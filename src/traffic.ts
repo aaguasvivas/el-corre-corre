@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { toonMaterial, textTexture } from './world';
+import { toonMaterial, textTexture, worldMaterial } from './world';
 
 export type VehicleType = 'sedan' | 'guagua' | 'camion' | 'civic' | 'motoconcho' | 'guaguaParada' | 'cart';
 export type PowerupKind = 'cafecito' | 'bendicion' | 'iman';
@@ -171,12 +171,12 @@ function guaguaAssets(banner: THREE.Texture, withBlinkers: boolean): TypeAssets 
       // "Dios es mi guia" above the windshield
       const b = new THREE.Mesh(
         new THREE.PlaneGeometry(1.9, 0.3),
-        new THREE.MeshBasicMaterial({ map: banner }),
+        worldMaterial(new THREE.MeshBasicMaterial({ map: banner })),
       );
       b.position.set(0, 2.32, 3.52);
       group.add(b);
       if (withBlinkers) {
-        const mat = new THREE.MeshBasicMaterial({ color: PALETTE.hazardOrange });
+        const mat = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.hazardOrange }));
         for (const sx of [-1, 1]) {
           const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.1), mat);
           lamp.position.set(sx * 0.9, 1.0, -3.52);
@@ -243,7 +243,9 @@ function civicAssets(): TypeAssets {
     addExtras: (group) => {
       const glow = new THREE.Mesh(
         new THREE.PlaneGeometry(2.3, 4.7),
-        new THREE.MeshBasicMaterial({ color: PALETTE.underglow, transparent: true, opacity: 0.5 }),
+        worldMaterial(
+          new THREE.MeshBasicMaterial({ color: PALETTE.underglow, transparent: true, opacity: 0.5 }),
+        ),
       );
       glow.rotation.x = -Math.PI / 2;
       glow.position.y = 0.04;
@@ -417,7 +419,7 @@ export class Traffic {
     for (let i = 0; i < 8; i++) {
       const mesh = new THREE.Mesh(
         new THREE.CircleGeometry(0.85, 20),
-        new THREE.MeshBasicMaterial({ map: hoyoTex, transparent: true }),
+        worldMaterial(new THREE.MeshBasicMaterial({ map: hoyoTex, transparent: true })),
       );
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.y = 0.02;
@@ -444,7 +446,7 @@ export class Traffic {
     for (let i = 0; i < 4; i++) {
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(ROAD.halfRoad * 2, 0.22, 1.0),
-        new THREE.MeshToonMaterial({ map: stripeTex }),
+        worldMaterial(new THREE.MeshToonMaterial({ map: stripeTex })),
       );
       mesh.position.y = 0.11;
       mesh.castShadow = true;
@@ -456,7 +458,9 @@ export class Traffic {
     for (let i = 0; i < 5; i++) {
       const mesh = new THREE.Mesh(
         new THREE.CircleGeometry(1, 20),
-        new THREE.MeshBasicMaterial({ color: PALETTE.charco, transparent: true, opacity: 0.5 }),
+        worldMaterial(
+          new THREE.MeshBasicMaterial({ color: PALETTE.charco, transparent: true, opacity: 0.5 }),
+        ),
       );
       mesh.rotation.x = -Math.PI / 2;
       mesh.scale.set(1.15, 1.7, 1);
@@ -491,7 +495,7 @@ export class Traffic {
 
     const ringGeo = new THREE.TorusGeometry(0.42, 0.045, 8, 20);
     ringGeo.rotateX(Math.PI / 2);
-    const gold = new THREE.MeshBasicMaterial({ color: PALETTE.gold });
+    const gold = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold }));
     const addPowerup = (kind: PowerupKind, build: (g: THREE.Group) => void, count: number): void => {
       for (let i = 0; i < count; i++) {
         const group = new THREE.Group();
@@ -512,9 +516,12 @@ export class Traffic {
       g.add(cup, foam);
     }, 2);
     addPowerup('bendicion', (g) => {
-      const badge = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.58, 0.1), new THREE.MeshBasicMaterial({ color: PALETTE.gold }));
+      const badge = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.58, 0.1), gold);
       badge.position.y = 0.55;
-      const inner = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.4, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      const inner = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.4, 0.12),
+        worldMaterial(new THREE.MeshBasicMaterial({ color: 0xffffff })),
+      );
       inner.position.y = 0.55;
       g.add(badge, inner);
     }, 2);

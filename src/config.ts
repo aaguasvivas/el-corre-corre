@@ -33,6 +33,13 @@ export const PALETTE = {
   gold: 0xffd54f,
   hazardOrange: 0xff8c42,
   underglow: 0x2ee6d6,
+  // Phase 3: el mundo
+  seawallCream: 0xefe6d4,
+  mountainHaze: 0xc9a48e,
+  dogTan: 0xc8a06a,
+  poleWood: 0x6e5d4e,
+  wire: 0x1f1b19,
+  obeliscoCream: 0xf5ecd9,
 } as const;
 
 export const CONFIG = {
@@ -173,6 +180,20 @@ export const CONFIG = {
   // Juice (minimal here; the real pass is Phase 5)
   shakeHoyo: 0.22, // FEEL: camera jolt when you eat a pothole
   shakeShield: 0.3,
+
+  // Phase 3: el Malecon
+  // DECISION: the S-curve is a visual bend field applied in the vertex shader.
+  // Gameplay space stays straight (lateral x relative to the road), so spawn
+  // validation and collisions remain exact under any curve. The road breathes,
+  // the math never lies.
+  curveAmp1: 3.2, // FEEL: main S-curve swing in meters; breathe, never slalom
+  curveLen1: 240, // FEEL: meters per main curve cycle
+  curveAmp2: 1.8, // FEEL: secondary wave layered in for variety
+  curveLen2: 111,
+  worldDrop: 0.00013, // FEEL: how much the distant road curls below the horizon
+  beltLen: 120, // scenery recycles in two alternating belts of this length
+  obeliscoEveryM: 800,
+  viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
 } as const;
 
 // Derived road geometry, shared everywhere

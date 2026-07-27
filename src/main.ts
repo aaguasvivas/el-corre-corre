@@ -360,6 +360,9 @@ requestAnimationFrame(frame);
   wheelie: () => player.isWheelie,
   airborne: () => player.isAirborne,
   powerups: () => ({ cafecitoT, imanT, shielded: player.hasShield, invincibleT }),
+  worldDist: () => Math.round(world.distance),
+  info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
+  dog: () => world.debugViralata(),
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },

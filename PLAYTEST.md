@@ -4,7 +4,27 @@ Living log of what the human should feel-test at the end of each phase.
 Run it with `npm run dev` and play on both desktop (A/D or arrows, W or Space
 for the wheelie) and a phone-sized window (drag to steer, swipe up to wheelie).
 
-## Phase 2: risk and reward (current)
+## Phase 3: El Malecón (current)
+
+1. **The poster test.** Pause at any random moment. Does the frame look like a
+   place, not a tech demo? Would a Dominican friend recognize home?
+2. **The curve.** Ride a couple of minutes. The road should breathe through
+   long lazy S-curves without ever feeling like it is steering for you or
+   hiding traffic unfairly. Too swervy? Lower `curveAmp1` in
+   [src/config.ts](src/config.ts). Too flat? Raise it.
+3. **Details at speed.** Colmado signs, the Av. George Washington plaque, the
+   domino table, flags, the chichigua over the seawall: do they register as
+   you fly past, or does anything read as visual noise where you dodge?
+4. **El Obelisco.** Around every 800 m mark. Does spotting it far ahead feel
+   like a milestone?
+5. **La viralata.** When the street dog darts at the road, does your stomach
+   drop for a second even though it always stops short? That flinch is the
+   point. (It can never be hit.)
+6. **Phone check.** Portrait on the phone: does it still hold 60fps with the
+   full world? If it stutters, tell me what device so I budget the Phase 6
+   audit against it.
+
+## Phase 2: risk and reward (passed pending your notes)
 
 1. **Ride en contra vía on purpose.** Cross the yellow line and hold it while
    the indicator pulses and the vignette breathes. Does the doubled score plus

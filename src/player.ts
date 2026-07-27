@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { toonMaterial } from './world';
+import { toonMaterial, worldMaterial } from './world';
 
 const DEG = Math.PI / 180;
 const EDGE_MAX = ROAD.edgeX - CONFIG.playerHalfWidth; // shoulders are ridable, edges never kill
@@ -125,7 +125,7 @@ export class Player {
     const shirt = toonMaterial(PALETTE.colmadoTeal);
     const skin = toonMaterial(PALETTE.skin);
     const jeans = toonMaterial(0x2f4a6f); // DECISION: jean blue reads well against the red moto
-    const glow = new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow });
+    const glow = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow }));
 
     const add = (
       geo: THREE.BufferGeometry,
@@ -179,19 +179,21 @@ export class Player {
     auraGeo.rotateX(Math.PI / 2);
     this.aura = new THREE.Mesh(
       auraGeo,
-      new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.9 }),
+      worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.9 })),
     );
     this.aura.position.y = 0.5;
     this.aura.visible = false;
     this.root.add(this.aura);
 
     // Cafecito invincibility glow
-    this.glowMat = new THREE.MeshBasicMaterial({
-      color: PALETTE.gold,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-    });
+    this.glowMat = worldMaterial(
+      new THREE.MeshBasicMaterial({
+        color: PALETTE.gold,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false,
+      }),
+    );
     this.glowShell = new THREE.Mesh(new THREE.SphereGeometry(1.05, 14, 10), this.glowMat);
     this.glowShell.scale.y = 0.9;
     this.glowShell.position.y = 0.85;
@@ -201,9 +203,11 @@ export class Player {
 
   private buildFx(scene: THREE.Scene): void {
     this.fxMats = {
-      spark: new THREE.MeshBasicMaterial({ color: PALETTE.centerLine }),
-      splash: new THREE.MeshBasicMaterial({ color: PALETTE.charco }),
-      trail: new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.85 }),
+      spark: worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.centerLine })),
+      splash: worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.charco })),
+      trail: worldMaterial(
+        new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.85 }),
+      ),
     };
     const geo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
     for (let i = 0; i < 26; i++) {
