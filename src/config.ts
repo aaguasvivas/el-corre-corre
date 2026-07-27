@@ -24,8 +24,15 @@ export const PALETTE = {
   flagRed: 0xce1126,
   flagWhite: 0xffffff,
   carPaints: [0xd6ccc2, 0xb3d9ff, 0xf2e9dc, 0xa8e6cf, 0xff8b94, 0xffeaa7, 0xcdb4db],
+  civicPaints: [0xe63946, 0x2a9d8f, 0xf4c430], // loud, que se oiga
+  guaguaYellow: 0xf4c430,
+  camionOlive: 0x708238,
   darkParts: 0x2a2624,
   skin: 0x8d5524,
+  charco: 0x4db6c9,
+  gold: 0xffd54f,
+  hazardOrange: 0xff8c42,
+  underglow: 0x2ee6d6,
 } as const;
 
 export const CONFIG = {
@@ -33,12 +40,12 @@ export const CONFIG = {
   fixedDt: 1 / 120, // fixed sim step; feel is framerate-independent
   maxFrameDt: 0.1, // clamp huge frame gaps (tab switches) so nothing teleports
 
-  // Forward motion
+  // Forward motion. Tuned up after the Phase 1 feel test ("difficulty is low").
   baseSpeed: 18,
   maxSpeed: 42,
-  speedRampPerSec: 0.07, // FEEL: how fast a run escalates; linear m/s gained per second
+  speedRampPerSec: 0.085, // FEEL: how fast a run escalates; linear m/s gained per second
 
-  // Steering. FEEL: drifty-smooth, not twitchy
+  // Steering. FEEL: drifty-smooth, not twitchy. Signed off in the Phase 1 test.
   lateralMaxSpeed: 9, // FEEL: top carving speed across the road
   lateralAccel: 38, // FEEL: how fast you reach carving speed; lower = driftier
   lateralDamping: 6.5, // FEEL: glide after releasing input; higher = stops sooner
@@ -69,53 +76,103 @@ export const CONFIG = {
   fogNear: 60,
   fogFar: 140,
 
-  // Spawning
+  // Spawning. Density bumped after the Phase 1 feel test.
   spawnAhead: 150,
   despawnBehind: 15,
   telegraphMinSec: 1.5, // sacred: min seconds between a threat appearing and reaching you
-  trafficDensityStart: 0.35,
+  trafficDensityStart: 0.45,
   trafficDensityMax: 1.0,
-  densityRampSec: 120,
-  gentleStartSec: 15,
-  spawnsPerSecAtFull: 1.05, // FEEL: spawn attempts per second once the density ramp completes
+  densityRampSec: 110,
+  gentleStartSec: 12,
+  spawnsPerSecAtFull: 1.3, // FEEL: filler spawn attempts per second at full density
   gentleSpawnFactor: 0.55, // FEEL: spawn rate multiplier during the gentle window
   oncomingUnlockSec: 6, // DECISION: no oncoming traffic in the very first seconds of a run
-  trafficMaxActive: 16, // FEEL: hard cap of cars on the road at once
+  trafficMaxActive: 20, // FEEL: hard cap of vehicles on the road at once
   sameLaneGapM: 16, // min same-lane spacing at spawn; keeps convoys threadable
   antiWallWindowM: 14, // z window in which all 4 lanes must never be occupied at once
+  fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
 
-  // Traffic speeds (m/s)
-  sameDirSpeedMin: 9,
-  sameDirSpeedMax: 13, // always slower than you: overtaking is the game
-  oncomingSpeedMin: 10,
-  oncomingSpeedMax: 14,
+  // Wave patterns
+  patternIntervalMin: 3.6, // FEEL: seconds between authored waves (scaled by density)
+  patternIntervalMax: 6.8,
 
-  // Generic sedan dims
-  carWidth: 1.9,
-  carLength: 4.4,
+  // Traffic speeds (m/s) per archetype: [min, max]
+  vehicleSpeeds: {
+    sedan: [9, 14],
+    guagua: [8, 11],
+    camion: [8, 10],
+    civic: [15, 17], // fast enough to be a rolling chicane, still slower than you
+    motoconcho: [10, 13],
+  },
+  // FEEL: relative spawn weights for filler traffic
+  vehicleWeights: { sedan: 32, motoconcho: 22, guagua: 16, camion: 12, civic: 18 },
+  civicUnlockSec: 22,
+  bigVehicleUnlockSec: 16, // guaguas y camiones enter after the opening moments
+
+  // Hitboxes
   vehicleHitboxScale: 0.9, // FEEL: forgiveness; the killer box is smaller than the visual box
-
-  // Mechanics
   playerRadius: 0.5, // FEEL: player collision circle; smaller = more forgiving
+
+  // Near-miss and combo
   nearMissRadius: 1.2,
+  nearMissPoints: 25,
   comboDecaySec: 4,
+
+  // Contra via. The signature: riding the oncoming lanes doubles everything.
+  contraViaMultiplier: 2,
+  contraViaMinX: 0.25, // FEEL: how far past the center line before it counts
+
+  // Wheelie (el caballito)
   wheelieDurationSec: 0.8,
   wheelieCooldownSec: 2.5,
+  wheelieSteerFactor: 0.6, // steering authority while the front wheel is up
+  wheeliePointsPerSec: 5,
+  swipeUpPx: 48, // FEEL: upward swipe distance that triggers a wheelie
+
+  // Airtime
+  airtimePointsPerSec: 15,
+  policiaLaunchVy: 0.16, // FEEL: launch vy = forward speed * this
+  jumpGravity: 20, // FEEL: heavier = snappier hops
+
+  // Obstacles
   potholeSpeedLoss: 0.3,
+  hoyoRecoverSec: 1.4,
+  charcoSteerFactor: 0.5,
+  charcoSec: 0.4,
   scrapeSpeedLoss: 0.2, // FEEL: fraction of speed lost after grinding the edge
   scrapeSlowSec: 1.0,
   scrapeCooldownSec: 0.35,
-  contraViaMultiplier: 2,
+  // Obstacle cadence: [minSec, maxSec] between spawns, once unlocked
+  hoyoEvery: [8, 14],
+  policiaEvery: [14, 24],
+  charcoEvery: [16, 26],
+  cartEvery: [18, 30],
+  hoyoUnlockSec: 18,
+  policiaUnlockSec: 14,
+  charcoUnlockSec: 24,
+  cartUnlockSec: 16,
+
+  // Pickups
+  platanoPoints: 10,
+  platanoRadius: 0.95, // FEEL: collection reach; generous feels better
+  platanoYTolerance: 0.55, // arc platanos need a jump to grab
+  powerupEvery: [18, 30],
+  powerupUnlockSec: 20,
+  cafecitoSec: 5,
+  cafecitoBoost: 1.35, // FEEL: cafecito speed multiplier
+  imanSec: 8,
+  imanRadius: 6,
+  imanPullSpeed: 15,
+  shieldGraceSec: 0.9, // brief invulnerability after the Bendicion absorbs a hit
 
   // Crash and restart. FEEL: this loop is the whole game
   crashSlowmoSec: 0.5, // real seconds of slow motion before the card appears
   crashTimeScale: 0.2, // sim speed during the slow-mo
   restartDebounceSec: 0.25, // ignore taps this long after the card shows
 
-  // Power-ups
-  cafecitoSec: 5,
-  imanSec: 8,
-  imanRadius: 6,
+  // Juice (minimal here; the real pass is Phase 5)
+  shakeHoyo: 0.22, // FEEL: camera jolt when you eat a pothole
+  shakeShield: 0.3,
 } as const;
 
 // Derived road geometry, shared everywhere
@@ -127,4 +184,5 @@ export const ROAD = {
     ((CONFIG.lanesSame + CONFIG.lanesOncoming) * CONFIG.laneWidth) / 2 + CONFIG.shoulderWidth, // 8.4
   // Lane centers: index 0-1 yours (screen right), 2-3 oncoming (sea side, screen left)
   laneCenters: [-5.1, -1.7, 1.7, 5.1] as const,
+  shoulderCenters: [-7.5, 7.5] as const, // parked guaguas and vendor carts live here
 } as const;

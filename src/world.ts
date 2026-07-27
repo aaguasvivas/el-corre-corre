@@ -1,7 +1,8 @@
-// world.ts: sky, golden-hour light, sea, ground, and the recycling road chunks.
-// World-moves architecture: the player stays near the origin, the world slides toward -z.
-// Forward is +z; +x is the oncoming/sea side (renders on screen LEFT because the
-// camera looks down +z).
+// world.ts: sky, golden-hour light, sea, ground, the recycling road chunks,
+// and La Cinta del Récord (the finish-line tape at your all-time best).
+// World-moves architecture: the player stays near the origin, the world slides
+// toward -z. Forward is +z; +x is the oncoming/sea side (renders on screen
+// LEFT because the camera looks down +z).
 
 import * as THREE from 'three';
 import { CONFIG, PALETTE, ROAD } from './config';
@@ -9,6 +10,7 @@ import { CONFIG, PALETTE, ROAD } from './config';
 const CHUNK_LEN = 30;
 const CHUNK_COUNT = 7; // covers roughly z -45 to +165, past fog and spawn distance
 const RECYCLE_Z = -35;
+const CONFETTI_COUNT = 46;
 
 // Shared 3-step toon gradient plus a material cache so everything shades identically.
 let gradientMap: THREE.DataTexture | null = null;
@@ -35,18 +37,56 @@ export function toonMaterial(color: number): THREE.MeshToonMaterial {
   return m;
 }
 
+export function textTexture(
+  text: string,
+  w: number,
+  h: number,
+  bg: string,
+  fg: string,
+  font: string,
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d')!;
+  g.fillStyle = bg;
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = fg;
+  g.font = font;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, w / 2, h / 2 + 1);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function hex(c: number): string {
   return '#' + c.toString(16).padStart(6, '0');
 }
 
+interface Confetto {
+  mesh: THREE.Mesh;
+  vx: number;
+  vy: number;
+  vz: number;
+  rx: number;
+  ry: number;
+  life: number;
+}
+
 export class World {
   private chunks: THREE.Mesh[] = [];
+  private tape!: THREE.Group;
+  private confetti: Confetto[] = [];
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.buildSky(scene);
     this.buildLights(scene);
     this.buildGround(scene);
     this.buildRoad(scene, renderer);
+    this.buildTape(scene);
+    this.buildConfetti(scene);
   }
 
   private buildSky(scene: THREE.Scene): void {
@@ -190,11 +230,102 @@ export class World {
     }
   }
 
-  step(ds: number): void {
+  // La Cinta del Récord: a finish tape stretched across the road at your
+  // all-time best distance, visible from far away.
+  private buildTape(scene: THREE.Scene): void {
+    this.tape = new THREE.Group();
+    const postGeo = new THREE.CylinderGeometry(0.07, 0.07, 1.5, 8);
+    for (const sx of [-1, 1]) {
+      const post = new THREE.Mesh(postGeo, toonMaterial(PALETTE.colmadoRed));
+      post.position.set(sx * 7.3, 0.75, 0);
+      this.tape.add(post);
+    }
+    const c = document.createElement('canvas');
+    c.width = 1024;
+    c.height = 48;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 1024, 48);
+    g.fillStyle = hex(PALETTE.flagBlue);
+    g.fillRect(0, 0, 1024, 7);
+    g.fillStyle = hex(PALETTE.flagRed);
+    g.fillRect(0, 41, 1024, 7);
+    g.fillStyle = hex(PALETTE.flagRed);
+    g.font = 'bold 30px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (const x of [170, 512, 854]) g.fillText('TU RÉCORD', x, 26);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const ribbon = new THREE.Mesh(
+      new THREE.PlaneGeometry(14.6, 0.46),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }),
+    );
+    ribbon.position.y = 1.12;
+    ribbon.rotation.y = Math.PI; // face the approaching player
+    this.tape.add(ribbon);
+    this.tape.visible = false;
+    scene.add(this.tape);
+  }
+
+  private buildConfetti(scene: THREE.Scene): void {
+    const geo = new THREE.PlaneGeometry(0.09, 0.14);
+    const mats = [PALETTE.flagBlue, PALETTE.flagRed, PALETTE.flagWhite].map(
+      (color) => new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }),
+    );
+    for (let i = 0; i < CONFETTI_COUNT; i++) {
+      const mesh = new THREE.Mesh(geo, mats[i % mats.length]);
+      mesh.visible = false;
+      scene.add(mesh);
+      this.confetti.push({ mesh, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, life: 0 });
+    }
+  }
+
+  // remain = meters until the record line; null hides the tape.
+  updateTape(remain: number | null): void {
+    if (remain === null || remain > 165) {
+      this.tape.visible = false;
+      return;
+    }
+    this.tape.visible = true;
+    this.tape.position.z = remain;
+  }
+
+  burstTape(): void {
+    const z = this.tape.visible ? this.tape.position.z : 2;
+    for (const f of this.confetti) {
+      f.life = 1.5 + Math.random() * 0.6;
+      f.mesh.visible = true;
+      f.mesh.position.set((Math.random() - 0.5) * 14, 1 + Math.random() * 1.6, z);
+      f.vx = (Math.random() - 0.5) * 3;
+      f.vy = 2.5 + Math.random() * 3.5;
+      f.vz = -(1 + Math.random() * 3);
+      f.rx = (Math.random() - 0.5) * 12;
+      f.ry = (Math.random() - 0.5) * 12;
+      f.mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+    }
+    this.tape.visible = false;
+  }
+
+  step(ds: number, dt: number): void {
     for (let i = 0; i < this.chunks.length; i++) {
       const chunk = this.chunks[i];
       chunk.position.z -= ds;
       if (chunk.position.z < RECYCLE_Z) chunk.position.z += CHUNK_COUNT * CHUNK_LEN;
+    }
+    for (const f of this.confetti) {
+      if (f.life <= 0) continue;
+      f.life -= dt;
+      f.vy -= 6 * dt; // flutters more than it falls
+      f.mesh.position.x += f.vx * dt;
+      f.mesh.position.y += f.vy * dt;
+      f.mesh.position.z += f.vz * dt - ds;
+      f.mesh.rotation.x += f.rx * dt;
+      f.mesh.rotation.y += f.ry * dt;
+      if (f.life <= 0 || f.mesh.position.y < -0.2) {
+        f.life = 0;
+        f.mesh.visible = false;
+      }
     }
   }
 }

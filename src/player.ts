@@ -1,4 +1,5 @@
-// player.ts: input, continuous steering physics, edge scrape, crash tumble.
+// player.ts: input, continuous steering physics, wheelie (el caballito),
+// airtime, edge scrape, power-up states, and the crash tumble.
 // Steering is a velocity-target model: input sets a desired lateral velocity,
 // acceleration chases it, damping glides it out. Continuous across the full
 // road width, never lane-snapped.
@@ -17,9 +18,13 @@ const START_X = -3.4; // middle of your half of the road
 export interface PlayerCallbacks {
   isSteeringActive: () => boolean;
   onScrape: () => void;
+  onWheelieEnd: () => void;
+  onLand: () => void;
 }
 
-interface Spark {
+type FxKind = 'spark' | 'splash' | 'trail';
+
+interface Particle {
   mesh: THREE.Mesh;
   vx: number;
   vy: number;
@@ -39,15 +44,38 @@ export class Player {
   private leanGroup = new THREE.Group();
   private frontWheel!: THREE.Mesh;
   private rearWheel!: THREE.Mesh;
+  private aura!: THREE.Mesh;
+  private glowShell!: THREE.Mesh;
+  private glowMat!: THREE.MeshBasicMaterial;
   private leanVis = 0;
+  private time = 0;
 
   private keys = new Set<string>();
   private touchActive = false;
   private touchTargetX = START_X;
   private pointerId: number | null = null;
   private lastPointerX = 0;
+  private swipeRefY = 0;
+  private swipeRefT = 0;
 
   private scrapeCooldown = 0;
+
+  // wheelie
+  private wheelieT = 0;
+  private wheelieCooldownT = 0;
+
+  // airtime
+  private airborne = false;
+  private airY = 0;
+  private airVy = 0;
+
+  // effects on handling
+  private charcoT = 0;
+
+  // power-ups
+  private shielded = false;
+  private glowOn = false;
+  private trailAcc = 0;
 
   private tumbling = false;
   private settling = false;
@@ -56,7 +84,8 @@ export class Player {
   private spinX = 0;
   private spinZ = 0;
 
-  private sparks: Spark[] = [];
+  private particles: Particle[] = [];
+  private fxMats!: Record<FxKind, THREE.MeshBasicMaterial>;
   private readonly cb: PlayerCallbacks;
 
   constructor(scene: THREE.Scene, cb: PlayerCallbacks) {
@@ -65,12 +94,28 @@ export class Player {
     this.root.position.set(START_X, 0, 0);
     this.root.add(this.leanGroup);
     scene.add(this.root);
-    this.buildSparks(scene);
+    this.buildFx(scene);
     this.bindInput();
   }
 
   get velXNorm(): number {
     return this.velX / CONFIG.lateralMaxSpeed;
+  }
+
+  get y(): number {
+    return this.airY;
+  }
+
+  get isAirborne(): boolean {
+    return this.airborne;
+  }
+
+  get isWheelie(): boolean {
+    return this.wheelieT > 0;
+  }
+
+  get hasShield(): boolean {
+    return this.shielded;
   }
 
   private buildMoto(): void {
@@ -128,24 +173,56 @@ export class Player {
     add(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, -0.25, 1.28, 0.18, -0.7);
     add(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, 0.17, 0.62, -0.2, 0.55);
     add(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, -0.17, 0.62, -0.2, 0.55);
+
+    // Bendicion aura, hidden until earned
+    const auraGeo = new THREE.TorusGeometry(0.8, 0.05, 8, 24);
+    auraGeo.rotateX(Math.PI / 2);
+    this.aura = new THREE.Mesh(
+      auraGeo,
+      new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.9 }),
+    );
+    this.aura.position.y = 0.5;
+    this.aura.visible = false;
+    this.root.add(this.aura);
+
+    // Cafecito invincibility glow
+    this.glowMat = new THREE.MeshBasicMaterial({
+      color: PALETTE.gold,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+    });
+    this.glowShell = new THREE.Mesh(new THREE.SphereGeometry(1.05, 14, 10), this.glowMat);
+    this.glowShell.scale.y = 0.9;
+    this.glowShell.position.y = 0.85;
+    this.glowShell.visible = false;
+    this.root.add(this.glowShell);
   }
 
-  private buildSparks(scene: THREE.Scene): void {
+  private buildFx(scene: THREE.Scene): void {
+    this.fxMats = {
+      spark: new THREE.MeshBasicMaterial({ color: PALETTE.centerLine }),
+      splash: new THREE.MeshBasicMaterial({ color: PALETTE.charco }),
+      trail: new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.85 }),
+    };
     const geo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-    const mat = new THREE.MeshBasicMaterial({ color: PALETTE.centerLine });
-    for (let i = 0; i < 14; i++) {
-      const mesh = new THREE.Mesh(geo, mat);
+    for (let i = 0; i < 26; i++) {
+      const mesh = new THREE.Mesh(geo, this.fxMats.spark);
       mesh.visible = false;
       scene.add(mesh);
-      this.sparks.push({ mesh, vx: 0, vy: 0, vz: 0, life: 0 });
+      this.particles.push({ mesh, vx: 0, vy: 0, vz: 0, life: 0 });
     }
   }
 
   private bindInput(): void {
     const STEER_KEYS = ['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight'];
+    const WHEELIE_KEYS = ['KeyW', 'Space', 'ArrowUp'];
     window.addEventListener('keydown', (e) => {
       if (STEER_KEYS.includes(e.code)) {
         this.keys.add(e.code);
+        e.preventDefault();
+      } else if (WHEELIE_KEYS.includes(e.code) && this.cb.isSteeringActive()) {
+        this.tryWheelie();
         e.preventDefault();
       }
     });
@@ -161,6 +238,8 @@ export class Player {
       this.lastPointerX = e.clientX;
       this.touchActive = true;
       this.touchTargetX = this.x;
+      this.swipeRefY = e.clientY;
+      this.swipeRefT = e.timeStamp;
     });
     window.addEventListener('pointermove', (e) => {
       if (!this.touchActive || e.pointerId !== this.pointerId) return;
@@ -172,6 +251,14 @@ export class Player {
         -EDGE_MAX,
         EDGE_MAX,
       );
+      // Upward swipe = wheelie
+      if (e.timeStamp - this.swipeRefT > 200) {
+        this.swipeRefT = e.timeStamp;
+        this.swipeRefY = e.clientY;
+      } else if (this.swipeRefY - e.clientY > CONFIG.swipeUpPx) {
+        this.swipeRefY = e.clientY;
+        this.tryWheelie();
+      }
     });
     const up = (e: PointerEvent): void => {
       if (e.pointerId === this.pointerId) this.endTouch();
@@ -185,7 +272,42 @@ export class Player {
     this.pointerId = null;
   }
 
+  tryWheelie(): void {
+    if (this.wheelieT > 0 || this.wheelieCooldownT > 0 || this.airborne || this.tumbling) return;
+    this.wheelieT = CONFIG.wheelieDurationSec;
+    this.wheelieCooldownT = CONFIG.wheelieCooldownSec;
+  }
+
+  launch(vy: number): void {
+    if (this.airborne) return;
+    this.airborne = true;
+    this.airVy = vy;
+    this.wheelieT = 0; // the bump ends any caballito
+  }
+
+  applyCharco(): void {
+    this.charcoT = CONFIG.charcoSec;
+    this.emit('splash', 9, this.x, 0.15, 0.3, 2.6);
+  }
+
+  setShield(on: boolean): void {
+    this.shielded = on;
+    this.aura.visible = on;
+  }
+
+  useShield(): void {
+    this.shielded = false;
+    this.aura.visible = false;
+    this.emit('trail', 14, this.x, 0.9, 0, 4);
+  }
+
+  setGlow(on: boolean): void {
+    this.glowOn = on;
+    this.glowShell.visible = on;
+  }
+
   step(dt: number, speed: number): void {
+    this.time += dt;
     let desired = 0;
     let hasInput = false;
     if (this.touchActive) {
@@ -205,9 +327,15 @@ export class Player {
       }
     }
 
+    // Wheelies and charcos cut steering authority
+    let authority = 1;
+    if (this.wheelieT > 0) authority *= CONFIG.wheelieSteerFactor;
+    if (this.charcoT > 0) authority *= CONFIG.charcoSteerFactor;
+    if (this.charcoT > 0) this.charcoT -= dt;
+
     if (hasInput) {
-      const maxDv = CONFIG.lateralAccel * dt;
-      this.velX += clamp(desired - this.velX, -maxDv, maxDv);
+      const maxDv = CONFIG.lateralAccel * authority * dt;
+      this.velX += clamp(desired * authority - this.velX, -maxDv, maxDv);
     } else {
       this.velX *= Math.exp(-CONFIG.lateralDamping * dt);
     }
@@ -225,42 +353,96 @@ export class Player {
       this.velX = 0;
     }
 
+    // Wheelie timers
+    if (this.wheelieCooldownT > 0) this.wheelieCooldownT -= dt;
+    let wheelieAngle = 0;
+    if (this.wheelieT > 0) {
+      this.wheelieT -= dt;
+      const elapsedW = CONFIG.wheelieDurationSec - this.wheelieT;
+      const rise = Math.min(1, elapsedW / 0.12);
+      const fall = Math.min(1, Math.max(0, this.wheelieT) / 0.15);
+      wheelieAngle = 0.5 * Math.min(rise, fall);
+      if (this.wheelieT <= 0) this.cb.onWheelieEnd();
+    }
+
+    // Airtime
+    if (this.airborne) {
+      this.airY += this.airVy * dt;
+      this.airVy -= CONFIG.jumpGravity * dt;
+      if (this.airY <= 0) {
+        this.airY = 0;
+        this.airborne = false;
+        this.cb.onLand();
+      }
+    }
+
+    // Cafecito trail
+    if (this.glowOn) {
+      this.trailAcc += dt;
+      while (this.trailAcc > 0.04) {
+        this.trailAcc -= 0.04;
+        this.emit('trail', 1, this.x + (Math.random() - 0.5) * 0.3, 0.35 + Math.random() * 0.4, -0.7, 1.2);
+      }
+      this.glowMat.opacity = 0.16 + 0.08 * (1 + Math.sin(this.time * 12)) * 0.5;
+    }
+    if (this.aura.visible) {
+      this.aura.rotation.z += dt * 1.5;
+      this.aura.position.y = 0.5 + Math.sin(this.time * 4) * 0.08;
+    }
+
     const leanTarget = -this.velXNorm * CONFIG.steerLeanMaxDeg * DEG;
     this.leanVis += (leanTarget - this.leanVis) * Math.min(1, CONFIG.leanResponse * dt);
     this.leanGroup.rotation.z = this.leanVis;
+    this.leanGroup.rotation.x = -wheelieAngle;
+    this.leanGroup.position.y = Math.sin(wheelieAngle) * 0.62; // pivot feel: rear wheel stays low
     this.root.rotation.y = this.velXNorm * 0.16; // nose points into the carve
     this.root.position.x = this.x;
+    this.root.position.y = this.airY;
 
     const spin = (speed / 0.33) * dt;
-    this.frontWheel.rotation.x += spin;
+    this.frontWheel.rotation.x += this.wheelieT > 0 ? spin * 0.35 : spin;
     this.rearWheel.rotation.x += spin;
   }
 
   private emitSparks(side: number): void {
+    this.emit('spark', 6, this.x + side * 0.5, 0.3, 0, 3, -side);
+  }
+
+  private emit(
+    kind: FxKind,
+    count: number,
+    x: number,
+    y: number,
+    z: number,
+    power: number,
+    dirX = 0,
+  ): void {
     let n = 0;
-    for (const s of this.sparks) {
-      if (s.life > 0) continue;
-      s.life = 0.25 + Math.random() * 0.2;
-      s.mesh.visible = true;
-      s.mesh.position.set(this.x + side * 0.5, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.8);
-      s.vx = -side * (1.5 + Math.random() * 2.5);
-      s.vy = 1.5 + Math.random() * 3;
-      s.vz = -(3 + Math.random() * 4);
-      if (++n >= 6) break;
+    for (const p of this.particles) {
+      if (p.life > 0) continue;
+      p.life = 0.22 + Math.random() * 0.2;
+      p.mesh.material = this.fxMats[kind];
+      p.mesh.visible = true;
+      p.mesh.position.set(x + (Math.random() - 0.5) * 0.4, y + Math.random() * 0.25, z + (Math.random() - 0.5) * 0.6);
+      const spread = kind === 'trail' ? 0.5 : 1;
+      p.vx = (dirX !== 0 ? dirX * (1.5 + Math.random() * 2.5) : (Math.random() - 0.5) * 2 * spread) * (power / 3);
+      p.vy = (kind === 'splash' ? 2.2 : 1.4) + Math.random() * power;
+      p.vz = kind === 'trail' ? -(4 + Math.random() * 3) : -(2 + Math.random() * power);
+      if (++n >= count) break;
     }
   }
 
-  updateSparks(dt: number): void {
-    for (const s of this.sparks) {
-      if (s.life <= 0) continue;
-      s.life -= dt;
-      s.vy -= 20 * dt;
-      s.mesh.position.x += s.vx * dt;
-      s.mesh.position.y += s.vy * dt;
-      s.mesh.position.z += s.vz * dt;
-      if (s.life <= 0 || s.mesh.position.y < 0) {
-        s.life = 0;
-        s.mesh.visible = false;
+  updateFx(dt: number): void {
+    for (const p of this.particles) {
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      p.vy -= 18 * dt;
+      p.mesh.position.x += p.vx * dt;
+      p.mesh.position.y += p.vy * dt;
+      p.mesh.position.z += p.vz * dt;
+      if (p.life <= 0 || p.mesh.position.y < 0) {
+        p.life = 0;
+        p.mesh.visible = false;
       }
     }
   }
@@ -272,6 +454,9 @@ export class Player {
     this.tumbleVz = 2.4;
     this.spinX = 8 + Math.random() * 5;
     this.spinZ = (Math.random() - 0.5) * 6;
+    this.wheelieT = 0;
+    this.airborne = false;
+    this.setGlow(false);
   }
 
   // Comic tumble: exaggerated gravity, a bounce, then settle flat. No blood, ever.
@@ -312,8 +497,17 @@ export class Player {
     this.tumbling = false;
     this.settling = false;
     this.scrapeCooldown = 0;
+    this.wheelieT = 0;
+    this.wheelieCooldownT = 0;
+    this.airborne = false;
+    this.airY = 0;
+    this.airVy = 0;
+    this.charcoT = 0;
+    this.setShield(false);
+    this.setGlow(false);
     this.root.position.set(START_X, 0, 0);
     this.root.rotation.set(0, 0, 0);
     this.leanGroup.rotation.set(0, 0, 0);
+    this.leanGroup.position.y = 0;
   }
 }
