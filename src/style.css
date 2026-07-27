@@ -1,0 +1,53 @@
+:root {
+  --blue: #002d62;
+  --red: #ce1126;
+  --white: #ffffff;
+  --cream: #f2e9dc;
+  --peach: #ffd9a0;
+  --sun: #fff3c4;
+  --sky: #6ec6e6;
+  --teal: #17a2b8;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sky);
+  overscroll-behavior: none;
+}
+
+body {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: 'Lilita One', 'Arial Rounded MT Bold', 'Marker Felt', system-ui, sans-serif;
+  color: var(--white);
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
