@@ -11,6 +11,7 @@ import { Player } from './player';
 import { Traffic, type ObstacleKind, type PickupKind, type VehicleType } from './traffic';
 import { Score, ladderTier } from './score';
 import { UI } from './ui';
+import { AudioEngine } from './audio';
 
 type GameState = 'title' | 'playing' | 'paused' | 'crashing' | 'gameover';
 
@@ -51,6 +52,12 @@ function addShake(amp: number): void {
 
 const world = new World(scene, renderer);
 const score = new Score();
+const audio = new AudioEngine();
+
+// Pan by where it happened: world +x renders on screen LEFT, so it flips.
+function panOf(x: number): number {
+  return Math.max(-1, Math.min(1, -(x - player.x) / 8));
+}
 
 // World-to-screen projection for popup placement (percent coordinates).
 const projV = new THREE.Vector3();
@@ -59,12 +66,20 @@ function w2s(x: number, y: number, z: number): { x: number; y: number } {
   return { x: (projV.x * 0.5 + 0.5) * 100, y: (-projV.y * 0.5 + 0.5) * 100 };
 }
 
+function toggleMute(): void {
+  audio.setMuted(!audio.muted);
+  ui.setMuted(audio.muted);
+  audio.click();
+}
+
 const ui = new UI(document.getElementById('ui')!, {
   onStart: startRun,
   onRestart: tryRestart,
   onResume: resume,
   onPause: pauseGame,
+  onToggleMute: toggleMute,
 });
+ui.setMuted(audio.muted);
 
 const traffic = new Traffic(scene, {
   onNearMiss: (x, z) => {
@@ -73,12 +88,15 @@ const traffic = new Traffic(scene, {
     ui.popup(`${ui.nextNearMissText()} +${r.pts}`, s.x, s.y, r.combo >= 5 ? 'pop-md' : 'pop-sm');
     if (r.ladderText) ui.popup(r.ladderText, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
     ui.setCombo(r.combo, ladderTier(r.combo));
+    audio.nearMiss(panOf(x));
+    if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
   },
   onPlatano: (x, y, z) => {
     const pts = score.collectPlatano();
     ui.setPlatanos(score.platanos);
     const s = w2s(x, y + 0.5, Math.max(z, 1));
     ui.popup(`+${pts}`, s.x, s.y, 'pop-sm pop-gold');
+    audio.platano();
   },
   onPowerup: (kind, x, z) => {
     const s = w2s(x, 1.4, Math.max(z, 1));
@@ -86,12 +104,15 @@ const traffic = new Traffic(scene, {
       cafecitoT = CONFIG.cafecitoSec;
       player.setGlow(true);
       ui.popup('¡CAFECITO!', s.x, s.y, 'pop-lg pop-gold');
+      audio.powerup('cafecito');
     } else if (kind === 'bendicion') {
       player.setShield(true);
       ui.popup('¡BENDICIÓN!', s.x, s.y, 'pop-lg pop-gold');
+      audio.bell();
     } else {
       imanT = CONFIG.imanSec;
       ui.popup('¡IMÁN!', s.x, s.y, 'pop-lg pop-gold');
+      audio.powerup('iman');
     }
   },
   onHoyo: () => {
@@ -99,11 +120,16 @@ const traffic = new Traffic(scene, {
     score.resetCombo();
     ui.setCombo(0, null);
     addShake(CONFIG.shakeHoyo);
+    audio.hoyo();
   },
   onPolicia: () => {
     player.launch(Math.max(3.2, currentEff * CONFIG.policiaLaunchVy));
+    audio.launch();
   },
-  onCharco: () => player.applyCharco(),
+  onCharco: () => {
+    player.applyCharco();
+    audio.splash();
+  },
 });
 
 const player = new Player(scene, {
@@ -112,6 +138,7 @@ const player = new Player(scene, {
     scrapeTimer = CONFIG.scrapeSlowSec;
     score.resetCombo();
     ui.setCombo(0, null);
+    audio.scrape();
   },
   onWheelieEnd: () => {
     if (state !== 'playing') return;
@@ -123,6 +150,7 @@ const player = new Player(scene, {
   },
   onLand: () => {
     if (state !== 'playing') return;
+    audio.land();
     const pts = score.endAir();
     if (pts >= 3) {
       const s = w2s(player.x, 1.4, 2);
@@ -150,6 +178,8 @@ function startRun(): void {
   acc = 0;
   state = 'playing';
   ui.showPlaying(score.record);
+  audio.startRun();
+  audio.click();
 }
 
 function tryRestart(): void {
@@ -162,6 +192,8 @@ function resume(): void {
   if (state !== 'paused') return;
   state = 'playing';
   ui.hidePause();
+  audio.startRun();
+  audio.click();
 }
 
 function pauseGame(): void {
@@ -169,6 +201,8 @@ function pauseGame(): void {
   state = 'paused';
   score.persist();
   ui.showPause();
+  audio.stopRun(false);
+  audio.click();
 }
 
 function doCrash(): void {
@@ -177,9 +211,14 @@ function doCrash(): void {
   player.crash();
   score.setContraVia(false);
   ui.setContraVia(false);
+  audio.stopRun(true);
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyM') {
+    toggleMute();
+    return;
+  }
   if (e.code !== 'Space' && e.code !== 'Enter') return;
   if (state === 'title') startRun();
   else if (state === 'gameover') tryRestart();
@@ -272,6 +311,7 @@ function stepSim(h: number): void {
         tapeBurst = true;
         world.burstTape();
         ui.banner('¡NUEVO RÉCORD!');
+        audio.recordBreak();
       } else {
         remain = r;
       }
@@ -337,6 +377,13 @@ function frame(now: number): void {
 
   advance(dt, now);
   updateCamera(dt);
+  audio.update(dt, {
+    running: state === 'playing',
+    speedNorm: (speed - CONFIG.baseSpeed) / (CONFIG.maxSpeed - CONFIG.baseSpeed),
+    combo: score.combo,
+    contraVia: score.isContraVia,
+    wheelie: player.isWheelie,
+  });
   if (state === 'playing' || state === 'crashing') ui.setScore(score.points);
   renderer.render(scene, camera);
 }
@@ -363,6 +410,7 @@ requestAnimationFrame(frame);
   worldDist: () => Math.round(world.distance),
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   dog: () => world.debugViralata(),
+  audio: () => ({ unlocked: audio.unlocked, muted: audio.muted, ctx: audio.ctxState }),
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },
@@ -389,6 +437,13 @@ requestAnimationFrame(frame);
       advance(step, performance.now());
     }
     updateCamera(1 / 60);
+    audio.update(1 / 60, {
+      running: state === 'playing',
+      speedNorm: (speed - CONFIG.baseSpeed) / (CONFIG.maxSpeed - CONFIG.baseSpeed),
+      combo: score.combo,
+      contraVia: score.isContraVia,
+      wheelie: player.isWheelie,
+    });
     if (state === 'playing' || state === 'crashing') ui.setScore(score.points);
     renderer.render(scene, camera);
   },

@@ -193,6 +193,26 @@ body {
   cursor: pointer;
 }
 
+.chip-mute {
+  right: auto;
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.chip-mute .snd-slash {
+  display: none;
+}
+
+.chip-mute.muted .snd-slash {
+  display: block;
+}
+
+.chip-mute.muted .snd-wave {
+  display: none;
+}
+
 @keyframes pulse {
   0%,
   100% {

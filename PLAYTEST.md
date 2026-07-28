@@ -4,7 +4,30 @@ Living log of what the human should feel-test at the end of each phase.
 Run it with `npm run dev` and play on both desktop (A/D or arrows, W or Space
 for the wheelie) and a phone-sized window (drag to steer, swipe up to wheelie).
 
-## Phase 3: El Malecón (current)
+## Phase 4: el sonido del barrio (current) - NEEDS YOUR EARS
+
+I cannot hear anything from this environment. Everything below is synthesized
+to spec and verified not to crash, but whether it GROOVES is 100% on you.
+
+1. **Does the dembow gallop?** Start a run. Kick on the downbeats, that
+   signature syncopated snare (steps 3, 6, 11, 14). If the tempo feels off,
+   `audioBpm` in [src/config.ts](src/config.ts).
+2. **Do the layers swell?** Chain near-misses: hats should bloom in at combo
+   3, the bass pulse at combo 5, and an extra metallic percussion layer the
+   moment you cross en contra vía. It should feel like the barrio hyping you
+   up, never like a switch flipping.
+3. **The engine.** Does the hum track your speed without droning? Does the
+   caballito rev feel like a rev?
+4. **The world.** Bocinazos every so often (panned to where cars are, with a
+   doppler dip), the sea washing quietly underneath, marimba on plátanos, the
+   whoosh on near-misses, the bell when la Bendición lands, the crash.
+5. **Balance and mute.** Anything too loud or grating? The knobs are
+   `musicVolume`, `sfxVolume`, `engineVolume`, `washVolume`. Mute chip on the
+   title (or press M): does it persist after a reload?
+6. **iOS check when you can.** Sound must start on the first tap, never
+   before, and pause when you background the app.
+
+## Phase 3: El Malecón (passed: "the world looks amazing")
 
 1. **The poster test.** Pause at any random moment. Does the frame look like a
    place, not a tech demo? Would a Dominican friend recognize home?

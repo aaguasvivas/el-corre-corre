@@ -194,6 +194,16 @@ export const CONFIG = {
   beltLen: 120, // scenery recycles in two alternating belts of this length
   obeliscoEveryM: 800,
   viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
+
+  // Phase 4: el sonido del barrio (100% WebAudio synthesis)
+  audioBpm: 108, // FEEL: dembow tempo
+  musicVolume: 0.5, // FEEL: music bus level
+  sfxVolume: 0.75, // FEEL: effects bus level
+  engineVolume: 0.085, // FEEL: engine loudness at max speed; it hums, never drones
+  washVolume: 0.026, // FEEL: the sea, barely there
+  comboHatsAt: 3, // hats swell in at this combo
+  comboBassAt: 5, // bass pulse joins at this combo
+  hornEvery: [7, 16], // FEEL: seconds between ambient bocinazos
 } as const;
 
 // Derived road geometry, shared everywhere

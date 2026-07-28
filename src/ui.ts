@@ -48,6 +48,7 @@ export interface UICallbacks {
   onRestart(): void;
   onResume(): void;
   onPause(): void;
+  onToggleMute(): void;
 }
 
 function readLang(): Lang {
@@ -93,6 +94,7 @@ export class UI {
   private promptEl: HTMLElement;
   private titleRecordEl: HTMLElement;
   private langBtn: HTMLElement;
+  private muteBtn: HTMLElement;
   private goTitleEl: HTMLElement;
   private goBadge: HTMLElement;
   private goPointsLabel: HTMLElement;
@@ -125,6 +127,9 @@ export class UI {
       <div id="banner"></div>
       <div id="title" class="screen hidden">
         <button id="lang" class="chip" type="button"></button>
+        <button id="mute" class="chip chip-mute" type="button" aria-label="Sonido">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </button>
         <div class="logo">
           <span class="logo-el">EL</span>
           <span class="logo-line">CORRE</span>
@@ -170,6 +175,7 @@ export class UI {
     this.promptEl = q('#prompt');
     this.titleRecordEl = q('#title-record');
     this.langBtn = q('#lang');
+    this.muteBtn = q('#mute');
     this.goTitleEl = q('#go-title');
     this.goBadge = q('#go-new');
     this.goPointsLabel = q('#go-points-label');
@@ -196,6 +202,10 @@ export class UI {
     this.langBtn.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.toggleLang();
+    });
+    this.muteBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onToggleMute();
     });
     this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
     this.pause.addEventListener('pointerdown', () => this.cb.onResume());
@@ -331,6 +341,10 @@ export class UI {
     this.cvShown = on;
     this.cvEl.classList.toggle('hidden', !on);
     this.vignette.classList.toggle('on', on);
+  }
+
+  setMuted(m: boolean): void {
+    this.muteBtn.classList.toggle('muted', m);
   }
 
   nextNearMissText(): string {
