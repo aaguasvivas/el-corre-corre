@@ -5,17 +5,29 @@
 import './style.css';
 import '@fontsource/lilita-one';
 import * as THREE from 'three';
-import { CONFIG, ROAD } from './config';
+import { CONFIG, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
 import { Traffic, type ObstacleKind, type PickupKind, type VehicleType } from './traffic';
-import { Score, ladderTier } from './score';
+import { Score, ladderTier, type RunResult } from './score';
 import { UI } from './ui';
 import { AudioEngine } from './audio';
+import { haptics } from './haptics';
 
 type GameState = 'title' | 'playing' | 'paused' | 'crashing' | 'gameover';
 
 const DEG = Math.PI / 180;
+const VEH_KEY = 'ecc.v1.vehicle';
+const VEHICLE_ORDER: VehicleId[] = ['pasola', 'motor', 'civic'];
+
+function readVehicle(): VehicleId {
+  try {
+    const v = localStorage.getItem(VEH_KEY);
+    return v === 'pasola' || v === 'civic' ? v : 'motor';
+  } catch {
+    return 'motor';
+  }
+}
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({
@@ -31,8 +43,10 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(CONFIG.fovDesktop, 1, 0.3, 400);
 
 let state: GameState = 'title';
+let selectedVehicle: VehicleId = readVehicle();
 let speed: number = CONFIG.baseSpeed;
 let currentEff: number = CONFIG.baseSpeed;
+let currentNorm = 0;
 let elapsed = 0;
 let scrapeTimer = 0;
 let hoyoTimer = 0;
@@ -44,6 +58,8 @@ let invincibleT = 0;
 let tapeBurst = false;
 let shakeT = 0;
 let shakeAmp = 0;
+let baseFov: number = CONFIG.fovDesktop;
+let lastRun: RunResult | null = null;
 
 function addShake(amp: number): void {
   shakeAmp = Math.max(shakeAmp, amp);
@@ -52,12 +68,8 @@ function addShake(amp: number): void {
 
 const world = new World(scene, renderer);
 const score = new Score();
+score.setVehicle(selectedVehicle);
 const audio = new AudioEngine();
-
-// Pan by where it happened: world +x renders on screen LEFT, so it flips.
-function panOf(x: number): number {
-  return Math.max(-1, Math.min(1, -(x - player.x) / 8));
-}
 
 // World-to-screen projection for popup placement (percent coordinates).
 const projV = new THREE.Vector3();
@@ -66,10 +78,53 @@ function w2s(x: number, y: number, z: number): { x: number; y: number } {
   return { x: (projV.x * 0.5 + 0.5) * 100, y: (-projV.y * 0.5 + 0.5) * 100 };
 }
 
+// Pan by where it happened: world +x renders on screen LEFT, so it flips.
+function panOf(x: number): number {
+  return Math.max(-1, Math.min(1, -(x - player.x) / 8));
+}
+
 function toggleMute(): void {
   audio.setMuted(!audio.muted);
   ui.setMuted(audio.muted);
   audio.click();
+}
+
+function vehicleRecords(): Record<VehicleId, number> {
+  return {
+    pasola: score.recordFor('pasola'),
+    motor: score.recordFor('motor'),
+    civic: score.recordFor('civic'),
+  };
+}
+
+function selectVehicle(id: VehicleId): void {
+  if (state !== 'title') return;
+  selectedVehicle = id;
+  try {
+    localStorage.setItem(VEH_KEY, id);
+  } catch {
+    // fine
+  }
+  score.setVehicle(id);
+  player.setVehicle(id);
+  player.reset();
+  ui.updateVehicles(id, vehicleRecords());
+  ui.showTitle(score.record);
+  audio.click();
+}
+
+function goToMenu(): void {
+  if (state !== 'gameover' && state !== 'paused') return;
+  state = 'title';
+  player.reset();
+  ui.showTitle(score.record);
+  ui.updateVehicles(selectedVehicle, vehicleRecords());
+  audio.click();
+}
+
+function doShare(): void {
+  audio.click();
+  if (lastRun) void ui.shareCard(lastRun);
 }
 
 const ui = new UI(document.getElementById('ui')!, {
@@ -78,6 +133,9 @@ const ui = new UI(document.getElementById('ui')!, {
   onResume: resume,
   onPause: pauseGame,
   onToggleMute: toggleMute,
+  onSelectVehicle: selectVehicle,
+  onMenu: goToMenu,
+  onShare: doShare,
 });
 ui.setMuted(audio.muted);
 
@@ -90,6 +148,7 @@ const traffic = new Traffic(scene, {
     ui.setCombo(r.combo, ladderTier(r.combo));
     audio.nearMiss(panOf(x));
     if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
+    haptics.light();
   },
   onPlatano: (x, y, z) => {
     const pts = score.collectPlatano();
@@ -97,6 +156,7 @@ const traffic = new Traffic(scene, {
     const s = w2s(x, y + 0.5, Math.max(z, 1));
     ui.popup(`+${pts}`, s.x, s.y, 'pop-sm pop-gold');
     audio.platano();
+    haptics.medium();
   },
   onPowerup: (kind, x, z) => {
     const s = w2s(x, 1.4, Math.max(z, 1));
@@ -114,6 +174,7 @@ const traffic = new Traffic(scene, {
       ui.popup('¡IMÁN!', s.x, s.y, 'pop-lg pop-gold');
       audio.powerup('iman');
     }
+    haptics.medium();
   },
   onHoyo: () => {
     hoyoTimer = CONFIG.hoyoRecoverSec;
@@ -121,6 +182,7 @@ const traffic = new Traffic(scene, {
     ui.setCombo(0, null);
     addShake(CONFIG.shakeHoyo);
     audio.hoyo();
+    haptics.medium();
   },
   onPolicia: () => {
     player.launch(Math.max(3.2, currentEff * CONFIG.policiaLaunchVy));
@@ -158,6 +220,13 @@ const player = new Player(scene, {
     }
   },
 });
+player.setVehicle(selectedVehicle);
+
+world.onObeliscoPass = () => {
+  if (state !== 'playing') return;
+  ui.popup('¡El Obelisco!', 50, 28, 'pop-lg pop-gold');
+  audio.bell();
+};
 
 function startRun(): void {
   if (state !== 'title' && state !== 'gameover') return;
@@ -166,6 +235,7 @@ function startRun(): void {
   player.reset();
   speed = CONFIG.baseSpeed;
   currentEff = CONFIG.baseSpeed;
+  currentNorm = 0;
   elapsed = 0;
   scrapeTimer = 0;
   hoyoTimer = 0;
@@ -211,12 +281,21 @@ function doCrash(): void {
   player.crash();
   score.setContraVia(false);
   ui.setContraVia(false);
+  ui.setCaballito(false);
+  addShake(CONFIG.shakeCrash);
   audio.stopRun(true);
+  haptics.heavy();
 }
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') {
     toggleMute();
+    return;
+  }
+  if (state === 'title' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+    const dir = e.code === 'ArrowRight' ? 1 : -1;
+    const idx = VEHICLE_ORDER.indexOf(selectedVehicle);
+    selectVehicle(VEHICLE_ORDER[(idx + dir + VEHICLE_ORDER.length) % VEHICLE_ORDER.length]);
     return;
   }
   if (e.code !== 'Space' && e.code !== 'Enter') return;
@@ -234,7 +313,8 @@ function resize(): void {
   const h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  camera.fov = h > w ? CONFIG.fovMobile : CONFIG.fovDesktop;
+  baseFov = h > w ? CONFIG.fovMobile : CONFIG.fovDesktop;
+  camera.fov = baseFov;
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
@@ -244,12 +324,17 @@ resize();
 function stepSim(h: number): void {
   if (state === 'title') {
     world.step(CONFIG.baseSpeed * 0.45 * h, h); // attract mode: the Malecon keeps moving
+    world.updateTape(null);
     return;
   }
   if (state !== 'playing' && state !== 'crashing') return;
 
+  const veh = VEHICLES[selectedVehicle];
   elapsed += h;
-  speed = Math.min(CONFIG.maxSpeed, CONFIG.baseSpeed + CONFIG.speedRampPerSec * elapsed);
+  const raw = CONFIG.baseSpeed + CONFIG.speedRampPerSec * elapsed;
+  speed = Math.min(veh.speedCap, raw) * veh.speedMult;
+  const topSpeed = veh.speedCap * veh.speedMult;
+  currentNorm = Math.max(0, Math.min(1, (speed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
   if (scrapeTimer > 0) scrapeTimer = Math.max(0, scrapeTimer - h);
   if (hoyoTimer > 0) hoyoTimer = Math.max(0, hoyoTimer - h);
   if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - h);
@@ -273,6 +358,8 @@ function stepSim(h: number): void {
   const cv = live && player.x > CONFIG.contraViaMinX && player.x < ROAD.halfRoad;
   score.setContraVia(cv);
   ui.setContraVia(cv);
+  score.setWheelie(live && player.isWheelie);
+  ui.setCaballito(live && player.isWheelie);
 
   traffic.step({
     ds,
@@ -281,6 +368,7 @@ function stepSim(h: number): void {
     speed: effSpeed,
     playerX: player.x,
     playerY: player.y,
+    playerR: player.radius,
     live,
     airborne: player.isAirborne,
     wheelie: player.isWheelie,
@@ -291,13 +379,15 @@ function stepSim(h: number): void {
     player.step(h, effSpeed);
     score.step(ds, h, { airborne: player.isAirborne, wheelie: player.isWheelie });
 
-    if (traffic.checkCollision(player.x, 0, CONFIG.playerRadius)) {
+    if (traffic.checkCollision(player.x, 0, player.radius)) {
       if (cafecitoT > 0 || invincibleT > 0) {
         // el cafecito: plow right through
       } else if (player.hasShield) {
         player.useShield();
         invincibleT = CONFIG.shieldGraceSec;
         addShake(CONFIG.shakeShield);
+        audio.bell();
+        haptics.medium();
       } else {
         doCrash();
       }
@@ -312,6 +402,7 @@ function stepSim(h: number): void {
         world.burstTape();
         ui.banner('¡NUEVO RÉCORD!');
         audio.recordBreak();
+        haptics.heavy();
       } else {
         remain = r;
       }
@@ -340,6 +431,11 @@ function updateCamera(dt: number): void {
     camera.position.y += (Math.random() - 0.5) * 1.2 * kk;
     if (shakeT <= 0) shakeAmp = 0;
   }
+  // FOV speed kick: velocity you can feel in your stomach
+  const kickNorm = state === 'playing' || state === 'crashing' ? currentNorm : 0;
+  const targetFov = baseFov + CONFIG.fovSpeedKick * kickNorm + (cafecitoT > 0 ? CONFIG.fovCafecito : 0);
+  camera.fov += (targetFov - camera.fov) * Math.min(1, 4 * dt);
+  camera.updateProjectionMatrix();
   lookTarget.set((camX + player.x) / 2, 1.1, CONFIG.camLookAhead);
   camera.lookAt(lookTarget);
 }
@@ -355,7 +451,8 @@ function advance(dt: number, now: number): void {
     if (crashRealT >= CONFIG.crashSlowmoSec) {
       state = 'gameover';
       gameOverAt = now;
-      ui.showGameOver(score.finishRun());
+      lastRun = score.finishRun();
+      ui.showGameOver(lastRun);
     }
   } else if (state !== 'paused' && state !== 'gameover') {
     acc += dt;
@@ -368,6 +465,16 @@ function advance(dt: number, now: number): void {
   player.updateFx(dt);
 }
 
+function audioCtxNow(): { running: boolean; speedNorm: number; combo: number; contraVia: boolean; wheelie: boolean } {
+  return {
+    running: state === 'playing',
+    speedNorm: currentNorm,
+    combo: score.combo,
+    contraVia: score.isContraVia,
+    wheelie: player.isWheelie,
+  };
+}
+
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
@@ -377,18 +484,13 @@ function frame(now: number): void {
 
   advance(dt, now);
   updateCamera(dt);
-  audio.update(dt, {
-    running: state === 'playing',
-    speedNorm: (speed - CONFIG.baseSpeed) / (CONFIG.maxSpeed - CONFIG.baseSpeed),
-    combo: score.combo,
-    contraVia: score.isContraVia,
-    wheelie: player.isWheelie,
-  });
+  audio.update(dt, audioCtxNow());
   if (state === 'playing' || state === 'crashing') ui.setScore(score.points);
   renderer.render(scene, camera);
 }
 
 ui.showTitle(score.record);
+ui.updateVehicles(selectedVehicle, vehicleRecords());
 requestAnimationFrame(frame);
 
 // Test hook for automated checks; the game itself never reads this.
@@ -411,13 +513,19 @@ requestAnimationFrame(frame);
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   dog: () => world.debugViralata(),
   audio: () => ({ unlocked: audio.unlocked, muted: audio.muted, ctx: audio.ctxState }),
+  vehicle: () => selectedVehicle,
+  selectVehicle: (id: VehicleId) => selectVehicle(id),
+  share: () => doShare(),
+  fov: () => Math.round(camera.fov * 10) / 10,
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },
   crash: () => {
     if (state === 'playing') doCrash();
   },
-  wheelieNow: () => player.tryWheelie(),
+  wheelieNow: () => {
+    // hold-based now; tests should dispatch keydown Space instead
+  },
   setRecordDist: (m: number) => {
     score.recordDist = m;
   },
@@ -437,13 +545,7 @@ requestAnimationFrame(frame);
       advance(step, performance.now());
     }
     updateCamera(1 / 60);
-    audio.update(1 / 60, {
-      running: state === 'playing',
-      speedNorm: (speed - CONFIG.baseSpeed) / (CONFIG.maxSpeed - CONFIG.baseSpeed),
-      combo: score.combo,
-      contraVia: score.isContraVia,
-      wheelie: player.isWheelie,
-    });
+    audio.update(1 / 60, audioCtxNow());
     if (state === 'playing' || state === 'crashing') ui.setScore(score.points);
     renderer.render(scene, camera);
   },

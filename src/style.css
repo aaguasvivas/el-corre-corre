@@ -162,7 +162,7 @@ body {
 }
 
 .prompt {
-  margin-top: 7vh;
+  margin-top: 3vh;
   font-size: clamp(20px, 3.4vh, 30px);
   letter-spacing: 2px;
   -webkit-text-stroke: 1.5px var(--blue);
@@ -431,6 +431,181 @@ body {
   50% {
     transform: translateX(-50%) scale(1.09);
   }
+}
+
+#hud-cab {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 148px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--sun);
+  color: var(--blue);
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: clamp(13px, 2.2vh, 17px);
+  letter-spacing: 1px;
+  white-space: nowrap;
+  box-shadow: 0 3px 0 rgba(0, 45, 98, 0.3);
+  animation: cv-pulse 0.6s ease-in-out infinite;
+}
+
+/* ---------- Vehicle cards ---------- */
+
+.vrow {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 0 10px;
+  max-width: 100%;
+}
+
+.vcard {
+  flex: 1;
+  width: 132px;
+  max-width: 150px;
+  background: rgba(0, 45, 98, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 14px;
+  padding: 9px 10px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.vcard.sel {
+  background: rgba(0, 45, 98, 0.78);
+  border-color: var(--sun);
+  transform: translateY(-4px) scale(1.04);
+  box-shadow: 0 6px 0 rgba(0, 45, 98, 0.35);
+}
+
+.vc-name {
+  font-size: clamp(11px, 1.8vh, 14px);
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+  color: var(--sun);
+  line-height: 1.05;
+  min-height: 2.1em;
+  display: flex;
+  align-items: center;
+}
+
+.vc-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+}
+
+.vc-stat span {
+  font-size: 9px;
+  letter-spacing: 1px;
+  width: 26px;
+  opacity: 0.8;
+}
+
+.vc-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.vc-bar b {
+  display: block;
+  height: 100%;
+  background: var(--sun);
+  border-radius: 3px;
+}
+
+.vcard.sel .vc-bar b {
+  background: linear-gradient(90deg, var(--red), var(--sun));
+}
+
+.vc-tag {
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.85;
+  margin-top: 6px;
+  min-height: 24px;
+  line-height: 1.15;
+}
+
+.vc-rec {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--cream);
+  opacity: 0.9;
+  margin-top: 3px;
+  min-height: 12px;
+}
+
+@media (max-height: 560px) {
+  .logo-line {
+    font-size: 46px;
+  }
+  .vrow {
+    margin-top: 6px;
+  }
+  .vc-tag {
+    display: none;
+  }
+}
+
+/* ---------- Secondary buttons ---------- */
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.btn-mid {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--blue);
+  color: var(--white);
+  border: none;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: clamp(16px, 2.8vh, 22px);
+  letter-spacing: 1.5px;
+  box-shadow: 0 4px 0 rgba(0, 24, 52, 0.85);
+  cursor: pointer;
+}
+
+.btn-mid:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0, 24, 52, 0.85);
+}
+
+.btn-share {
+  background: var(--teal);
+  box-shadow: 0 4px 0 #0e6b7c;
+}
+
+.btn-share:active {
+  box-shadow: 0 1px 0 #0e6b7c;
+}
+
+.close-call {
+  color: var(--red);
+  font-size: clamp(15px, 2.6vh, 20px);
+  letter-spacing: 0.5px;
+  animation: pop 0.35s ease;
+}
+
+.pause-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(70vw, 280px);
+  margin-top: 3vh;
+}
+
+.pause-btns .btn-big {
+  width: 100%;
 }
 
 #vignette {

@@ -946,6 +946,8 @@ export class World {
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
   private nextObeliscoAt: number = CONFIG.obeliscoEveryM;
+  private obeliscoPassed = false;
+  onObeliscoPass: (() => void) | null = null;
   private shimmerA!: THREE.CanvasTexture;
   private shimmerB!: THREE.CanvasTexture;
   private glintMat!: THREE.MeshBasicMaterial;
@@ -1349,10 +1351,15 @@ export class World {
     // El Obelisco, every ~800 m
     if (!this.obelisco.visible && this.nextObeliscoAt - this.D < 190) {
       this.obelisco.visible = true;
+      this.obeliscoPassed = false;
       this.obelisco.position.z = this.nextObeliscoAt - this.D;
     }
     if (this.obelisco.visible) {
       this.obelisco.position.z -= ds;
+      if (!this.obeliscoPassed && this.obelisco.position.z < 2) {
+        this.obeliscoPassed = true;
+        this.onObeliscoPass?.();
+      }
       if (this.obelisco.position.z < -35) {
         this.obelisco.visible = false;
         this.nextObeliscoAt += CONFIG.obeliscoEveryM;

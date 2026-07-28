@@ -1,6 +1,8 @@
-// ui.ts: DOM screens, HUD, floating popups, and copy strings.
-// Spanish-first with an EN flip. The slang stays Dominican in both languages.
+// ui.ts: DOM screens, HUD, floating popups, vehicle cards, copy strings, and
+// the share card. Spanish-first with an EN flip. The slang stays Dominican in
+// both languages.
 
+import { VEHICLES, type VehicleId } from './config';
 import type { RunResult } from './score';
 
 type Lang = 'es' | 'en';
@@ -17,9 +19,15 @@ const STRINGS = {
     distance: 'Distancia',
     platanos: 'Plátanos',
     again: 'OTRA VEZ',
+    menu: 'MENÚ',
+    share: 'COMPARTIR',
+    resumeBtn: 'SEGUIR',
     newRecord: '¡NUEVO RÉCORD!',
     pause: 'PAUSA',
     resume: 'Toca pa’ seguir',
+    closeCall: (n: number) => `¡Te quedaste a ${n}!`,
+    inVehicle: (v: string) => `en ${v} por el Malecón`,
+    shareAsk: '¿Me lo puedes ganar?',
     gameOverTitles: ['¡Te dieron, loco!', '¡Diablo!', '¡Eso tuvo feo!'],
   },
   en: {
@@ -31,14 +39,21 @@ const STRINGS = {
     distance: 'Distance',
     platanos: 'Plantains',
     again: 'AGAIN',
+    menu: 'MENU',
+    share: 'SHARE',
+    resumeBtn: 'RESUME',
     newRecord: 'NEW RECORD!',
     pause: 'PAUSED',
     resume: 'Tap to resume',
+    closeCall: (n: number) => `Only ${n} short!`,
+    inVehicle: (v: string) => `on ${v} down the Malecón`,
+    shareAsk: 'Can you beat it?',
     gameOverTitles: ['They got you!', '¡Diablo!', 'That was ugly!'],
   },
 } as const;
 
 const NEAR_MISS_TEXTS = ['¡Cerquita!', '¡Por un pelito!'] as const;
+const VEHICLE_IDS: VehicleId[] = ['pasola', 'motor', 'civic'];
 
 const BANANA_SVG =
   '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 7 C5 15 13 20 20 15 C15 22 4 19 2 9 Z" fill="#f4c430" stroke="#7cb342" stroke-width="1.4"/></svg>';
@@ -49,6 +64,9 @@ export interface UICallbacks {
   onResume(): void;
   onPause(): void;
   onToggleMute(): void;
+  onSelectVehicle(v: VehicleId): void;
+  onMenu(): void;
+  onShare(): void;
 }
 
 function readLang(): Lang {
@@ -63,6 +81,21 @@ function clampPct(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+function statBars(): string {
+  return VEHICLE_IDS.map((id) => {
+    const v = VEHICLES[id];
+    const bar = (label: string, n: number): string =>
+      `<div class="vc-stat"><span>${label}</span><div class="vc-bar"><b style="width:${n * 20}%"></b></div></div>`;
+    return `
+      <div class="vcard" data-v="${id}">
+        <div class="vc-name">${v.name}</div>
+        ${bar('VEL', v.stats.vel)}${bar('MAN', v.stats.man)}${bar('AGU', v.stats.agu)}
+        <div class="vc-tag">${v.tagline}</div>
+        <div class="vc-rec" data-rec="${id}"></div>
+      </div>`;
+  }).join('');
+}
+
 export class UI {
   private lang: Lang = readLang();
   private cb: UICallbacks;
@@ -73,10 +106,12 @@ export class UI {
   private comboShown = 0;
   private platShown = -1;
   private cvShown = false;
+  private cabShown = false;
   private nearMissIdx = 0;
   private popupIdx = 0;
   private lastPopupAt = 0;
   private popupBurst = 0;
+  private selectedVehicle: VehicleId = 'motor';
 
   private hud: HTMLElement;
   private title: HTMLElement;
@@ -88,6 +123,7 @@ export class UI {
   private scoreEl: HTMLElement;
   private comboEl: HTMLElement;
   private cvEl: HTMLElement;
+  private cabEl: HTMLElement;
   private platEl: HTMLElement;
   private hudRecordEl: HTMLElement;
   private subtitleEl: HTMLElement;
@@ -97,6 +133,7 @@ export class UI {
   private muteBtn: HTMLElement;
   private goTitleEl: HTMLElement;
   private goBadge: HTMLElement;
+  private goClose: HTMLElement;
   private goPointsLabel: HTMLElement;
   private goPoints: HTMLElement;
   private goDistLabel: HTMLElement;
@@ -106,8 +143,11 @@ export class UI {
   private goPlatLabel: HTMLElement;
   private goPlat: HTMLElement;
   private btnAgain: HTMLElement;
+  private btnMenu: HTMLElement;
+  private btnShare: HTMLElement;
   private pauseTitle: HTMLElement;
-  private pauseSub: HTMLElement;
+  private btnResume: HTMLElement;
+  private btnPauseMenu: HTMLElement;
 
   constructor(root: HTMLElement, cb: UICallbacks) {
     this.cb = cb;
@@ -117,6 +157,7 @@ export class UI {
         <div id="hud-score">0</div>
         <div id="hud-combo" class="hidden"></div>
         <div id="hud-cv" class="hidden">¡EN CONTRA VÍA! ×2</div>
+        <div id="hud-cab" class="hidden">¡CABALLITO! ×1.5</div>
         <div id="hud-record"></div>
         <div id="hud-left">
           <button id="hud-pause" type="button" aria-label="Pausa"><i></i><i></i></button>
@@ -137,6 +178,7 @@ export class UI {
           <div class="flagbar"><i class="fb-blue"></i><i class="fb-white"></i><i class="fb-red"></i></div>
         </div>
         <div id="subtitle" class="subtitle"></div>
+        <div id="vrow" class="vrow">${statBars()}</div>
         <div id="prompt" class="prompt"></div>
         <div id="title-record" class="title-record"></div>
       </div>
@@ -144,6 +186,7 @@ export class UI {
         <div class="card">
           <div id="go-title" class="go-title"></div>
           <div id="go-new" class="badge hidden"></div>
+          <div id="go-close" class="close-call hidden"></div>
           <div id="go-points-label" class="go-points-label"></div>
           <div id="go-points" class="go-points">0</div>
           <div class="go-rows">
@@ -152,11 +195,18 @@ export class UI {
             <div><span id="go-plat-label"></span><b id="go-plat"></b></div>
           </div>
           <button id="btn-again" class="btn-big" type="button"></button>
+          <div class="btn-row">
+            <button id="btn-menu" class="btn-mid" type="button"></button>
+            <button id="btn-share" class="btn-mid btn-share" type="button"></button>
+          </div>
         </div>
       </div>
       <div id="pause" class="screen hidden">
         <div id="pause-title" class="pause-title"></div>
-        <div id="pause-sub" class="pause-sub"></div>
+        <div class="pause-btns">
+          <button id="btn-resume" class="btn-big" type="button"></button>
+          <button id="btn-pause-menu" class="btn-mid" type="button"></button>
+        </div>
       </div>`;
 
     const q = (sel: string): HTMLElement => root.querySelector(sel)!;
@@ -169,6 +219,7 @@ export class UI {
     this.scoreEl = q('#hud-score');
     this.comboEl = q('#hud-combo');
     this.cvEl = q('#hud-cv');
+    this.cabEl = q('#hud-cab');
     this.platEl = q('#plat-n');
     this.hudRecordEl = q('#hud-record');
     this.subtitleEl = q('#subtitle');
@@ -178,6 +229,7 @@ export class UI {
     this.muteBtn = q('#mute');
     this.goTitleEl = q('#go-title');
     this.goBadge = q('#go-new');
+    this.goClose = q('#go-close');
     this.goPointsLabel = q('#go-points-label');
     this.goPoints = q('#go-points');
     this.goDistLabel = q('#go-dist-label');
@@ -187,8 +239,11 @@ export class UI {
     this.goPlatLabel = q('#go-plat-label');
     this.goPlat = q('#go-plat');
     this.btnAgain = q('#btn-again');
+    this.btnMenu = q('#btn-menu');
+    this.btnShare = q('#btn-share');
     this.pauseTitle = q('#pause-title');
-    this.pauseSub = q('#pause-sub');
+    this.btnResume = q('#btn-resume');
+    this.btnPauseMenu = q('#btn-pause-menu');
 
     const layer = q('#popup-layer');
     for (let i = 0; i < POPUP_POOL; i++) {
@@ -207,8 +262,26 @@ export class UI {
       e.stopPropagation();
       this.cb.onToggleMute();
     });
+    for (const card of root.querySelectorAll<HTMLElement>('.vcard')) {
+      card.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        this.cb.onSelectVehicle(card.dataset.v as VehicleId);
+      });
+    }
     this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
-    this.pause.addEventListener('pointerdown', () => this.cb.onResume());
+    this.btnMenu.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onMenu();
+    });
+    this.btnShare.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onShare();
+    });
+    this.btnResume.addEventListener('pointerdown', () => this.cb.onResume());
+    this.btnPauseMenu.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onMenu();
+    });
     q('#hud-pause').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onPause();
@@ -248,11 +321,25 @@ export class UI {
     this.goRecLabel.textContent = `${t.record} `;
     this.goPlatLabel.textContent = `${t.platanos} `;
     this.btnAgain.textContent = t.again;
+    this.btnMenu.textContent = t.menu;
+    this.btnShare.textContent = t.share;
     this.goBadge.textContent = t.newRecord;
     this.pauseTitle.textContent = t.pause;
-    this.pauseSub.textContent = t.resume;
+    this.btnResume.textContent = t.resumeBtn;
+    this.btnPauseMenu.textContent = t.menu;
     if (this.lastResult) {
       this.goTitleEl.textContent = t.gameOverTitles[this.goTitleIdx];
+    }
+  }
+
+  updateVehicles(selected: VehicleId, records: Record<VehicleId, number>): void {
+    this.selectedVehicle = selected;
+    const t = this.t();
+    for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
+      const id = card.dataset.v as VehicleId;
+      card.classList.toggle('sel', id === selected);
+      const rec = card.querySelector<HTMLElement>(`[data-rec="${id}"]`)!;
+      rec.textContent = records[id] > 0 ? `${t.record} ${records[id]}` : '·';
     }
   }
 
@@ -264,6 +351,7 @@ export class UI {
     this.gameover.classList.add('hidden');
     this.pause.classList.add('hidden');
     this.setContraVia(false);
+    this.setCaballito(false);
   }
 
   showPlaying(record: number): void {
@@ -276,6 +364,7 @@ export class UI {
     this.platShown = -1;
     this.setPlatanos(0);
     this.setContraVia(false);
+    this.setCaballito(false);
     for (const p of this.popups) p.classList.remove('go');
     this.hud.classList.remove('hidden');
     this.title.classList.add('hidden');
@@ -294,9 +383,12 @@ export class UI {
     this.goRec.textContent = String(r.record);
     this.goPlat.textContent = String(r.platanos);
     this.goBadge.classList.toggle('hidden', !r.isNewRecord);
+    this.goClose.classList.toggle('hidden', r.closeCall === null);
+    if (r.closeCall !== null) this.goClose.textContent = t.closeCall(r.closeCall);
     this.gameover.classList.remove('hidden');
     this.hud.classList.add('hidden');
     this.setContraVia(false);
+    this.setCaballito(false);
   }
 
   showPause(): void {
@@ -343,6 +435,12 @@ export class UI {
     this.vignette.classList.toggle('on', on);
   }
 
+  setCaballito(on: boolean): void {
+    if (on === this.cabShown) return;
+    this.cabShown = on;
+    this.cabEl.classList.toggle('hidden', !on);
+  }
+
   setMuted(m: boolean): void {
     this.muteBtn.classList.toggle('muted', m);
   }
@@ -372,5 +470,156 @@ export class UI {
     this.bannerEl.classList.remove('show');
     void this.bannerEl.offsetWidth;
     this.bannerEl.classList.add('show');
+  }
+
+  // ---------------- share card ----------------
+
+  async shareCard(r: RunResult): Promise<void> {
+    const t = this.t();
+    const veh = VEHICLES[this.selectedVehicle];
+    try {
+      await document.fonts.ready;
+    } catch {
+      // draw with whatever we have
+    }
+    const c = document.createElement('canvas');
+    c.width = 1080;
+    c.height = 1350;
+    const g = c.getContext('2d')!;
+
+    const sky = g.createLinearGradient(0, 0, 0, 1350);
+    sky.addColorStop(0, '#6ec6e6');
+    sky.addColorStop(0.52, '#ffd9a0');
+    sky.addColorStop(0.7, '#ffe9bc');
+    sky.addColorStop(1, '#17a2b8');
+    g.fillStyle = sky;
+    g.fillRect(0, 0, 1080, 1350);
+
+    g.fillStyle = 'rgba(255,243,196,0.55)';
+    g.beginPath();
+    g.arc(830, 760, 200, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff3c4';
+    g.beginPath();
+    g.arc(830, 760, 130, 0, Math.PI * 2);
+    g.fill();
+
+    g.fillStyle = '#17a2b8';
+    g.fillRect(0, 900, 1080, 450);
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    for (let i = 0; i < 60; i++) {
+      g.fillRect(Math.random() * 1080, 910 + Math.random() * 420, 10 + Math.random() * 26, 3);
+    }
+
+    // the road wedge
+    g.fillStyle = '#3e3a38';
+    g.beginPath();
+    g.moveTo(240, 1350);
+    g.lineTo(470, 900);
+    g.lineTo(610, 900);
+    g.lineTo(840, 1350);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = '#f4c430';
+    g.lineWidth = 10;
+    g.setLineDash([46, 34]);
+    g.beginPath();
+    g.moveTo(540, 900);
+    g.lineTo(540, 1350);
+    g.stroke();
+    g.setLineDash([]);
+
+    const stroked = (
+      text: string,
+      x: number,
+      y: number,
+      size: number,
+      fill: string,
+      stroke: string,
+      strokeW: number,
+    ): void => {
+      g.font = `${size}px "Lilita One", sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineWidth = strokeW;
+      g.lineJoin = 'round';
+      g.strokeStyle = stroke;
+      g.strokeText(text, x, y);
+      g.fillStyle = fill;
+      g.fillText(text, x, y);
+    };
+
+    g.save();
+    g.translate(540, 0);
+    g.rotate(-0.03);
+    g.fillStyle = '#002d62';
+    g.beginPath();
+    g.roundRect(-74, 92, 148, 66, 16);
+    g.fill();
+    stroked('EL', 0, 126, 48, '#ffffff', '#002d62', 0.01);
+    stroked('CORRE', 0, 226, 130, '#ffffff', '#002d62', 16);
+    stroked('CORRE', 0, 344, 130, '#ffffff', '#002d62', 16);
+    g.restore();
+
+    const barW = 420;
+    const seg = barW / 3;
+    const colors = ['#002d62', '#ffffff', '#ce1126'];
+    colors.forEach((col, i) => {
+      g.fillStyle = col;
+      g.fillRect(540 - barW / 2 + i * seg, 420, seg, 16);
+    });
+
+    if (r.isNewRecord) {
+      g.save();
+      g.translate(540, 505);
+      g.rotate(-0.04);
+      g.fillStyle = '#ce1126';
+      g.beginPath();
+      g.roundRect(-230, -34, 460, 68, 18);
+      g.fill();
+      stroked(t.newRecord, 0, 2, 44, '#ffffff', '#ce1126', 0.01);
+      g.restore();
+    }
+
+    stroked(t.points.toUpperCase(), 540, 585, 44, '#002d62', '#002d62', 0.01);
+    let size = 230;
+    g.font = `${size}px "Lilita One", sans-serif`;
+    while (g.measureText(String(r.points)).width > 900 && size > 90) {
+      size -= 10;
+      g.font = `${size}px "Lilita One", sans-serif`;
+    }
+    stroked(String(r.points), 540, 715, size, '#002d62', '#ffffff', 20);
+
+    stroked(
+      `${t.distance} ${r.distanceM} m   ·   ${t.platanos} ${r.platanos}`,
+      540,
+      860,
+      42,
+      '#ffffff',
+      '#002d62',
+      8,
+    );
+    stroked(t.inVehicle(veh.name), 540, 985, 52, '#fff3c4', '#002d62', 10);
+    stroked(t.shareAsk, 540, 1160, 74, '#ffffff', '#ce1126', 12);
+    stroked('EL CORRE CORRE', 540, 1300, 34, 'rgba(255,255,255,0.85)', '#0e7490', 6);
+
+    const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
+    if (!blob) return;
+    const file = new File([blob], 'el-corre-corre.png', { type: 'image/png' });
+    const text = `${r.points} puntos por el Malecón. ${t.shareAsk}`;
+    try {
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'El Corre Corre', text });
+        return;
+      }
+    } catch {
+      // user closed the share sheet; fall through to download
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'el-corre-corre.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
 }

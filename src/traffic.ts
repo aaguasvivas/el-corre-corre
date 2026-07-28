@@ -31,6 +31,7 @@ export interface StepCtx {
   speed: number;
   playerX: number;
   playerY: number;
+  playerR: number; // collision circle, scaled per vehicle
   live: boolean; // gameplay interactions only while actually playing
   airborne: boolean;
   wheelie: boolean;
@@ -777,7 +778,7 @@ export class Traffic {
 
       if (live && !v.passed && v.z <= 0) {
         v.passed = true;
-        const clearance = Math.abs(ctx.playerX - v.x) - (v.halfW * CONFIG.vehicleHitboxScale + CONFIG.playerRadius);
+        const clearance = Math.abs(ctx.playerX - v.x) - (v.halfW * CONFIG.vehicleHitboxScale + ctx.playerR);
         if (clearance >= 0 && clearance <= CONFIG.nearMissRadius) {
           this.events.onNearMiss(v.x, v.z);
         }

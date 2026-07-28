@@ -224,11 +224,14 @@ export class AudioEngine {
 
   // ---------------- the dembow ----------------
 
+  // Dembow, not reggaeton: driving tempo, hats on every 16th, and the
+  // ghost-snare doubles after 6 and 14 that give it the gallop.
   private scheduleStep(s: number, t: number): void {
     if (KICK_STEPS.includes(s)) this.kick(t);
-    if (SNARE_STEPS.includes(s)) this.snare(t);
-    if (s % 2 === 0) this.hat(t, false);
-    if (s === 7 || s === 15) this.hat(t, true);
+    if (SNARE_STEPS.includes(s)) this.snare(t, false);
+    if (s === 7 || s === 15) this.snare(t, true); // the "ra-ta"
+    this.hat(t, false, s % 4 === 2);
+    if (s === 7 || s === 15) this.hat(t, true, false);
     const bassF = BASS_PATTERN[s];
     if (bassF !== undefined) this.bassNote(t, bassF);
     if (PERC_STEPS.includes(s)) this.perc(t);
@@ -289,17 +292,18 @@ export class AudioEngine {
   }
 
   private kick(t: number): void {
-    this.tone(t, this.layerKick, 'sine', 150, 50, 0.95, 0.16);
-    this.noiseHit(t, this.layerKick, 0.22, 0.015, 'highpass', 2000);
+    this.tone(t, this.layerKick, 'sine', 155, 52, 1.0, 0.12);
+    this.noiseHit(t, this.layerKick, 0.28, 0.012, 'highpass', 2200);
   }
 
-  private snare(t: number): void {
-    this.noiseHit(t, this.layerSnare, 0.5, 0.09, 'bandpass', 1900, 1.1);
-    this.tone(t, this.layerSnare, 'sine', 190, 130, 0.2, 0.05);
+  private snare(t: number, ghost: boolean): void {
+    this.noiseHit(t, this.layerSnare, ghost ? 0.26 : 0.52, ghost ? 0.06 : 0.09, 'bandpass', 1900, 1.1);
+    if (!ghost) this.tone(t, this.layerSnare, 'sine', 190, 130, 0.2, 0.05);
   }
 
-  private hat(t: number, open: boolean): void {
-    this.noiseHit(t, this.layerHat, open ? 0.32 : 0.26, open ? 0.16 : 0.045, 'highpass', 6800);
+  private hat(t: number, open: boolean, accent: boolean): void {
+    const peak = open ? 0.32 : accent ? 0.3 : 0.16;
+    this.noiseHit(t, this.layerHat, peak, open ? 0.15 : 0.04, 'highpass', 6800);
   }
 
   private bassNote(t: number, f: number): void {

@@ -1,12 +1,16 @@
-// score.ts: the full Phase 2 scoring model.
+// score.ts: the full scoring model with per-vehicle records.
 // Distance +1/m, platano +10, near-miss +25 x combo, airtime +15/s,
-// wheelie +5/s, and EVERYTHING x2 en contra via. Records persist.
+// wheelie +5/s. EVERYTHING x2 en contra via, x1.5 during the caballito
+// (they stack), and the Civic adds its own +15%. Records persist per vehicle.
 
-import { CONFIG } from './config';
+import { CONFIG, VEHICLES, type VehicleId } from './config';
 
-const RECORD_KEY = 'ecc.v1.record';
-const DIST_KEY = 'ecc.v1.recordDist';
+const LEGACY_RECORD = 'ecc.v1.record';
+const LEGACY_DIST = 'ecc.v1.recordDist';
 const PLATANOS_KEY = 'ecc.v1.platanosLifetime'; // future soft currency (roadmap)
+
+const recordKey = (v: VehicleId): string => `ecc.v1.record.${v}`;
+const distKey = (v: VehicleId): string => `ecc.v1.recordDist.${v}`;
 
 export interface RunResult {
   points: number;
@@ -14,6 +18,7 @@ export interface RunResult {
   platanos: number;
   record: number;
   isNewRecord: boolean;
+  closeCall: number | null; // points short of the record, when tantalizingly close
 }
 
 export interface NearMissResult {
@@ -59,19 +64,42 @@ function writeInt(key: string, value: number): void {
   }
 }
 
+// One-time migration: pre-Phase-5 records belong to El Motor.
+function migrateLegacy(): void {
+  try {
+    const old = localStorage.getItem(LEGACY_RECORD);
+    if (old !== null && localStorage.getItem(recordKey('motor')) === null) {
+      localStorage.setItem(recordKey('motor'), old);
+      const oldDist = localStorage.getItem(LEGACY_DIST);
+      if (oldDist !== null) localStorage.setItem(distKey('motor'), oldDist);
+    }
+    localStorage.removeItem(LEGACY_RECORD);
+    localStorage.removeItem(LEGACY_DIST);
+  } catch {
+    // fine
+  }
+}
+
 export class Score {
   distance = 0;
   platanos = 0;
   combo = 0;
-  record = readInt(RECORD_KEY);
-  recordDist = readInt(DIST_KEY);
+  record = 0;
+  recordDist = 0;
 
+  private vehicle: VehicleId = 'motor';
+  private vehicleScoreMult = 1;
   private pointsF = 0;
   private comboTimer = 0;
   private contraVia = false;
+  private wheelieOn = false;
   private airAccum = 0;
   private wheelieAccum = 0;
   private platanosLifetime = readInt(PLATANOS_KEY);
+
+  constructor() {
+    migrateLegacy();
+  }
 
   get points(): number {
     return Math.floor(this.pointsF);
@@ -81,12 +109,31 @@ export class Score {
     return this.contraVia;
   }
 
+  recordFor(v: VehicleId): number {
+    return readInt(recordKey(v));
+  }
+
+  setVehicle(v: VehicleId): void {
+    this.vehicle = v;
+    this.vehicleScoreMult = VEHICLES[v].scoreMult;
+    this.record = readInt(recordKey(v));
+    this.recordDist = readInt(distKey(v));
+  }
+
   private mult(): number {
-    return this.contraVia ? CONFIG.contraViaMultiplier : 1;
+    return (
+      (this.contraVia ? CONFIG.contraViaMultiplier : 1) *
+      (this.wheelieOn ? CONFIG.wheelieMultiplier : 1) *
+      this.vehicleScoreMult
+    );
   }
 
   setContraVia(on: boolean): void {
     this.contraVia = on;
+  }
+
+  setWheelie(on: boolean): void {
+    this.wheelieOn = on;
   }
 
   step(ds: number, dt: number, opts: { airborne: boolean; wheelie: boolean }): void {
@@ -111,7 +158,7 @@ export class Score {
   nearMiss(): NearMissResult {
     this.combo += 1;
     this.comboTimer = CONFIG.comboDecaySec;
-    const pts = CONFIG.nearMissPoints * this.combo * this.mult();
+    const pts = Math.round(CONFIG.nearMissPoints * this.combo * this.mult());
     this.pointsF += pts;
     let ladderText: string | null = null;
     for (const [n, s] of LADDER) {
@@ -121,7 +168,7 @@ export class Score {
   }
 
   collectPlatano(): number {
-    const pts = CONFIG.platanoPoints * this.mult();
+    const pts = Math.round(CONFIG.platanoPoints * this.mult());
     this.pointsF += pts;
     this.platanos += 1;
     this.platanosLifetime += 1;
@@ -149,13 +196,19 @@ export class Score {
   finishRun(): RunResult {
     const points = this.points;
     const isNewRecord = points > this.record;
+    let closeCall: number | null = null;
     if (isNewRecord) {
       this.record = points;
-      writeInt(RECORD_KEY, points);
+      writeInt(recordKey(this.vehicle), points);
+    } else if (this.record > 0) {
+      const short = this.record - points;
+      if (short > 0 && short <= Math.max(50, this.record * CONFIG.closeCallShare)) {
+        closeCall = short;
+      }
     }
     if (this.distance > this.recordDist) {
       this.recordDist = Math.floor(this.distance);
-      writeInt(DIST_KEY, this.recordDist);
+      writeInt(distKey(this.vehicle), this.recordDist);
     }
     writeInt(PLATANOS_KEY, this.platanosLifetime);
     return {
@@ -164,6 +217,7 @@ export class Score {
       platanos: this.platanos,
       record: this.record,
       isNewRecord,
+      closeCall,
     };
   }
 
@@ -171,7 +225,7 @@ export class Score {
   persist(): void {
     if (this.points > this.record) {
       this.record = this.points;
-      writeInt(RECORD_KEY, this.record);
+      writeInt(recordKey(this.vehicle), this.record);
     }
     writeInt(PLATANOS_KEY, this.platanosLifetime);
   }
@@ -183,6 +237,7 @@ export class Score {
     this.combo = 0;
     this.comboTimer = 0;
     this.contraVia = false;
+    this.wheelieOn = false;
     this.airAccum = 0;
     this.wheelieAccum = 0;
   }

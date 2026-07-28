@@ -40,6 +40,67 @@ export const PALETTE = {
   poleWood: 0x6e5d4e,
   wire: 0x1f1b19,
   obeliscoCream: 0xf5ecd9,
+  // Phase 5
+  pasolaMint: 0x7fd8c9,
+  dust: 0xd9c7a7,
+} as const;
+
+export type VehicleId = 'pasola' | 'motor' | 'civic';
+
+export interface VehicleDef {
+  name: string;
+  tagline: string; // DECISION: taglines stay in Spanish in both languages; they are flavor
+  speedCap: number;
+  speedMult: number;
+  scoreMult: number;
+  hitbox: number; // multiplier on the collision circle and edge width
+  accelMult: number;
+  dampMult: number;
+  latMaxMult: number;
+  leanMult: number;
+  stats: { vel: number; man: number; agu: number }; // 1..5 display bars
+}
+
+export const VEHICLES: Record<VehicleId, VehicleDef> = {
+  pasola: {
+    name: 'LA PASOLA',
+    tagline: 'Chiquita pero cumplidora.',
+    speedCap: 36,
+    speedMult: 1,
+    scoreMult: 1,
+    hitbox: 0.75,
+    accelMult: 1.18,
+    dampMult: 1.08,
+    latMaxMult: 1.08,
+    leanMult: 1.1,
+    stats: { vel: 2, man: 5, agu: 3 },
+  },
+  motor: {
+    name: 'EL MOTOR',
+    tagline: 'El clásico del barrio.',
+    speedCap: 42,
+    speedMult: 1,
+    scoreMult: 1,
+    hitbox: 1,
+    accelMult: 1,
+    dampMult: 1,
+    latMaxMult: 1,
+    leanMult: 1,
+    stats: { vel: 3, man: 3, agu: 3 },
+  },
+  civic: {
+    name: 'EL CIVIC TUNEAO',
+    tagline: 'Que se oiga.',
+    speedCap: 42,
+    speedMult: 1.15,
+    scoreMult: 1.15,
+    hitbox: 1.4,
+    accelMult: 0.8,
+    dampMult: 0.85,
+    latMaxMult: 0.95,
+    leanMult: 0.3,
+    stats: { vel: 5, man: 2, agu: 4 },
+  },
 } as const;
 
 export const CONFIG = {
@@ -47,10 +108,10 @@ export const CONFIG = {
   fixedDt: 1 / 120, // fixed sim step; feel is framerate-independent
   maxFrameDt: 0.1, // clamp huge frame gaps (tab switches) so nothing teleports
 
-  // Forward motion. Tuned up after the Phase 1 feel test ("difficulty is low").
+  // Forward motion. Ramp steepened after the Phase 4 feel test ("too easy").
   baseSpeed: 18,
   maxSpeed: 42,
-  speedRampPerSec: 0.085, // FEEL: how fast a run escalates; linear m/s gained per second
+  speedRampPerSec: 0.105, // FEEL: how fast a run escalates; linear m/s gained per second
 
   // Steering. FEEL: drifty-smooth, not twitchy. Signed off in the Phase 1 test.
   lateralMaxSpeed: 9, // FEEL: top carving speed across the road
@@ -77,31 +138,32 @@ export const CONFIG = {
   fovDesktop: 60,
   camDamping: 6, // FEEL: camera lag chasing the player laterally
   camXFollow: 0.72, // FEEL: fraction of player x the camera follows; <1 keeps edges in view
-  fovSpeedKick: 6, // reserved for the Phase 5 juice pass
+  fovSpeedKick: 6, // FEEL: extra FOV at top speed; speed you can feel in your stomach
+  fovCafecito: 3, // FEEL: extra kick while the cafecito burns
 
   // Atmosphere
   fogNear: 60,
   fogFar: 140,
 
-  // Spawning. Density bumped after the Phase 1 feel test.
+  // Spawning. Pressure raised after the Phase 4 feel test.
   spawnAhead: 150,
   despawnBehind: 15,
   telegraphMinSec: 1.5, // sacred: min seconds between a threat appearing and reaching you
-  trafficDensityStart: 0.45,
+  trafficDensityStart: 0.5,
   trafficDensityMax: 1.0,
-  densityRampSec: 110,
-  gentleStartSec: 12,
-  spawnsPerSecAtFull: 1.3, // FEEL: filler spawn attempts per second at full density
+  densityRampSec: 85,
+  gentleStartSec: 10,
+  spawnsPerSecAtFull: 1.5, // FEEL: filler spawn attempts per second at full density
   gentleSpawnFactor: 0.55, // FEEL: spawn rate multiplier during the gentle window
   oncomingUnlockSec: 6, // DECISION: no oncoming traffic in the very first seconds of a run
-  trafficMaxActive: 20, // FEEL: hard cap of vehicles on the road at once
+  trafficMaxActive: 24, // FEEL: hard cap of vehicles on the road at once
   sameLaneGapM: 16, // min same-lane spacing at spawn; keeps convoys threadable
   antiWallWindowM: 14, // z window in which all 4 lanes must never be occupied at once
   fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
 
   // Wave patterns
-  patternIntervalMin: 3.6, // FEEL: seconds between authored waves (scaled by density)
-  patternIntervalMax: 6.8,
+  patternIntervalMin: 3.2, // FEEL: seconds between authored waves (scaled by density)
+  patternIntervalMax: 5.6,
 
   // Traffic speeds (m/s) per archetype: [min, max]
   vehicleSpeeds: {
@@ -113,12 +175,12 @@ export const CONFIG = {
   },
   // FEEL: relative spawn weights for filler traffic
   vehicleWeights: { sedan: 32, motoconcho: 22, guagua: 16, camion: 12, civic: 18 },
-  civicUnlockSec: 22,
+  civicUnlockSec: 18,
   bigVehicleUnlockSec: 16, // guaguas y camiones enter after the opening moments
 
   // Hitboxes
   vehicleHitboxScale: 0.9, // FEEL: forgiveness; the killer box is smaller than the visual box
-  playerRadius: 0.5, // FEEL: player collision circle; smaller = more forgiving
+  playerRadius: 0.5, // FEEL: base player collision circle, scaled per vehicle
 
   // Near-miss and combo
   nearMissRadius: 1.2,
@@ -129,12 +191,18 @@ export const CONFIG = {
   contraViaMultiplier: 2,
   contraViaMinX: 0.25, // FEEL: how far past the center line before it counts
 
-  // Wheelie (el caballito)
-  wheelieDurationSec: 0.8,
-  wheelieCooldownSec: 2.5,
-  wheelieSteerFactor: 0.6, // steering authority while the front wheel is up
+  // El caballito. Redesigned after the Phase 4 feel test: HOLD the wheelie as
+  // long as you dare. Steering decays the longer you hold, points multiply.
+  wheelieMaxSec: 4.5, // FEEL: hard cap on one caballito
+  wheelieMultiplier: 1.5, // FEEL: ALL points x this while the front wheel is up
+  wheelieSteerFactorStart: 0.68, // FEEL: steering authority at wheelie start...
+  wheelieSteerFactorEnd: 0.38, // FEEL: ...decaying to this at max hold. The risk.
+  wheelieWobble: 0.09, // FEEL: how shaky the bike gets deep into a hold
+  wheelieCooldownBase: 1.1, // FEEL: cooldown = base + held seconds * perSec
+  wheelieCooldownPerSec: 0.65,
   wheeliePointsPerSec: 5,
-  swipeUpPx: 48, // FEEL: upward swipe distance that triggers a wheelie
+  swipeUpPx: 48, // FEEL: upward swipe distance that starts a caballito
+  swipeDownPx: 42, // FEEL: downward swipe that drops it early
 
   // Airtime
   airtimePointsPerSec: 15,
@@ -176,10 +244,13 @@ export const CONFIG = {
   crashSlowmoSec: 0.5, // real seconds of slow motion before the card appears
   crashTimeScale: 0.2, // sim speed during the slow-mo
   restartDebounceSec: 0.25, // ignore taps this long after the card shows
+  closeCallShare: 0.15, // FEEL: "te quedaste a N" shows when within this fraction of the record
 
-  // Juice (minimal here; the real pass is Phase 5)
+  // Juice
   shakeHoyo: 0.22, // FEEL: camera jolt when you eat a pothole
   shakeShield: 0.3,
+  shakeCrash: 0.5,
+  dustMinVelX: 4.2, // FEEL: how hard you must carve before tire dust kicks up
 
   // Phase 3: el Malecon
   // DECISION: the S-curve is a visual bend field applied in the vertex shader.
@@ -196,7 +267,7 @@ export const CONFIG = {
   viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
 
   // Phase 4: el sonido del barrio (100% WebAudio synthesis)
-  audioBpm: 108, // FEEL: dembow tempo
+  audioBpm: 120, // FEEL: dembow drives; 108 read as reggaeton in the feel test
   musicVolume: 0.5, // FEEL: music bus level
   sfxVolume: 0.75, // FEEL: effects bus level
   engineVolume: 0.085, // FEEL: engine loudness at max speed; it hums, never drones
