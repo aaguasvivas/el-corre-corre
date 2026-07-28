@@ -15,6 +15,20 @@ const SNARE_STEPS = [3, 6, 11, 14]; // that syncopation IS the dembow gallop
 const PERC_STEPS = [2, 5, 10, 13]; // extra layer en contra via
 const BASS_PATTERN: Record<number, number> = { 0: 55, 4: 55, 7: 65.41, 8: 55, 12: 55, 14: 49 };
 
+// Long runs need the beat to move: a pluck riff cycling Am G F E every two
+// bars, kick variant every 8, a snare roll into every 4th bar, and one
+// stripped breakdown bar every 16.
+const CHORDS = [
+  [220, 261.63, 329.63], // Am
+  [196, 246.94, 293.66], // G
+  [174.61, 220, 261.63], // F
+  [164.81, 207.65, 246.94], // E
+];
+const RIFF_PATTERNS: Array<Record<number, number>> = [
+  { 0: 0, 3: 1, 6: 2, 10: 1, 12: 0, 14: 2 },
+  { 2: 0, 5: 2, 8: 1, 11: 0, 14: 1 },
+];
+
 export interface AudioUpdateCtx {
   running: boolean;
   speedNorm: number;
@@ -43,6 +57,8 @@ export class AudioEngine {
   private layerHat!: GainNode;
   private layerBass!: GainNode;
   private layerPerc!: GainNode;
+  private layerRiff!: GainNode;
+  private bar = 0;
 
   private engineOsc!: OscillatorNode;
   private engineFilter!: BiquadFilterNode;
@@ -127,6 +143,7 @@ export class AudioEngine {
     this.layerHat = mkLayer(0.3);
     this.layerBass = mkLayer(0);
     this.layerPerc = mkLayer(0);
+    this.layerRiff = mkLayer(1);
 
     // Engine: filtered sawtooth, always alive, gain gated by the run
     this.engineOsc = ctx.createOscillator();
@@ -169,6 +186,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     this.step = 0;
+    this.bar = 0;
     this.nextStepAt = now + 0.06;
     this.engineGain.gain.setTargetAtTime(0.05, now, 0.2);
   }
@@ -225,16 +243,38 @@ export class AudioEngine {
   // ---------------- the dembow ----------------
 
   // Dembow, not reggaeton: driving tempo, hats on every 16th, and the
-  // ghost-snare doubles after 6 and 14 that give it the gallop.
+  // ghost-snare doubles after 6 and 14 that give it the gallop. Phrase-level
+  // variation keeps long runs alive without ever stopping the groove.
   private scheduleStep(s: number, t: number): void {
-    if (KICK_STEPS.includes(s)) this.kick(t);
-    if (SNARE_STEPS.includes(s)) this.snare(t, false);
-    if (s === 7 || s === 15) this.snare(t, true); // the "ra-ta"
+    const bar = this.bar;
+    const fill = bar % 4 === 3;
+    const breakdown = bar % 16 === 11;
+    if (!breakdown) {
+      if (KICK_STEPS.includes(s)) this.kick(t);
+      if (bar % 8 >= 4 && s === 10) this.kick(t); // variant B doubles the kick
+      if (SNARE_STEPS.includes(s)) this.snare(t, false);
+      if (s === 7 || s === 15) this.snare(t, true); // the "ra-ta"
+    }
+    if (fill && s >= 12) {
+      this.noiseHit(t, this.layerSnare, 0.18 + (s - 12) * 0.09, 0.05, 'bandpass', 1900, 1.1);
+    }
     this.hat(t, false, s % 4 === 2);
     if (s === 7 || s === 15) this.hat(t, true, false);
     const bassF = BASS_PATTERN[s];
     if (bassF !== undefined) this.bassNote(t, bassF);
     if (PERC_STEPS.includes(s)) this.perc(t);
+    if (!breakdown) {
+      const chord = CHORDS[Math.floor(bar / 2) % CHORDS.length];
+      const pattern = RIFF_PATTERNS[Math.floor(bar / 8) % RIFF_PATTERNS.length];
+      const noteIdx = pattern[s];
+      if (noteIdx !== undefined) this.pluck(t, chord[noteIdx] * 2);
+    }
+    if (s === 15) this.bar++;
+  }
+
+  private pluck(t: number, f: number): void {
+    this.tone(t, this.layerRiff, 'triangle', f, null, CONFIG.riffVolume * 2, 0.16, 0.004);
+    this.tone(t, this.layerRiff, 'sine', f * 2, null, CONFIG.riffVolume * 0.7, 0.1, 0.004);
   }
 
   private env(g: GainNode, t: number, peak: number, decay: number, attack = 0.004): void {

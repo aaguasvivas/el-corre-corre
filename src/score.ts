@@ -24,27 +24,10 @@ export interface RunResult {
 export interface NearMissResult {
   pts: number;
   combo: number;
-  ladderText: string | null;
 }
 
-// The slang ladder stays Dominican in both languages. DECISION: it is flavor,
-// not UI copy, and it does not translate.
-const LADDER: ReadonlyArray<readonly [number, string]> = [
-  [2, '¡Eso!'],
-  [3, '¡Duro!'],
-  [5, '¡Diablo!'],
-  [7, "¡Tú ta' loco!"],
-  [10, "¡ETE E' UN LOCO!"],
-  [15, '¡LEYENDA DEL MALECÓN!'],
-];
-
-export function ladderTier(combo: number): string | null {
-  let text: string | null = null;
-  for (const [n, s] of LADDER) {
-    if (combo >= n) text = s;
-  }
-  return text;
-}
+// Ladder thresholds live here; the per-language slang lives in ui.ts.
+export const LADDER_STEPS = [2, 3, 5, 7, 10, 15] as const;
 
 function readInt(key: string): number {
   try {
@@ -89,6 +72,7 @@ export class Score {
 
   private vehicle: VehicleId = 'motor';
   private vehicleScoreMult = 1;
+  private distTier = 1;
   private pointsF = 0;
   private comboTimer = 0;
   private contraVia = false;
@@ -120,11 +104,16 @@ export class Score {
     this.recordDist = readInt(distKey(v));
   }
 
+  get distMult(): number {
+    return this.distTier;
+  }
+
   private mult(): number {
     return (
       (this.contraVia ? CONFIG.contraViaMultiplier : 1) *
       (this.wheelieOn ? CONFIG.wheelieMultiplier : 1) *
-      this.vehicleScoreMult
+      this.vehicleScoreMult *
+      this.distTier
     );
   }
 
@@ -138,6 +127,10 @@ export class Score {
 
   step(ds: number, dt: number, opts: { airborne: boolean; wheelie: boolean }): void {
     this.distance += ds;
+    this.distTier = 1;
+    for (const [m, mult] of CONFIG.distMultTiers) {
+      if (this.distance >= m) this.distTier = mult;
+    }
     this.pointsF += ds * this.mult();
     if (opts.airborne) {
       const a = CONFIG.airtimePointsPerSec * dt * this.mult();
@@ -160,11 +153,7 @@ export class Score {
     this.comboTimer = CONFIG.comboDecaySec;
     const pts = Math.round(CONFIG.nearMissPoints * this.combo * this.mult());
     this.pointsF += pts;
-    let ladderText: string | null = null;
-    for (const [n, s] of LADDER) {
-      if (this.combo === n) ladderText = s;
-    }
-    return { pts, combo: this.combo, ladderText };
+    return { pts, combo: this.combo };
   }
 
   collectPlatano(): number {
@@ -232,6 +221,7 @@ export class Score {
 
   reset(): void {
     this.distance = 0;
+    this.distTier = 1;
     this.pointsF = 0;
     this.platanos = 0;
     this.combo = 0;

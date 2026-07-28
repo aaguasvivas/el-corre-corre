@@ -9,7 +9,7 @@ import { CONFIG, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
 import { Traffic, type ObstacleKind, type PickupKind, type VehicleType } from './traffic';
-import { Score, ladderTier, type RunResult } from './score';
+import { Score, type RunResult } from './score';
 import { UI } from './ui';
 import { AudioEngine } from './audio';
 import { haptics } from './haptics';
@@ -60,6 +60,7 @@ let shakeT = 0;
 let shakeAmp = 0;
 let baseFov: number = CONFIG.fovDesktop;
 let lastRun: RunResult | null = null;
+let shownMult = 1;
 
 function addShake(amp: number): void {
   shakeAmp = Math.max(shakeAmp, amp);
@@ -144,8 +145,9 @@ const traffic = new Traffic(scene, {
     const r = score.nearMiss();
     const s = w2s(x, 1.3, Math.max(z, 1.5));
     ui.popup(`${ui.nextNearMissText()} +${r.pts}`, s.x, s.y, r.combo >= 5 ? 'pop-md' : 'pop-sm');
-    if (r.ladderText) ui.popup(r.ladderText, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
-    ui.setCombo(r.combo, ladderTier(r.combo));
+    const hit = ui.ladderHitText(r.combo);
+    if (hit) ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
+    ui.setCombo(r.combo, ui.ladderTierText(r.combo));
     audio.nearMiss(panOf(x));
     if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
     haptics.light();
@@ -207,7 +209,7 @@ const player = new Player(scene, {
     const pts = score.endWheelie();
     if (pts >= 2) {
       const s = w2s(player.x, 1.6, 2);
-      ui.popup(`¡CABALLITO! +${pts}`, s.x, s.y, 'pop-md pop-gold');
+      ui.popupTrick(pts, s.x, s.y);
     }
   },
   onLand: () => {
@@ -216,7 +218,7 @@ const player = new Player(scene, {
     const pts = score.endAir();
     if (pts >= 3) {
       const s = w2s(player.x, 1.4, 2);
-      ui.popup(`¡AIRE! +${pts}`, s.x, s.y, 'pop-md pop-gold');
+      ui.popupAir(pts, s.x, s.y);
     }
   },
 });
@@ -224,7 +226,7 @@ player.setVehicle(selectedVehicle);
 
 world.onObeliscoPass = () => {
   if (state !== 'playing') return;
-  ui.popup('¡El Obelisco!', 50, 28, 'pop-lg pop-gold');
+  ui.popupObelisco();
   audio.bell();
 };
 
@@ -245,6 +247,7 @@ function startRun(): void {
   tapeBurst = false;
   shakeT = 0;
   shakeAmp = 0;
+  shownMult = 1;
   acc = 0;
   state = 'playing';
   ui.showPlaying(score.record);
@@ -369,15 +372,27 @@ function stepSim(h: number): void {
     playerX: player.x,
     playerY: player.y,
     playerR: player.radius,
+    playerCv: cv,
     live,
     airborne: player.isAirborne,
-    wheelie: player.isWheelie,
+    wheelie: player.clearsGroundHazards,
     magnet: imanT > 0,
   });
 
   if (live) {
     player.step(h, effSpeed);
     score.step(ds, h, { airborne: player.isAirborne, wheelie: player.isWheelie });
+
+    // Score momentum: the run pays more the deeper you get
+    if (score.distMult !== shownMult) {
+      shownMult = score.distMult;
+      ui.setDistMult(shownMult);
+      if (shownMult > 1) {
+        ui.popupMultUp(shownMult);
+        audio.powerup('cafecito');
+        haptics.medium();
+      }
+    }
 
     if (traffic.checkCollision(player.x, 0, player.radius)) {
       if (cafecitoT > 0 || invincibleT > 0) {
@@ -400,7 +415,7 @@ function stepSim(h: number): void {
       if (r <= 0) {
         tapeBurst = true;
         world.burstTape();
-        ui.banner('¡NUEVO RÉCORD!');
+        ui.bannerNewRecord();
         audio.recordBreak();
         haptics.heavy();
       } else {
@@ -517,6 +532,8 @@ requestAnimationFrame(frame);
   selectVehicle: (id: VehicleId) => selectVehicle(id),
   share: () => doShare(),
   fov: () => Math.round(camera.fov * 10) / 10,
+  radius: () => +player.radius.toFixed(3),
+  distMult: () => score.distMult,
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },
@@ -528,6 +545,9 @@ requestAnimationFrame(frame);
   },
   setRecordDist: (m: number) => {
     score.recordDist = m;
+  },
+  setDistance: (m: number) => {
+    score.distance = m;
   },
   spawnPickup: (kind: PickupKind, x: number, z: number, y?: number) =>
     traffic.debugSpawnPickup(kind, x, z, y),

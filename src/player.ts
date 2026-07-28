@@ -83,6 +83,8 @@ export class Player {
   private wheelieT = 0;
   private wheelieCooldownT = 0;
   private wheelieLatch = false; // must release before the next one arms
+  private driftYawVis = 0;
+  private driftSign = 1;
 
   // airtime
   private airborne = false;
@@ -136,12 +138,19 @@ export class Player {
     return this.wheelieActive;
   }
 
+  // Caballitos float over hoyos; el derrape keeps all four wheels down.
+  get clearsGroundHazards(): boolean {
+    return this.wheelieActive && this.vehicle !== 'civic';
+  }
+
   get hasShield(): boolean {
     return this.shielded;
   }
 
   get radius(): number {
-    return CONFIG.playerRadius * VEHICLES[this.vehicle].hitbox;
+    const base = CONFIG.playerRadius * VEHICLES[this.vehicle].hitbox;
+    // Sideways is wide: the drift needs room. That is the trade.
+    return this.vehicle === 'civic' && this.wheelieActive ? base * CONFIG.driftHitboxMult : base;
   }
 
   // ---------------- visuals ----------------
@@ -506,7 +515,10 @@ export class Player {
 
     let authority = 1;
     if (this.wheelieActive) {
-      authority *= lerp(CONFIG.wheelieSteerFactorStart, CONFIG.wheelieSteerFactorEnd, wheelieDecay);
+      authority *=
+        this.vehicle === 'civic'
+          ? CONFIG.driftSteerFactor
+          : lerp(CONFIG.wheelieSteerFactorStart, CONFIG.wheelieSteerFactorEnd, wheelieDecay);
     }
     if (this.charcoT > 0) {
       authority *= CONFIG.charcoSteerFactor;
@@ -544,12 +556,13 @@ export class Player {
       }
     }
 
-    // Tire dust when carving hard
-    if (!this.airborne && Math.abs(this.velX) > CONFIG.dustMinVelX) {
-      this.dustAcc += dt;
+    // Tire dust when carving hard, and constantly while sideways
+    const drifting = this.wheelieActive && this.vehicle === 'civic';
+    if (!this.airborne && (Math.abs(this.velX) > CONFIG.dustMinVelX || drifting)) {
+      this.dustAcc += dt * (drifting ? 1.7 : 1);
       while (this.dustAcc > 0.055) {
         this.dustAcc -= 0.055;
-        this.emit('dust', 1, this.x - Math.sign(this.velX) * 0.3, 0.12, -0.6, 1.2);
+        this.emit('dust', 1, this.x - Math.sign(this.velX || 1) * 0.3, 0.12, drifting ? -1.4 : -0.6, 1.2);
       }
     }
 
@@ -567,18 +580,22 @@ export class Player {
       this.aura.position.y = 0.5 + Math.sin(this.time * 4) * 0.08;
     }
 
-    // Visuals: lean, wheelie pitch, wobble deep in a hold
-    const wobble = this.wheelieActive
-      ? Math.sin(this.time * 13) * CONFIG.wheelieWobble * wheelieDecay
-      : 0;
+    // Visuals: lean, wheelie pitch (bikes) or drift yaw (civic), wobble deep in a hold
+    const wobble =
+      this.wheelieActive && this.vehicle !== 'civic'
+        ? Math.sin(this.time * 13) * CONFIG.wheelieWobble * wheelieDecay
+        : 0;
     const leanTarget = -this.velXNorm * CONFIG.steerLeanMaxDeg * DEG * veh.leanMult;
     this.leanVis += (leanTarget - this.leanVis) * Math.min(1, CONFIG.leanResponse * dt);
     this.leanGroup.rotation.z = this.leanVis + wobble;
-    const wheelieTarget = this.wheelieActive ? this.wheelieAngleMax : 0;
+    const wheelieTarget = this.wheelieActive && this.vehicle !== 'civic' ? this.wheelieAngleMax : 0;
     this.wheelieVis += (wheelieTarget - this.wheelieVis) * Math.min(1, 11 * dt);
     this.leanGroup.rotation.x = -this.wheelieVis;
     this.leanGroup.position.y = Math.sin(this.wheelieVis) * this.wheelieLift;
-    this.root.rotation.y = this.velXNorm * 0.16; // nose points into the carve
+    if (Math.abs(this.velX) > 0.6) this.driftSign = this.velX > 0 ? 1 : -1;
+    const driftTarget = drifting ? this.driftSign * CONFIG.driftYaw : 0;
+    this.driftYawVis += (driftTarget - this.driftYawVis) * Math.min(1, 9 * dt);
+    this.root.rotation.y = this.velXNorm * 0.16 + this.driftYawVis; // nose into the carve, tail out in the derrape
     this.root.position.x = this.x;
     this.root.position.y = this.airY;
 
@@ -696,6 +713,8 @@ export class Player {
     this.wheelieT = 0;
     this.wheelieCooldownT = 0;
     this.wheelieLatch = false;
+    this.driftYawVis = 0;
+    this.driftSign = 1;
     this.airborne = false;
     this.airY = 0;
     this.airVy = 0;

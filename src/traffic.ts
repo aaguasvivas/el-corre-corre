@@ -32,6 +32,7 @@ export interface StepCtx {
   playerX: number;
   playerY: number;
   playerR: number; // collision circle, scaled per vehicle
+  playerCv: boolean; // riding en contra via: oncoming filler starts hunting
   live: boolean; // gameplay interactions only while actually playing
   airborne: boolean;
   wheelie: boolean;
@@ -338,6 +339,8 @@ export class Traffic {
   private time = 0;
   private elapsed = 0;
   private lastSpeed: number = CONFIG.baseSpeed;
+  private lastPlayerX = 0;
+  private lastPlayerCv = false;
   private spawnAcc = 0;
   private activeCount = 0;
 
@@ -688,7 +691,7 @@ export class Traffic {
     } else if (pick === 'oncomingSwarm') {
       const z0 = this.oncBase();
       let lane = Math.random() < 0.5 ? 2 : 3;
-      const n = Math.random() < 0.4 ? 5 : 4;
+      const n = this.elapsed > 60 ? 5 + (Math.random() < 0.5 ? 1 : 0) : Math.random() < 0.4 ? 5 : 4;
       const spacing = rand(14, 19);
       for (let i = 0; i < n; i++) {
         const type: VehicleType =
@@ -730,7 +733,7 @@ export class Traffic {
 
   private spawnFiller(): void {
     const allowOncoming = this.elapsed >= CONFIG.oncomingUnlockSec;
-    const dir: 1 | -1 = allowOncoming && Math.random() < 0.46 ? -1 : 1;
+    const dir: 1 | -1 = allowOncoming && Math.random() < CONFIG.oncomingShare ? -1 : 1;
     const w = CONFIG.vehicleWeights;
     const opts: Array<readonly [VehicleType, number]> = [
       ['sedan', w.sedan],
@@ -742,7 +745,11 @@ export class Traffic {
     if (dir === 1 && this.elapsed > CONFIG.civicUnlockSec) opts.push(['civic', w.civic]);
     const type = pickWeighted(opts);
     const lanes: [number, number] = dir === 1 ? [0, 1] : [2, 3];
-    const first = Math.random() < 0.5 ? 0 : 1;
+    let first = Math.random() < 0.5 ? 0 : 1;
+    // En contra via, the road answers: oncoming filler aims for your lane.
+    if (dir === -1 && this.lastPlayerCv && Math.random() < CONFIG.cvTargetBias) {
+      first = this.lastPlayerX < ROAD.laneCenters[2] + CONFIG.laneWidth / 2 ? 0 : 1;
+    }
     const range = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
     const z = type === 'civic'
       ? 80 + rand(0, 25) // slow closing speed: let the civic enter through the fog sooner
@@ -759,6 +766,8 @@ export class Traffic {
     this.time += dt;
     this.elapsed = elapsed;
     this.lastSpeed = ctx.speed;
+    this.lastPlayerX = ctx.playerX;
+    this.lastPlayerCv = ctx.playerCv;
 
     const blinkOn = this.time % 0.9 < 0.45;
 

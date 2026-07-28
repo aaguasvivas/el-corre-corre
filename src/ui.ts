@@ -3,7 +3,7 @@
 // both languages.
 
 import { VEHICLES, type VehicleId } from './config';
-import type { RunResult } from './score';
+import { LADDER_STEPS, type RunResult } from './score';
 
 type Lang = 'es' | 'en';
 const LANG_KEY = 'ecc.v1.lang';
@@ -29,6 +29,16 @@ const STRINGS = {
     inVehicle: (v: string) => `en ${v} por el Malecón`,
     shareAsk: '¿Me lo puedes ganar?',
     gameOverTitles: ['¡Te dieron, loco!', '¡Diablo!', '¡Eso tuvo feo!'],
+    cvPill: '¡EN CONTRA VÍA! ×2',
+    trickPillBike: '¡CABALLITO! ×1.5',
+    trickPillCar: '¡DERRAPE! ×1.5',
+    trickBike: '¡CABALLITO!',
+    trickCar: '¡DERRAPE!',
+    air: '¡AIRE!',
+    obelisco: '¡El Obelisco!',
+    multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
+    nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
+    ladder: ['¡Eso!', '¡Duro!', '¡Diablo!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
   },
   en: {
     subtitle: "Let's go, we're late!",
@@ -48,11 +58,19 @@ const STRINGS = {
     closeCall: (n: number) => `Only ${n} short!`,
     inVehicle: (v: string) => `on ${v} down the Malecón`,
     shareAsk: 'Can you beat it?',
-    gameOverTitles: ['They got you!', '¡Diablo!', 'That was ugly!'],
+    gameOverTitles: ['They got you!', 'Wipeout!', 'That was ugly!'],
+    cvPill: 'WRONG WAY! ×2',
+    trickPillBike: 'WHEELIE! ×1.5',
+    trickPillCar: 'DRIFT! ×1.5',
+    trickBike: 'WHEELIE!',
+    trickCar: 'DRIFT!',
+    air: 'AIR!',
+    obelisco: 'The Obelisco!',
+    multUp: (n: number) => `MULTIPLIER ×${n}!`,
+    nearMiss: ['So close!', 'By a hair!'],
+    ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
   },
 } as const;
-
-const NEAR_MISS_TEXTS = ['¡Cerquita!', '¡Por un pelito!'] as const;
 const VEHICLE_IDS: VehicleId[] = ['pasola', 'motor', 'civic'];
 
 const BANANA_SVG =
@@ -107,6 +125,7 @@ export class UI {
   private platShown = -1;
   private cvShown = false;
   private cabShown = false;
+  private multShown = 1;
   private nearMissIdx = 0;
   private popupIdx = 0;
   private lastPopupAt = 0;
@@ -125,6 +144,7 @@ export class UI {
   private cvEl: HTMLElement;
   private cabEl: HTMLElement;
   private platEl: HTMLElement;
+  private multEl: HTMLElement;
   private hudRecordEl: HTMLElement;
   private subtitleEl: HTMLElement;
   private promptEl: HTMLElement;
@@ -162,6 +182,7 @@ export class UI {
         <div id="hud-left">
           <button id="hud-pause" type="button" aria-label="Pausa"><i></i><i></i></button>
           <div id="hud-platanos">${BANANA_SVG}<span id="plat-n">0</span></div>
+          <div id="hud-mult" class="hidden">×2</div>
         </div>
       </div>
       <div id="popup-layer"></div>
@@ -221,6 +242,7 @@ export class UI {
     this.cvEl = q('#hud-cv');
     this.cabEl = q('#hud-cab');
     this.platEl = q('#plat-n');
+    this.multEl = q('#hud-mult');
     this.hudRecordEl = q('#hud-record');
     this.subtitleEl = q('#subtitle');
     this.promptEl = q('#prompt');
@@ -308,6 +330,9 @@ export class UI {
     const t = this.t();
     document.documentElement.lang = this.lang;
     this.langBtn.textContent = this.lang === 'es' ? 'EN' : 'ES';
+    this.cvEl.textContent = t.cvPill;
+    this.cabEl.textContent =
+      this.selectedVehicle === 'civic' ? t.trickPillCar : t.trickPillBike;
     this.subtitleEl.textContent = t.subtitle;
     this.promptEl.textContent = window.matchMedia('(pointer: coarse)').matches
       ? t.startTouch
@@ -335,6 +360,7 @@ export class UI {
   updateVehicles(selected: VehicleId, records: Record<VehicleId, number>): void {
     this.selectedVehicle = selected;
     const t = this.t();
+    this.cabEl.textContent = selected === 'civic' ? t.trickPillCar : t.trickPillBike;
     for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
       const id = card.dataset.v as VehicleId;
       card.classList.toggle('sel', id === selected);
@@ -365,6 +391,8 @@ export class UI {
     this.setPlatanos(0);
     this.setContraVia(false);
     this.setCaballito(false);
+    this.multShown = 1;
+    this.multEl.classList.add('hidden');
     for (const p of this.popups) p.classList.remove('go');
     this.hud.classList.remove('hidden');
     this.title.classList.add('hidden');
@@ -445,9 +473,55 @@ export class UI {
     this.muteBtn.classList.toggle('muted', m);
   }
 
+  setDistMult(n: number): void {
+    if (n === this.multShown) return;
+    this.multShown = n;
+    this.multEl.classList.toggle('hidden', n < 2);
+    this.multEl.textContent = `×${n}`;
+    this.multEl.classList.remove('bump');
+    void this.multEl.offsetWidth;
+    this.multEl.classList.add('bump');
+  }
+
   nextNearMissText(): string {
-    this.nearMissIdx = (this.nearMissIdx + 1) % NEAR_MISS_TEXTS.length;
-    return NEAR_MISS_TEXTS[this.nearMissIdx];
+    const texts = this.t().nearMiss;
+    this.nearMissIdx = (this.nearMissIdx + 1) % texts.length;
+    return texts[this.nearMissIdx];
+  }
+
+  ladderHitText(combo: number): string | null {
+    const idx = LADDER_STEPS.indexOf(combo as (typeof LADDER_STEPS)[number]);
+    return idx >= 0 ? this.t().ladder[idx] : null;
+  }
+
+  ladderTierText(combo: number): string | null {
+    let text: string | null = null;
+    LADDER_STEPS.forEach((n, i) => {
+      if (combo >= n) text = this.t().ladder[i];
+    });
+    return text;
+  }
+
+  popupTrick(pts: number, x: number, y: number): void {
+    const t = this.t();
+    const name = this.selectedVehicle === 'civic' ? t.trickCar : t.trickBike;
+    this.popup(`${name} +${pts}`, x, y, 'pop-md pop-gold');
+  }
+
+  popupAir(pts: number, x: number, y: number): void {
+    this.popup(`${this.t().air} +${pts}`, x, y, 'pop-md pop-gold');
+  }
+
+  popupObelisco(): void {
+    this.popup(this.t().obelisco, 50, 28, 'pop-lg pop-gold');
+  }
+
+  popupMultUp(n: number): void {
+    this.popup(this.t().multUp(n), 50, 40, 'pop-lg pop-gold');
+  }
+
+  bannerNewRecord(): void {
+    this.banner(this.t().newRecord);
   }
 
   popup(text: string, xPct: number, yPct: number, cls: string): void {

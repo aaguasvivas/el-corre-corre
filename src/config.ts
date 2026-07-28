@@ -61,17 +61,18 @@ export interface VehicleDef {
   stats: { vel: number; man: number; agu: number }; // 1..5 display bars
 }
 
+// Stat gaps widened after the second feel test ("should be more noticeable").
 export const VEHICLES: Record<VehicleId, VehicleDef> = {
   pasola: {
     name: 'LA PASOLA',
     tagline: 'Chiquita pero cumplidora.',
-    speedCap: 36,
+    speedCap: 34,
     speedMult: 1,
     scoreMult: 1,
-    hitbox: 0.75,
-    accelMult: 1.18,
-    dampMult: 1.08,
-    latMaxMult: 1.08,
+    hitbox: 0.7,
+    accelMult: 1.3,
+    dampMult: 1.05,
+    latMaxMult: 1.15,
     leanMult: 1.1,
     stats: { vel: 2, man: 5, agu: 3 },
   },
@@ -92,12 +93,12 @@ export const VEHICLES: Record<VehicleId, VehicleDef> = {
     name: 'EL CIVIC TUNEAO',
     tagline: 'Que se oiga.',
     speedCap: 42,
-    speedMult: 1.15,
-    scoreMult: 1.15,
+    speedMult: 1.22,
+    scoreMult: 1.22,
     hitbox: 1.4,
-    accelMult: 0.8,
+    accelMult: 0.7,
     dampMult: 0.85,
-    latMaxMult: 0.95,
+    latMaxMult: 0.9,
     leanMult: 0.3,
     stats: { vel: 5, man: 2, agu: 4 },
   },
@@ -108,10 +109,10 @@ export const CONFIG = {
   fixedDt: 1 / 120, // fixed sim step; feel is framerate-independent
   maxFrameDt: 0.1, // clamp huge frame gaps (tab switches) so nothing teleports
 
-  // Forward motion. Ramp steepened after the Phase 4 feel test ("too easy").
+  // Forward motion. Ramp steepened twice by feel test ("speed IS the fun").
   baseSpeed: 18,
   maxSpeed: 42,
-  speedRampPerSec: 0.105, // FEEL: how fast a run escalates; linear m/s gained per second
+  speedRampPerSec: 0.12, // FEEL: how fast a run escalates; linear m/s gained per second
 
   // Steering. FEEL: drifty-smooth, not twitchy. Signed off in the Phase 1 test.
   lateralMaxSpeed: 9, // FEEL: top carving speed across the road
@@ -151,19 +152,23 @@ export const CONFIG = {
   telegraphMinSec: 1.5, // sacred: min seconds between a threat appearing and reaching you
   trafficDensityStart: 0.5,
   trafficDensityMax: 1.0,
-  densityRampSec: 85,
-  gentleStartSec: 10,
-  spawnsPerSecAtFull: 1.5, // FEEL: filler spawn attempts per second at full density
+  densityRampSec: 70,
+  gentleStartSec: 9,
+  spawnsPerSecAtFull: 1.7, // FEEL: filler spawn attempts per second at full density
   gentleSpawnFactor: 0.55, // FEEL: spawn rate multiplier during the gentle window
   oncomingUnlockSec: 6, // DECISION: no oncoming traffic in the very first seconds of a run
-  trafficMaxActive: 24, // FEEL: hard cap of vehicles on the road at once
+  trafficMaxActive: 27, // FEEL: hard cap of vehicles on the road at once
+  oncomingShare: 0.5, // FEEL: fraction of filler spawns that come at you
+  // Contra via must be RISKIER than your own lane, not emptier. While you ride
+  // the wrong way, oncoming filler aims for the lane you are actually in.
+  cvTargetBias: 0.65, // FEEL: chance a CV-time oncoming spawn picks your lane
   sameLaneGapM: 16, // min same-lane spacing at spawn; keeps convoys threadable
   antiWallWindowM: 14, // z window in which all 4 lanes must never be occupied at once
   fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
 
   // Wave patterns
-  patternIntervalMin: 3.2, // FEEL: seconds between authored waves (scaled by density)
-  patternIntervalMax: 5.6,
+  patternIntervalMin: 2.8, // FEEL: seconds between authored waves (scaled by density)
+  patternIntervalMax: 5.0,
 
   // Traffic speeds (m/s) per archetype: [min, max]
   vehicleSpeeds: {
@@ -171,7 +176,7 @@ export const CONFIG = {
     guagua: [8, 11],
     camion: [8, 10],
     civic: [15, 17], // fast enough to be a rolling chicane, still slower than you
-    motoconcho: [10, 13],
+    motoconcho: [10, 14],
   },
   // FEEL: relative spawn weights for filler traffic
   vehicleWeights: { sedan: 32, motoconcho: 22, guagua: 16, camion: 12, civic: 18 },
@@ -203,6 +208,19 @@ export const CONFIG = {
   wheeliePointsPerSec: 5,
   swipeUpPx: 48, // FEEL: upward swipe distance that starts a caballito
   swipeDownPx: 42, // FEEL: downward swipe that drops it early
+  // El derrape: the Civic cannot wheelie, so its trick is a held drift. Same
+  // multiplier, different risk: the car goes sideways and needs more room.
+  driftHitboxMult: 1.35, // FEEL: collision circle grows this much mid-drift
+  driftSteerFactor: 0.8, // FEEL: steering authority while sideways
+  driftYaw: 0.5, // how far the car angles, radians
+
+  // Score momentum: surviving deep multiplies EVERYTHING. The record chase is
+  // about depth, not grinding. [meters, multiplier]
+  distMultTiers: [
+    [500, 2],
+    [1200, 3],
+    [2200, 4],
+  ], // FEEL: when the run starts printing points
 
   // Airtime
   airtimePointsPerSec: 15,
@@ -275,6 +293,7 @@ export const CONFIG = {
   comboHatsAt: 3, // hats swell in at this combo
   comboBassAt: 5, // bass pulse joins at this combo
   hornEvery: [7, 16], // FEEL: seconds between ambient bocinazos
+  riffVolume: 0.15, // FEEL: the melodic pluck riding over the dembow
 } as const;
 
 // Derived road geometry, shared everywhere

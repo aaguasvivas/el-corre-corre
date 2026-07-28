@@ -411,6 +411,20 @@ body {
   animation: bump 0.25s ease;
 }
 
+#hud-mult {
+  background: var(--sun);
+  color: var(--blue);
+  border-radius: 999px;
+  padding: 4px 13px;
+  font-size: 17px;
+  letter-spacing: 1px;
+  box-shadow: 0 3px 0 rgba(0, 45, 98, 0.3);
+}
+
+#hud-mult.bump {
+  animation: bump 0.3s ease;
+}
+
 @keyframes bump {
   40% {
     transform: scale(1.25);
