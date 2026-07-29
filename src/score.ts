@@ -210,11 +210,18 @@ export class Score {
     };
   }
 
-  // Defensive save (e.g. app backgrounded mid-run).
+  // Defensive save (e.g. app backgrounded mid-run, or quitting from PAUSE).
+  // Mirrors finishRun on BOTH records: banking points without the distance
+  // would leave La Cinta del Récord stranded at an older distance than the
+  // Récord the player is being shown.
   persist(): void {
     if (this.points > this.record) {
       this.record = this.points;
       writeInt(recordKey(this.vehicle), this.record);
+    }
+    if (this.distance > this.recordDist) {
+      this.recordDist = Math.floor(this.distance);
+      writeInt(distKey(this.vehicle), this.recordDist);
     }
     writeInt(PLATANOS_KEY, this.platanosLifetime);
   }

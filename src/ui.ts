@@ -177,6 +177,7 @@ export class UI {
   private muteBtn: HTMLElement;
   private mutePauseBtn: HTMLElement;
   private pauseBtn: HTMLElement;
+  private lastRecords: Record<VehicleId, number> | null = null;
   private goTitleEl: HTMLElement;
   private goBadge: HTMLElement;
   private goClose: HTMLElement;
@@ -420,10 +421,20 @@ export class UI {
     if (this.lastResult) {
       this.goTitleEl.textContent = t.gameOverTitles[this.goTitleIdx];
     }
+    // Relabel the card records directly rather than calling updateVehicles:
+    // that also rewrites ctrlTrickEl, which this method has just set.
+    if (this.lastRecords) {
+      for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
+        const id = card.dataset.v as VehicleId;
+        const rec = card.querySelector<HTMLElement>(`[data-rec="${id}"]`);
+        if (rec) rec.textContent = this.lastRecords[id] > 0 ? `${t.record} ${this.lastRecords[id]}` : '·';
+      }
+    }
   }
 
   updateVehicles(selected: VehicleId, records: Record<VehicleId, number>): void {
     this.selectedVehicle = selected;
+    this.lastRecords = records;
     const t = this.t();
     this.cabEl.textContent = selected === 'civic' ? t.trickPillCar : t.trickPillBike;
     const trick = selected === 'civic' ? t.trickCar : t.trickBike;
@@ -601,10 +612,17 @@ export class UI {
     const el = this.popups[this.popupIdx];
     this.popupIdx = (this.popupIdx + 1) % POPUP_POOL;
     el.className = `popup ${cls}`;
-    el.style.left = `${clampPct(xPct, 8, 92)}%`;
-    el.style.top = `${clampPct(yPct - this.popupBurst * 6, 10, 80)}%`;
     el.textContent = text;
+    el.style.left = '50%';
+    el.style.top = `${clampPct(yPct - this.popupBurst * 6, 10, 80)}%`;
+    // This reflow already had to happen to restart the animation, so reading
+    // the width here is free. A popup is centred on its x, so a wide one
+    // fired near the kerb used to hang off the screen: pull it in by its own
+    // half width instead of a fixed 8% guess, and leave narrow ones where the
+    // event actually happened.
     void el.offsetWidth;
+    const halfPct = ((el.offsetWidth / 2 + 8) / window.innerWidth) * 100;
+    el.style.left = `${clampPct(xPct, Math.min(halfPct, 50), Math.max(100 - halfPct, 50))}%`;
     el.classList.add('go');
   }
 

@@ -117,8 +117,10 @@ function selectVehicle(id: VehicleId): void {
 
 function goToMenu(): void {
   if (state !== 'gameover' && state !== 'paused') return;
+  // Quitting from PAUSE abandons a live run, so bank it before wiping it.
+  score.persist();
   state = 'title';
-  player.reset();
+  resetRunState();
   ui.showTitle(score.record);
   ui.updateVehicles(selectedVehicle, vehicleRecords());
   audio.click();
@@ -231,9 +233,10 @@ world.onObeliscoPass = () => {
   audio.bell();
 };
 
-function startRun(): void {
-  if (state !== 'title' && state !== 'gameover') return;
-  score.reset();
+// Everything scoped to a single run. Both starting a run and abandoning one
+// back to the title go through here, otherwise the dead run's cars, hoyos and
+// plátanos sit frozen on the scrolling title screen.
+function resetRunState(): void {
   traffic.reset();
   player.reset();
   speed = CONFIG.baseSpeed;
@@ -250,6 +253,12 @@ function startRun(): void {
   shakeAmp = 0;
   shownMult = 1;
   acc = 0;
+}
+
+function startRun(): void {
+  if (state !== 'title' && state !== 'gameover') return;
+  score.reset();
+  resetRunState();
   state = 'playing';
   ui.showPlaying(score.record);
   audio.startRun();
