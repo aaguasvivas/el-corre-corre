@@ -137,6 +137,17 @@ function clampPct(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+// Every card is a different run, so every card needs a different filename.
+// A fixed name meant each save silently replaced the last one. Score first so
+// the folder sorts by how good the run was, then a stamp to keep ties apart,
+// and a -record marker so the ones worth keeping are obvious at a glance.
+function shareFileName(r: RunResult): string {
+  const d = new Date();
+  const p = (n: number): string => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  return `el-corre-corre-${r.points}pts${r.isNewRecord ? '-record' : ''}-${stamp}.png`;
+}
+
 function statBars(): string {
   return VEHICLE_IDS.map((id) => {
     const v = VEHICLES[id];
@@ -796,7 +807,8 @@ export class UI {
 
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
     if (!blob) return;
-    const file = new File([blob], 'el-corre-corre.png', { type: 'image/png' });
+    const name = shareFileName(r);
+    const file = new File([blob], name, { type: 'image/png' });
     const text = `${t.shareText(r.points)} ${t.shareAsk}`;
     let canFiles = false;
     try {
@@ -817,7 +829,7 @@ export class UI {
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'el-corre-corre.png';
+    a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
