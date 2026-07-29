@@ -13,6 +13,7 @@ import { Score, type RunResult } from './score';
 import { UI } from './ui';
 import { AudioEngine } from './audio';
 import { haptics } from './haptics';
+import { submitScore } from './leaderboard';
 
 type GameState = 'title' | 'playing' | 'paused' | 'crashing' | 'gameover';
 
@@ -467,6 +468,7 @@ function advance(dt: number, now: number): void {
       state = 'gameover';
       gameOverAt = now;
       lastRun = score.finishRun();
+      submitScore(lastRun.points, selectedVehicle);
       ui.showGameOver(lastRun);
     }
   } else if (state !== 'paused' && state !== 'gameover') {

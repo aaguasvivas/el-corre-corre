@@ -14,6 +14,10 @@ const STRINGS = {
     subtitle: '¡Dale, que vamo’ tarde!',
     startTouch: "TOCA PA' EMPEZAR",
     startKey: 'DALE A ESPACIO',
+    ctrlSteerTouch: 'Arrastra pa’ esquivar',
+    ctrlSteerKey: 'A / D pa’ esquivar',
+    ctrlTrickTouch: (trick: string) => `Desliza arriba y aguanta: ${trick}`,
+    ctrlTrickKey: (trick: string) => `Aguanta W: ${trick}`,
     record: 'Récord',
     points: 'Puntos',
     distance: 'Distancia',
@@ -44,6 +48,10 @@ const STRINGS = {
     subtitle: "Let's go, we're late!",
     startTouch: 'TAP TO START',
     startKey: 'PRESS SPACE',
+    ctrlSteerTouch: 'Drag to weave',
+    ctrlSteerKey: 'A / D to weave',
+    ctrlTrickTouch: (trick: string) => `Swipe up and hold: ${trick}`,
+    ctrlTrickKey: (trick: string) => `Hold W: ${trick}`,
     record: 'Best',
     points: 'Points',
     distance: 'Distance',
@@ -148,6 +156,13 @@ export class UI {
   private hudRecordEl: HTMLElement;
   private subtitleEl: HTMLElement;
   private promptEl: HTMLElement;
+  private ctrlSteerEl: HTMLElement;
+  private ctrlTrickEl: HTMLElement;
+  // Which controls to advertise. Seeded from the device, then corrected by
+  // whatever the player actually touches first: a phone has no space bar.
+  private inputMode: 'touch' | 'key' = window.matchMedia('(pointer: coarse)').matches
+    ? 'touch'
+    : 'key';
   private titleRecordEl: HTMLElement;
   private langBtn: HTMLElement;
   private muteBtn: HTMLElement;
@@ -201,6 +216,10 @@ export class UI {
         <div id="subtitle" class="subtitle"></div>
         <div id="vrow" class="vrow">${statBars()}</div>
         <div id="prompt" class="prompt"></div>
+        <div id="controls" class="controls">
+          <span id="ctrl-steer"></span>
+          <span id="ctrl-trick"></span>
+        </div>
         <div id="title-record" class="title-record"></div>
       </div>
       <div id="gameover" class="screen hidden">
@@ -246,6 +265,8 @@ export class UI {
     this.hudRecordEl = q('#hud-record');
     this.subtitleEl = q('#subtitle');
     this.promptEl = q('#prompt');
+    this.ctrlSteerEl = q('#ctrl-steer');
+    this.ctrlTrickEl = q('#ctrl-trick');
     this.titleRecordEl = q('#title-record');
     this.langBtn = q('#lang');
     this.muteBtn = q('#mute');
@@ -274,6 +295,17 @@ export class UI {
       layer.appendChild(el);
       this.popups.push(el);
     }
+
+    // Two listeners for the life of the page: keep the on-screen hints honest
+    // on hybrid devices (iPad with a keyboard, touch laptops).
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType === 'touch') this.setInputMode('touch');
+      },
+      { capture: true, passive: true },
+    );
+    window.addEventListener('keydown', () => this.setInputMode('key'), { capture: true });
 
     this.title.addEventListener('pointerdown', () => this.cb.onStart());
     this.langBtn.addEventListener('pointerdown', (e) => {
@@ -316,6 +348,12 @@ export class UI {
     return STRINGS[this.lang];
   }
 
+  private setInputMode(mode: 'touch' | 'key'): void {
+    if (this.inputMode === mode) return;
+    this.inputMode = mode;
+    this.applyLang();
+  }
+
   private toggleLang(): void {
     this.lang = this.lang === 'es' ? 'en' : 'es';
     try {
@@ -334,9 +372,11 @@ export class UI {
     this.cabEl.textContent =
       this.selectedVehicle === 'civic' ? t.trickPillCar : t.trickPillBike;
     this.subtitleEl.textContent = t.subtitle;
-    this.promptEl.textContent = window.matchMedia('(pointer: coarse)').matches
-      ? t.startTouch
-      : t.startKey;
+    const touch = this.inputMode === 'touch';
+    this.promptEl.textContent = touch ? t.startTouch : t.startKey;
+    const trick = this.selectedVehicle === 'civic' ? t.trickCar : t.trickBike;
+    this.ctrlSteerEl.textContent = touch ? t.ctrlSteerTouch : t.ctrlSteerKey;
+    this.ctrlTrickEl.textContent = touch ? t.ctrlTrickTouch(trick) : t.ctrlTrickKey(trick);
     this.titleRecordEl.textContent =
       this.lastRecord > 0 ? `${t.record}: ${this.lastRecord}` : '';
     this.hudRecordEl.textContent =
@@ -361,6 +401,9 @@ export class UI {
     this.selectedVehicle = selected;
     const t = this.t();
     this.cabEl.textContent = selected === 'civic' ? t.trickPillCar : t.trickPillBike;
+    const trick = selected === 'civic' ? t.trickCar : t.trickBike;
+    this.ctrlTrickEl.textContent =
+      this.inputMode === 'touch' ? t.ctrlTrickTouch(trick) : t.ctrlTrickKey(trick);
     for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
       const id = card.dataset.v as VehicleId;
       card.classList.toggle('sel', id === selected);

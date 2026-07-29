@@ -720,6 +720,101 @@ class Belt {
 // Critters: never collidable, pure ambience
 // ---------------------------------------------------------------------------
 
+// Critters share one vertex-colored toon material and one merged geometry each,
+// so a pelican costs one draw call instead of seven.
+let _critterMat: THREE.MeshToonMaterial | null = null;
+function critterMaterial(): THREE.MeshToonMaterial {
+  if (!_critterMat) {
+    _critterMat = worldMaterial(
+      new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() }),
+    );
+  }
+  return _critterMat;
+}
+
+// Unlit + double-sided: kite sails and bows read as flat paper against the sky.
+let _kiteMat: THREE.MeshBasicMaterial | null = null;
+function kiteMaterial(): THREE.MeshBasicMaterial {
+  if (!_kiteMat) {
+    _kiteMat = worldMaterial(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  }
+  return _kiteMat;
+}
+
+let _dogGeo: THREE.BufferGeometry | null = null;
+function dogGeometry(): THREE.BufferGeometry {
+  if (_dogGeo) return _dogGeo;
+  const parts: THREE.BufferGeometry[] = [];
+  const tan = PALETTE.dogTan;
+  cbox(parts, 0.26, 0.26, 0.62, 0, 0.42, 0, tan); // body
+  cbox(parts, 0.22, 0.2, 0.24, 0, 0.62, 0.38, tan); // head
+  cbox(parts, 0.1, 0.09, 0.16, 0, 0.56, 0.54, PALETTE.darkParts); // snout
+  cbox(parts, 0.05, 0.12, 0.08, -0.07, 0.75, 0.38, tan);
+  cbox(parts, 0.05, 0.12, 0.08, 0.07, 0.75, 0.38, tan);
+  for (const sx of [-0.09, 0.09]) {
+    for (const sz of [-0.22, 0.22]) cbox(parts, 0.07, 0.3, 0.07, sx, 0.15, sz, tan);
+  }
+  _dogGeo = mergeGeometries(parts)!;
+  return _dogGeo;
+}
+
+let _dogTailGeo: THREE.BufferGeometry | null = null;
+function dogTailGeometry(): THREE.BufferGeometry {
+  if (!_dogTailGeo) _dogTailGeo = paint(new THREE.BoxGeometry(0.05, 0.05, 0.3), PALETTE.dogTan);
+  return _dogTailGeo;
+}
+
+let _pelicanGeo: THREE.BufferGeometry | null = null;
+function pelicanGeometry(): THREE.BufferGeometry {
+  if (_pelicanGeo) return _pelicanGeo;
+  const parts: THREE.BufferGeometry[] = [];
+  const cream = 0xf4ede0;
+  cbox(parts, 0.3, 0.22, 0.6, 0, 0, 0, cream); // body
+  cbox(parts, 0.18, 0.18, 0.2, 0, 0.14, 0.32, cream); // head
+  cbox(parts, 0.07, 0.07, 0.42, 0, 0.08, 0.55, 0xe8b04b); // beak
+  cbox(parts, 1.05, 0.04, 0.34, -0.6, 0.12, 0, cream, 0, 0, 0.22);
+  cbox(parts, 1.05, 0.04, 0.34, 0.6, 0.12, 0, cream, 0, 0, -0.22);
+  cbox(parts, 0.3, 0.04, 0.34, -1.2, 0.26, 0, PALETTE.darkParts, 0, 0, 0.32);
+  cbox(parts, 0.3, 0.04, 0.34, 1.2, 0.26, 0, PALETTE.darkParts, 0, 0, -0.32);
+  _pelicanGeo = mergeGeometries(parts)!;
+  return _pelicanGeo;
+}
+
+let _kidsGeo: THREE.BufferGeometry | null = null;
+function kidsGeometry(): THREE.BufferGeometry {
+  if (_kidsGeo) return _kidsGeo;
+  const parts: THREE.BufferGeometry[] = [];
+  const kid = (h: number, shirt: number, x: number, z: number): void => {
+    cbox(parts, 0.26, h, 0.2, x, h / 2 + 0.3, z, shirt);
+    cgeo(parts, new THREE.SphereGeometry(0.12, 8, 6), PALETTE.skin, x, h + 0.45, z);
+  };
+  kid(0.5, 0xffd3b6, 0, 0);
+  kid(0.4, 0xb3d9ff, 0.45, 0.2);
+  _kidsGeo = mergeGeometries(parts)!;
+  return _kidsGeo;
+}
+
+// The kite carries its owner's color, so it is the one critter geometry that is
+// built per instance (there are exactly two).
+function kiteGeometry(kiteColor: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const sail = new THREE.PlaneGeometry(0.95, 0.95);
+  sail.rotateZ(Math.PI / 4);
+  parts.push(paint(sail, kiteColor));
+  cbox(parts, 1.3, 0.03, 0.03, 0, 0, 0, PALETTE.darkParts); // spar
+  for (let i = 0; i < 3; i++) {
+    cgeo(
+      parts,
+      new THREE.PlaneGeometry(0.16, 0.1),
+      i % 2 ? PALETTE.flagWhite : PALETTE.flagBlue,
+      0.18 * (i % 2 ? 1 : -1) * 0.4,
+      -0.75 - i * 0.28,
+      0,
+    );
+  }
+  return mergeGeometries(parts)!;
+}
+
 class Viralata {
   group = new THREE.Group();
   private tail: THREE.Mesh;
@@ -728,24 +823,12 @@ class Viralata {
   private nextAt = rand(10, 18);
 
   constructor(scene: THREE.Scene) {
-    const tan = toonMaterial(PALETTE.dogTan);
-    const dark = toonMaterial(PALETTE.darkParts);
-    const add = (w: number, h: number, d: number, x: number, y: number, z: number, mat = tan): THREE.Mesh => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, y, z);
-      this.group.add(m);
-      return m;
-    };
-    const body = add(0.26, 0.26, 0.62, 0, 0.42, 0);
+    const mat = critterMaterial();
+    const body = new THREE.Mesh(dogGeometry(), mat);
     body.castShadow = true;
-    add(0.22, 0.2, 0.24, 0, 0.62, 0.38);
-    add(0.1, 0.09, 0.16, 0, 0.56, 0.54, dark); // snout
-    add(0.05, 0.12, 0.08, -0.07, 0.75, 0.38);
-    add(0.05, 0.12, 0.08, 0.07, 0.75, 0.38);
-    for (const sx of [-0.09, 0.09]) {
-      for (const sz of [-0.22, 0.22]) add(0.07, 0.3, 0.07, sx, 0.15, sz);
-    }
-    this.tail = add(0.05, 0.05, 0.3, 0, 0.52, -0.42);
+    this.tail = new THREE.Mesh(dogTailGeometry(), mat);
+    this.tail.position.set(0, 0.52, -0.42);
+    this.group.add(body, this.tail);
     this.group.visible = false;
     // faces the road: rotated so +z of the group points toward +x (the road)
     this.group.rotation.y = -Math.PI / 2;
@@ -811,44 +894,15 @@ class Viralata {
 
 class Chichigua {
   group = new THREE.Group();
-  private kite = new THREE.Group();
+  private kite: THREE.Mesh;
   private line: THREE.Line;
   private linePos: THREE.BufferAttribute;
   private phase = Math.random() * 7;
   private t = 0;
 
   constructor(scene: THREE.Scene, kiteColor: number) {
-    const skin = toonMaterial(PALETTE.skin);
-    const kid = (h: number, shirt: number, x: number, z: number): void => {
-      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.26, h, 0.2), toonMaterial(shirt));
-      torso.position.set(x, h / 2 + 0.3, z);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), skin);
-      head.position.set(x, h + 0.45, z);
-      this.group.add(torso, head);
-    };
-    kid(0.5, 0xffd3b6, 0, 0);
-    kid(0.4, 0xb3d9ff, 0.45, 0.2);
-
-    const sail = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.95, 0.95),
-      worldMaterial(new THREE.MeshBasicMaterial({ color: kiteColor, side: THREE.DoubleSide })),
-    );
-    sail.rotation.z = Math.PI / 4;
-    const spar = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.03, 0.03), toonMaterial(PALETTE.darkParts));
-    for (let i = 0; i < 3; i++) {
-      const bow = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.16, 0.1),
-        worldMaterial(
-          new THREE.MeshBasicMaterial({
-            color: i % 2 ? PALETTE.flagWhite : PALETTE.flagBlue,
-            side: THREE.DoubleSide,
-          }),
-        ),
-      );
-      bow.position.set(0.18 * (i % 2 ? 1 : -1) * 0.4, -0.75 - i * 0.28, 0);
-      this.kite.add(bow);
-    }
-    this.kite.add(sail, spar);
+    this.group.add(new THREE.Mesh(kidsGeometry(), critterMaterial()));
+    this.kite = new THREE.Mesh(kiteGeometry(kiteColor), kiteMaterial());
     this.group.add(this.kite);
 
     const lineGeo = new THREE.BufferGeometry();
@@ -890,20 +944,7 @@ class Pelican {
   private t = 0;
 
   constructor(scene: THREE.Scene) {
-    const cream = toonMaterial(0xf4ede0);
-    const add = (w: number, h: number, d: number, x: number, y: number, z: number, mat = cream, rz = 0): void => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, y, z);
-      m.rotation.z = rz;
-      this.group.add(m);
-    };
-    add(0.3, 0.22, 0.6, 0, 0, 0);
-    add(0.18, 0.18, 0.2, 0, 0.14, 0.32);
-    add(0.07, 0.07, 0.42, 0, 0.08, 0.55, toonMaterial(0xe8b04b));
-    add(1.05, 0.04, 0.34, -0.6, 0.12, 0, cream, 0.22);
-    add(1.05, 0.04, 0.34, 0.6, 0.12, 0, cream, -0.22);
-    add(0.3, 0.04, 0.34, -1.2, 0.26, 0, toonMaterial(PALETTE.darkParts), 0.32);
-    add(0.3, 0.04, 0.34, 1.2, 0.26, 0, toonMaterial(PALETTE.darkParts), -0.32);
+    this.group.add(new THREE.Mesh(pelicanGeometry(), critterMaterial()));
     this.respawn();
     scene.add(this.group);
   }

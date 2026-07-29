@@ -170,6 +170,22 @@ body {
   animation: pulse 1.15s ease-in-out infinite;
 }
 
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: 1vh;
+  font-size: clamp(11px, 1.6vh, 13px);
+  letter-spacing: 0.5px;
+  color: var(--cream);
+  opacity: 0.85;
+  text-shadow: 0 2px 0 rgba(0, 45, 98, 0.45);
+  text-align: center;
+  padding: 0 14px;
+  line-height: 1.35;
+}
+
 .title-record {
   margin-top: 1.4vh;
   font-size: 16px;
@@ -554,15 +570,54 @@ body {
   min-height: 12px;
 }
 
+/* Landscape phone: everything on the title has to fit without clipping the
+   logo or losing the record line off the bottom. */
 @media (max-height: 560px) {
+  #title {
+    gap: 2px;
+  }
+  .logo-el {
+    font-size: 13px;
+    letter-spacing: 4px;
+    padding: 2px 12px;
+    margin-bottom: 1px;
+  }
   .logo-line {
-    font-size: 46px;
+    font-size: 40px;
+  }
+  .flagbar {
+    height: 6px;
+    margin-top: 5px;
+  }
+  .subtitle {
+    margin-top: 9px;
+    font-size: 14px;
   }
   .vrow {
     margin-top: 6px;
   }
+  .vcard {
+    padding: 6px 9px;
+  }
+  .vc-name {
+    min-height: 0;
+    margin-bottom: 3px;
+  }
   .vc-tag {
     display: none;
+  }
+  .prompt {
+    margin-top: 6px;
+    font-size: 20px;
+  }
+  .controls {
+    margin-top: 3px;
+    font-size: 11px;
+  }
+  .title-record {
+    margin-top: 3px;
+    font-size: 13px;
+    min-height: 16px;
   }
 }
 

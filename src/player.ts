@@ -29,6 +29,12 @@ export interface PlayerCallbacks {
 
 type FxKind = 'spark' | 'splash' | 'trail' | 'dust';
 
+interface Rig {
+  group: THREE.Group;
+  wheels: THREE.Mesh[];
+  wheelRadius: number;
+}
+
 interface Particle {
   mesh: THREE.Mesh;
   vx: number;
@@ -55,6 +61,8 @@ export class Player {
   private leanGroup = new THREE.Group();
   private wheels: THREE.Mesh[] = [];
   private wheelRadius = 0.32;
+  private rigs: Partial<Record<VehicleId, Rig>> = {};
+  private buildTarget!: THREE.Group;
   private aura!: THREE.Mesh;
   private glowShell!: THREE.Mesh;
   private glowMat!: THREE.MeshBasicMaterial;
@@ -200,21 +208,33 @@ export class Player {
     this.root.add(this.stars);
   }
 
+  // Rigs are built once and kept: swapping rides on the title screen is a
+  // visibility flip, not a rebuild, so there is no hitch and nothing to dispose.
   setVehicle(id: VehicleId): void {
     this.vehicle = id;
     const v = VEHICLES[id];
     this.edgeMax = ROAD.edgeX - CONFIG.playerHalfWidth * v.hitbox;
     this.wheelieAngleMax = id === 'civic' ? 0.3 : 0.5;
     this.wheelieLift = id === 'civic' ? 0.42 : 0.62;
-    while (this.leanGroup.children.length > 0) {
-      const m = this.leanGroup.children[this.leanGroup.children.length - 1] as THREE.Mesh;
-      this.leanGroup.remove(m);
-      if (m.geometry) m.geometry.dispose();
+
+    let rig = this.rigs[id];
+    if (!rig) {
+      const group = new THREE.Group();
+      this.buildTarget = group;
+      this.wheels = [];
+      if (id === 'pasola') this.buildPasola();
+      else if (id === 'civic') this.buildCivic();
+      else this.buildMoto();
+      rig = { group, wheels: this.wheels, wheelRadius: this.wheelRadius };
+      this.rigs[id] = rig;
+      this.leanGroup.add(group);
     }
-    this.wheels = [];
-    if (id === 'pasola') this.buildPasola();
-    else if (id === 'civic') this.buildCivic();
-    else this.buildMoto();
+    for (const key of Object.keys(this.rigs) as VehicleId[]) {
+      const r = this.rigs[key];
+      if (r) r.group.visible = key === id;
+    }
+    this.wheels = rig.wheels;
+    this.wheelRadius = rig.wheelRadius;
   }
 
   private add(
@@ -231,7 +251,7 @@ export class Player {
     m.rotation.x = rx;
     m.rotation.z = rz;
     m.castShadow = true;
-    this.leanGroup.add(m);
+    this.buildTarget.add(m);
     return m;
   }
 
@@ -343,7 +363,7 @@ export class Player {
     );
     glowPlane.rotation.x = -Math.PI / 2;
     glowPlane.position.y = 0.05;
-    this.leanGroup.add(glowPlane);
+    this.buildTarget.add(glowPlane);
   }
 
   private buildFx(scene: THREE.Scene): void {
