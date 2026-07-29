@@ -31,7 +31,10 @@ const STRINGS = {
     resume: 'Toca pa’ seguir',
     closeCall: (n: number) => `¡Te quedaste a ${n}!`,
     inVehicle: (v: string) => `en ${v} por el Malecón`,
+    shareText: (n: number) => `${n} puntos por el Malecón.`,
     shareAsk: '¿Me lo puedes ganar?',
+    ariaSound: 'Sonido',
+    ariaPause: 'Pausa',
     gameOverTitles: ['¡Te dieron, loco!', '¡Diablo!', '¡Eso tuvo feo!'],
     cvPill: '¡EN CONTRA VÍA! ×2',
     trickPillBike: '¡CABALLITO! ×1.5',
@@ -65,7 +68,10 @@ const STRINGS = {
     resume: 'Tap to resume',
     closeCall: (n: number) => `Only ${n} short!`,
     inVehicle: (v: string) => `on ${v} down the Malecón`,
+    shareText: (n: number) => `${n} points down the Malecón.`,
     shareAsk: 'Can you beat it?',
+    ariaSound: 'Sound',
+    ariaPause: 'Pause',
     gameOverTitles: ['They got you!', 'Wipeout!', 'That was ugly!'],
     cvPill: 'WRONG WAY! ×2',
     trickPillBike: 'WHEELIE! ×1.5',
@@ -158,6 +164,9 @@ export class UI {
   private promptEl: HTMLElement;
   private ctrlSteerEl: HTMLElement;
   private ctrlTrickEl: HTMLElement;
+  private readonly fontsReady: Promise<unknown> = document.fonts
+    ? document.fonts.ready
+    : Promise.resolve();
   // Which controls to advertise. Seeded from the device, then corrected by
   // whatever the player actually touches first: a phone has no space bar.
   private inputMode: 'touch' | 'key' = window.matchMedia('(pointer: coarse)').matches
@@ -166,6 +175,8 @@ export class UI {
   private titleRecordEl: HTMLElement;
   private langBtn: HTMLElement;
   private muteBtn: HTMLElement;
+  private mutePauseBtn: HTMLElement;
+  private pauseBtn: HTMLElement;
   private goTitleEl: HTMLElement;
   private goBadge: HTMLElement;
   private goClose: HTMLElement;
@@ -242,6 +253,9 @@ export class UI {
         </div>
       </div>
       <div id="pause" class="screen hidden">
+        <button id="mute-pause" class="chip chip-mute" type="button" aria-label="Sonido">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </button>
         <div id="pause-title" class="pause-title"></div>
         <div class="pause-btns">
           <button id="btn-resume" class="btn-big" type="button"></button>
@@ -270,6 +284,8 @@ export class UI {
     this.titleRecordEl = q('#title-record');
     this.langBtn = q('#lang');
     this.muteBtn = q('#mute');
+    this.mutePauseBtn = q('#mute-pause');
+    this.pauseBtn = q('#hud-pause');
     this.goTitleEl = q('#go-title');
     this.goBadge = q('#go-new');
     this.goClose = q('#go-close');
@@ -313,6 +329,12 @@ export class UI {
       this.toggleLang();
     });
     this.muteBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.cb.onToggleMute();
+    });
+    // Mid-run mute has to be reachable without a keyboard and without
+    // throwing away the run, so it lives on the pause screen too.
+    this.mutePauseBtn.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onToggleMute();
     });
@@ -368,6 +390,9 @@ export class UI {
     const t = this.t();
     document.documentElement.lang = this.lang;
     this.langBtn.textContent = this.lang === 'es' ? 'EN' : 'ES';
+    this.muteBtn.setAttribute('aria-label', t.ariaSound);
+    this.mutePauseBtn.setAttribute('aria-label', t.ariaSound);
+    this.pauseBtn.setAttribute('aria-label', t.ariaPause);
     this.cvEl.textContent = t.cvPill;
     this.cabEl.textContent =
       this.selectedVehicle === 'civic' ? t.trickPillCar : t.trickPillBike;
@@ -514,6 +539,7 @@ export class UI {
 
   setMuted(m: boolean): void {
     this.muteBtn.classList.toggle('muted', m);
+    this.mutePauseBtn.classList.toggle('muted', m);
   }
 
   setDistMult(n: number): void {
@@ -594,8 +620,11 @@ export class UI {
   async shareCard(r: RunResult): Promise<void> {
     const t = this.t();
     const veh = VEHICLES[this.selectedVehicle];
+    // Awaited, not requested, here: the font was warmed at boot so this
+    // resolves immediately and iOS still sees navigator.share as a prompt
+    // response rather than a late async call.
     try {
-      await document.fonts.ready;
+      await this.fontsReady;
     } catch {
       // draw with whatever we have
     }
@@ -723,15 +752,23 @@ export class UI {
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
     if (!blob) return;
     const file = new File([blob], 'el-corre-corre.png', { type: 'image/png' });
-    const text = `${r.points} puntos por el Malecón. ${t.shareAsk}`;
+    const text = `${t.shareText(r.points)} ${t.shareAsk}`;
+    let canFiles = false;
     try {
-      if (navigator.canShare?.({ files: [file] })) {
+      canFiles = navigator.canShare?.({ files: [file] }) ?? false;
+    } catch {
+      canFiles = false; // a throwing canShare just means no file sharing here
+    }
+    if (canFiles) {
+      try {
         await navigator.share({ files: [file], title: 'El Corre Corre', text });
         return;
+      } catch (e) {
+        // Dismissing the sheet is a real choice, so respect it. Anything else
+        // (iOS refusing the call, no activation left) falls through to the
+        // download, because COMPARTIR must never be a dead button.
+        if ((e as { name?: string } | null)?.name === 'AbortError') return;
       }
-    } catch {
-      // user closed the share sheet; fall through to download
-      return;
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

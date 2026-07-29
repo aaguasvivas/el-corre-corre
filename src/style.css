@@ -214,7 +214,17 @@ body {
   left: calc(env(safe-area-inset-left, 0px) + 12px);
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 8px 12px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* The pause screen keeps the HUD visible, and the HUD pause button already
+   owns the top left, so this one sits on the free side. */
+#mute-pause {
+  left: auto;
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
 }
 
 .chip-mute .snd-slash {
@@ -772,7 +782,10 @@ body {
   left: 50%;
   transform: translateX(-50%) scale(0);
   opacity: 0;
-  font-size: clamp(34px, 7vh, 64px);
+  /* The vw term keeps "¡NUEVO RÉCORD!" inside a 375 px phone: at that width
+     it resolves to ~41 px instead of ~57 px, which used to run off both
+     edges. Never wrap it; a two-word banner breaking mid-pop looks worse. */
+  font-size: clamp(30px, min(7vh, 11vw), 64px);
   color: var(--white);
   -webkit-text-stroke: 3px var(--red);
   paint-order: stroke fill;
