@@ -81,6 +81,7 @@ export class Player {
   private touchTargetX = START_X;
   private pointerId: number | null = null;
   private lastPointerX = 0;
+  private swipeRefX = 0;
   private swipeRefY = 0;
   private swipeRefT = 0;
 
@@ -412,14 +413,19 @@ export class Player {
 
     window.addEventListener('pointerdown', (e) => {
       if (!this.cb.isSteeringActive() || this.pointerId !== null) return;
-      this.pointerId = e.pointerId;
-      this.lastPointerX = e.clientX;
-      this.touchActive = true;
-      this.touchTargetX = this.x;
-      this.swipeRefY = e.clientY;
-      this.swipeRefT = e.timeStamp;
+      this.adoptPointer(e);
     });
     window.addEventListener('pointermove', (e) => {
+      if (this.pointerId === null) {
+        // Adopt a finger that is already on the glass. Two cases that used to
+        // leave the bike uncontrollable until every finger came off: the
+        // thumb that tapped OTRA VEZ (its pointerdown was rejected while the
+        // state was still gameover), and a second thumb still planted when
+        // the steering one lifts. buttons !== 0 keeps a hovering mouse out.
+        if (e.buttons === 0 || !this.cb.isSteeringActive()) return;
+        this.adoptPointer(e);
+        return; // no phantom dx on the frame we take over
+      }
       if (!this.touchActive || e.pointerId !== this.pointerId) return;
       const dx = e.clientX - this.lastPointerX;
       this.lastPointerX = e.clientX;
@@ -429,15 +435,22 @@ export class Player {
         -this.edgeMax,
         this.edgeMax,
       );
-      // Swipe up starts the caballito, swipe down drops it
+      // Swipe up starts the caballito, swipe down drops it. The gesture only
+      // counts when it is genuinely vertical: a fast dodge arcs, and firing a
+      // caballito mid-dodge steals steering authority at the worst moment.
+      const dy = this.swipeRefY - e.clientY;
+      const acrossX = Math.abs(e.clientX - this.swipeRefX);
       if (e.timeStamp - this.swipeRefT > 200) {
         this.swipeRefT = e.timeStamp;
         this.swipeRefY = e.clientY;
-      } else if (this.swipeRefY - e.clientY > CONFIG.swipeUpPx) {
+        this.swipeRefX = e.clientX;
+      } else if (dy > CONFIG.swipeUpPx && dy > acrossX * CONFIG.swipeDominance) {
         this.swipeRefY = e.clientY;
+        this.swipeRefX = e.clientX;
         this.touchWheelieHold = true;
-      } else if (e.clientY - this.swipeRefY > CONFIG.swipeDownPx) {
+      } else if (-dy > CONFIG.swipeDownPx && -dy > acrossX * CONFIG.swipeDominance) {
         this.swipeRefY = e.clientY;
+        this.swipeRefX = e.clientX;
         this.touchWheelieHold = false;
       }
     });
@@ -446,6 +459,16 @@ export class Player {
     };
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
+  }
+
+  private adoptPointer(e: PointerEvent): void {
+    this.pointerId = e.pointerId;
+    this.lastPointerX = e.clientX;
+    this.touchActive = true;
+    this.touchTargetX = this.x;
+    this.swipeRefX = e.clientX;
+    this.swipeRefY = e.clientY;
+    this.swipeRefT = e.timeStamp;
   }
 
   private endTouch(): void {
@@ -462,6 +485,10 @@ export class Player {
   }
 
   private endWheelie(): void {
+    // Touch parity with the keyboard: releasing W re-arms the latch, so the
+    // finger's hold has to drop too or a phone player can never start a
+    // second caballito without lifting off the screen entirely.
+    this.touchWheelieHold = false;
     this.wheelieActive = false;
     this.wheelieCooldownT = CONFIG.wheelieCooldownBase + this.wheelieT * CONFIG.wheelieCooldownPerSec;
     this.cb.onWheelieEnd();

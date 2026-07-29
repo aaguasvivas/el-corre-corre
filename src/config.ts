@@ -208,6 +208,9 @@ export const CONFIG = {
   wheeliePointsPerSec: 5,
   swipeUpPx: 48, // FEEL: upward swipe distance that starts a caballito
   swipeDownPx: 42, // FEEL: downward swipe that drops it early
+  // FEEL: how much more vertical than horizontal a swipe must be to count as
+  // a trick. Raise it if dodging keeps firing accidental caballitos.
+  swipeDominance: 1.2,
   // El derrape: the Civic cannot wheelie, so its trick is a held drift. Same
   // multiplier, different risk: the car goes sideways and needs more room.
   driftHitboxMult: 1.35, // FEEL: collision circle grows this much mid-drift
