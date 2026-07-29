@@ -517,6 +517,11 @@ function frame(now: number): void {
 
 ui.showTitle(score.record);
 ui.updateVehicles(selectedVehicle, vehicleRecords());
+// Compile every shader while the title is up. renderer.compile walks the whole
+// scene, not just the visible parts, so the pooled traffic, obstacles and the
+// 46 confetti get their programs built here instead of hitching mid-run, worst
+// of all at the ¡NUEVO RÉCORD! burst.
+renderer.compile(scene, camera);
 requestAnimationFrame(frame);
 
 // Test hook for automated checks; the game itself never reads this.
@@ -538,6 +543,8 @@ requestAnimationFrame(frame);
   worldDist: () => Math.round(world.distance),
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   dog: () => world.debugViralata(),
+  confetti: () => world.confettiState,
+  burstTape: () => world.burstTape(),
   audio: () => ({
     unlocked: audio.unlocked,
     muted: audio.muted,

@@ -145,7 +145,7 @@ function rand(a: number, b: number): number {
 // Vertex-colored geometry helpers (for merged, instanced scenery)
 // ---------------------------------------------------------------------------
 
-function paint(g: THREE.BufferGeometry, color: number): THREE.BufferGeometry {
+export function paint(g: THREE.BufferGeometry, color: number): THREE.BufferGeometry {
   const c = new THREE.Color(color);
   const n = g.attributes.position.count;
   const arr = new Float32Array(n * 3);
@@ -720,16 +720,17 @@ class Belt {
 // Critters: never collidable, pure ambience
 // ---------------------------------------------------------------------------
 
-// Critters share one vertex-colored toon material and one merged geometry each,
-// so a pelican costs one draw call instead of seven.
-let _critterMat: THREE.MeshToonMaterial | null = null;
-function critterMaterial(): THREE.MeshToonMaterial {
-  if (!_critterMat) {
-    _critterMat = worldMaterial(
+// One shared vertex-colored toon material for everything that bakes its colors
+// into merged geometry: critters, traffic, the player rigs. Colors live in the
+// vertices, so a whole vehicle is one draw call instead of three to six.
+let _vcToonMat: THREE.MeshToonMaterial | null = null;
+export function vcToonMaterial(): THREE.MeshToonMaterial {
+  if (!_vcToonMat) {
+    _vcToonMat = worldMaterial(
       new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() }),
     );
   }
-  return _critterMat;
+  return _vcToonMat;
 }
 
 // Unlit + double-sided: kite sails and bows read as flat paper against the sky.
@@ -823,7 +824,7 @@ class Viralata {
   private nextAt = rand(10, 18);
 
   constructor(scene: THREE.Scene) {
-    const mat = critterMaterial();
+    const mat = vcToonMaterial();
     const body = new THREE.Mesh(dogGeometry(), mat);
     body.castShadow = true;
     this.tail = new THREE.Mesh(dogTailGeometry(), mat);
@@ -901,7 +902,7 @@ class Chichigua {
   private t = 0;
 
   constructor(scene: THREE.Scene, kiteColor: number) {
-    this.group.add(new THREE.Mesh(kidsGeometry(), critterMaterial()));
+    this.group.add(new THREE.Mesh(kidsGeometry(), vcToonMaterial()));
     this.kite = new THREE.Mesh(kiteGeometry(kiteColor), kiteMaterial());
     this.group.add(this.kite);
 
@@ -944,7 +945,7 @@ class Pelican {
   private t = 0;
 
   constructor(scene: THREE.Scene) {
-    this.group.add(new THREE.Mesh(pelicanGeometry(), critterMaterial()));
+    this.group.add(new THREE.Mesh(pelicanGeometry(), vcToonMaterial()));
     this.respawn();
     scene.add(this.group);
   }
@@ -968,7 +969,13 @@ class Pelican {
 // ---------------------------------------------------------------------------
 
 interface Confetto {
-  mesh: THREE.Mesh;
+  im: THREE.InstancedMesh;
+  idx: number;
+  x: number;
+  y: number;
+  z: number;
+  rotX: number;
+  rotY: number;
   vx: number;
   vy: number;
   vz: number;
@@ -981,6 +988,7 @@ export class World {
   private chunks: THREE.Mesh[] = [];
   private tape!: THREE.Group;
   private confetti: Confetto[] = [];
+  private confettiMeshes: THREE.InstancedMesh[] = [];
   private belts: Belt[] = [];
   private viralata!: Viralata;
   private chichiguas: Chichigua[] = [];
@@ -1054,6 +1062,9 @@ export class World {
         color: PALETTE.sunGlow,
         fog: false,
         side: THREE.DoubleSide,
+        // A flat camera-facing disc has no front/back ordering to resolve, so
+        // skip the two-pass transparency three.js would otherwise do here.
+        forceSinglePass: true,
         transparent: true,
         opacity: 0.35,
       }),
@@ -1301,16 +1312,32 @@ export class World {
     scene.add(this.tape);
   }
 
+  // One InstancedMesh per flag color: three draw calls instead of 46, and the
+  // burst lands exactly when the ¡NUEVO RÉCORD! banner does, so this is the
+  // worst possible moment to spike.
   private buildConfetti(scene: THREE.Scene): void {
     const geo = new THREE.PlaneGeometry(0.09, 0.14);
-    const mats = [PALETTE.flagBlue, PALETTE.flagRed, PALETTE.flagWhite].map((color) =>
-      worldMaterial(new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide })),
-    );
+    const colors = [PALETTE.flagBlue, PALETTE.flagRed, PALETTE.flagWhite];
+    const per = Math.ceil(CONFETTI_COUNT / colors.length);
+    for (const color of colors) {
+      const im = new THREE.InstancedMesh(
+        geo,
+        worldMaterial(new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide })),
+        per,
+      );
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.frustumCulled = false;
+      im.visible = false;
+      scene.add(im);
+      this.confettiMeshes.push(im);
+    }
     for (let i = 0; i < CONFETTI_COUNT; i++) {
-      const mesh = new THREE.Mesh(geo, mats[i % mats.length]);
-      mesh.visible = false;
-      scene.add(mesh);
-      this.confetti.push({ mesh, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, life: 0 });
+      this.confetti.push({
+        im: this.confettiMeshes[i % colors.length],
+        idx: Math.floor(i / colors.length),
+        x: 0, y: 0, z: 0, rotX: 0, rotY: 0,
+        vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, life: 0,
+      });
     }
   }
 
@@ -1352,16 +1379,43 @@ export class World {
     const z = this.tape.visible ? this.tape.position.z : 2;
     for (const f of this.confetti) {
       f.life = 1.5 + Math.random() * 0.6;
-      f.mesh.visible = true;
-      f.mesh.position.set((Math.random() - 0.5) * 14, 1 + Math.random() * 1.6, z);
+      f.x = (Math.random() - 0.5) * 14;
+      f.y = 1 + Math.random() * 1.6;
+      f.z = z;
       f.vx = (Math.random() - 0.5) * 3;
       f.vy = 2.5 + Math.random() * 3.5;
       f.vz = -(1 + Math.random() * 3);
       f.rx = (Math.random() - 0.5) * 12;
       f.ry = (Math.random() - 0.5) * 12;
-      f.mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+      f.rotX = Math.random() * 3;
+      f.rotY = Math.random() * 3;
     }
+    for (const im of this.confettiMeshes) im.visible = true;
     this.tape.visible = false;
+  }
+
+  // Test probe: confetti is instanced, so "is it on screen" is not something a
+  // draw-call count can answer any more.
+  get confettiState(): {
+    visible: boolean;
+    live: number;
+    sampleScale: number;
+    samplePos: number[];
+    logicPos: number[];
+  } {
+    let live = 0;
+    for (const f of this.confetti) if (f.life > 0) live++;
+    const m = new THREE.Matrix4();
+    this.confettiMeshes[0].getMatrixAt(0, m);
+    const p = new THREE.Vector3().setFromMatrixPosition(m);
+    const f0 = this.confetti[0];
+    return {
+      visible: this.confettiMeshes[0].visible,
+      live,
+      sampleScale: +new THREE.Vector3().setFromMatrixScale(m).x.toFixed(2),
+      samplePos: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)],
+      logicPos: [+f0.x.toFixed(2), +f0.y.toFixed(2), +f0.z.toFixed(2)],
+    };
   }
 
   debugViralata(): void {
@@ -1387,6 +1441,11 @@ export class World {
         belt.group.position.z += CONFIG.beltLen * BELT_COUNT;
         belt.fill();
       }
+      // The belts keep frustumCulled off, because a manual bounding sphere
+      // would have to be inflated for the bend field. One cheap z test still
+      // drops the whole belt that is already behind the camera: the bend
+      // never displaces forward, only laterally, so this cannot pop.
+      belt.group.visible = belt.group.position.z + CONFIG.beltLen > -12;
     }
 
     // El Obelisco, every ~800 m
@@ -1417,19 +1476,33 @@ export class World {
     this.shimmerA.offset.x = (this.shimmerA.offset.x + dt * 0.01) % 1;
     this.glintMat.opacity = 0.38 + Math.sin(this.t * 1.9) * 0.1;
 
+    let anyConfetti = false;
     for (const f of this.confetti) {
       if (f.life <= 0) continue;
       f.life -= dt;
       f.vy -= 6 * dt;
-      f.mesh.position.x += f.vx * dt;
-      f.mesh.position.y += f.vy * dt;
-      f.mesh.position.z += f.vz * dt - ds;
-      f.mesh.rotation.x += f.rx * dt;
-      f.mesh.rotation.y += f.ry * dt;
-      if (f.life <= 0 || f.mesh.position.y < -0.2) {
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.z += f.vz * dt - ds;
+      f.rotX += f.rx * dt;
+      f.rotY += f.ry * dt;
+      if (f.life <= 0 || f.y < -0.2) {
         f.life = 0;
-        f.mesh.visible = false;
+        _dummy.position.set(0, -999, 0); // parked far below, scale 0 is enough
+        _dummy.rotation.set(0, 0, 0);
+        _dummy.scale.set(0, 0, 0);
+      } else {
+        anyConfetti = true;
+        _dummy.position.set(f.x, f.y, f.z);
+        _dummy.rotation.set(f.rotX, f.rotY, 0);
+        _dummy.scale.set(1, 1, 1);
       }
+      _dummy.updateMatrix();
+      f.im.setMatrixAt(f.idx, _dummy.matrix);
+      f.im.instanceMatrix.needsUpdate = true;
+    }
+    if (!anyConfetti && this.confettiMeshes[0].visible) {
+      for (const im of this.confettiMeshes) im.visible = false;
     }
   }
 }

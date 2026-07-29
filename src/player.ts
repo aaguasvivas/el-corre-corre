@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD, VEHICLES, type VehicleId } from './config';
-import { toonMaterial, worldMaterial } from './world';
+import { toonMaterial, worldMaterial, paint, vcToonMaterial } from './world';
 
 const DEG = Math.PI / 180;
 const START_X = -3.4; // middle of your half of the road
@@ -63,6 +63,7 @@ export class Player {
   private wheelRadius = 0.32;
   private rigs: Partial<Record<VehicleId, Rig>> = {};
   private buildTarget!: THREE.Group;
+  private staticParts: THREE.BufferGeometry[] = [];
   private aura!: THREE.Mesh;
   private glowShell!: THREE.Mesh;
   private glowMat!: THREE.MeshBasicMaterial;
@@ -238,7 +239,9 @@ export class Player {
     this.wheelRadius = rig.wheelRadius;
   }
 
-  private add(
+  // Meshes that have to stay their own object: the wheels (they spin) and the
+  // unlit bits (headlight, underglow) that need MeshBasicMaterial.
+  private addMesh(
     geo: THREE.BufferGeometry,
     mat: THREE.Material,
     x: number,
@@ -256,105 +259,130 @@ export class Player {
     return m;
   }
 
+  // Everything rigid on the ride goes into one merged, vertex-colored mesh,
+  // so a rig is 4 draw calls instead of 18.
+  private addStatic(
+    geo: THREE.BufferGeometry,
+    color: number,
+    x: number,
+    y: number,
+    z: number,
+    rx = 0,
+    rz = 0,
+  ): void {
+    if (rz) geo.rotateZ(rz);
+    if (rx) geo.rotateX(rx);
+    geo.translate(x, y, z);
+    this.staticParts.push(paint(geo, color));
+  }
+
+  private finishRig(): void {
+    if (this.staticParts.length === 0) return;
+    const m = new THREE.Mesh(mergeGeometries(this.staticParts)!, vcToonMaterial());
+    m.castShadow = true;
+    this.buildTarget.add(m);
+    this.staticParts = [];
+  }
+
   private buildRider(upright: boolean): void {
-    const shirt = toonMaterial(PALETTE.colmadoTeal);
-    const skin = toonMaterial(PALETTE.skin);
-    const jeans = toonMaterial(0x2f4a6f);
-    const blue = toonMaterial(PALETTE.flagBlue);
+    const shirt = PALETTE.colmadoTeal;
+    const jeans = 0x2f4a6f;
+    const blue = PALETTE.flagBlue;
     const tilt = upright ? 0.08 : 0.3;
-    this.add(new THREE.BoxGeometry(0.36, 0.5, 0.26), shirt, 0, 1.24, -0.14, tilt);
-    this.add(new THREE.SphereGeometry(0.17, 12, 10), skin, 0, 1.62, 0);
-    this.add(new THREE.CylinderGeometry(0.185, 0.185, 0.1, 12), blue, 0, 1.72, 0);
-    this.add(new THREE.BoxGeometry(0.26, 0.035, 0.16), blue, 0, 1.69, 0.16);
-    this.add(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, 0.25, 1.28, 0.18, -0.7);
-    this.add(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, -0.25, 1.28, 0.18, -0.7);
-    this.add(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, 0.17, 0.62, -0.2, 0.55);
-    this.add(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, -0.17, 0.62, -0.2, 0.55);
+    this.addStatic(new THREE.BoxGeometry(0.36, 0.5, 0.26), shirt, 0, 1.24, -0.14, tilt);
+    this.addStatic(new THREE.SphereGeometry(0.17, 12, 10), PALETTE.skin, 0, 1.62, 0);
+    this.addStatic(new THREE.CylinderGeometry(0.185, 0.185, 0.1, 12), blue, 0, 1.72, 0);
+    this.addStatic(new THREE.BoxGeometry(0.26, 0.035, 0.16), blue, 0, 1.69, 0.16);
+    this.addStatic(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, 0.25, 1.28, 0.18, -0.7);
+    this.addStatic(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, -0.25, 1.28, 0.18, -0.7);
+    this.addStatic(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, 0.17, 0.62, -0.2, 0.55);
+    this.addStatic(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, -0.17, 0.62, -0.2, 0.55);
   }
 
   private buildMoto(): void {
-    const red = toonMaterial(PALETTE.flagRed);
+    const red = PALETTE.flagRed;
+    const chrome = 0xd9d9d9;
     const dark = toonMaterial(PALETTE.darkParts);
-    const chrome = toonMaterial(0xd9d9d9);
     const glow = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow }));
 
     this.wheelRadius = 0.32;
     const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.2, 12);
     wheelGeo.rotateZ(Math.PI / 2);
-    this.wheels.push(this.add(wheelGeo, dark, 0, 0.32, -0.62));
-    this.wheels.push(this.add(wheelGeo.clone(), dark, 0, 0.32, 0.72));
+    this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.32, -0.62));
+    this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.32, 0.72));
 
-    this.add(new THREE.BoxGeometry(0.42, 0.34, 1.3), red, 0, 0.62, 0.02);
-    this.add(new THREE.BoxGeometry(0.3, 0.2, 0.52), red, 0, 0.84, 0.3);
-    this.add(new THREE.BoxGeometry(0.34, 0.12, 0.56), dark, 0, 0.8, -0.34);
-    this.add(new THREE.BoxGeometry(0.07, 0.52, 0.07), chrome, 0.1, 0.55, 0.66, -0.25);
-    this.add(new THREE.BoxGeometry(0.07, 0.52, 0.07), chrome, -0.1, 0.55, 0.66, -0.25);
+    this.addStatic(new THREE.BoxGeometry(0.42, 0.34, 1.3), red, 0, 0.62, 0.02);
+    this.addStatic(new THREE.BoxGeometry(0.3, 0.2, 0.52), red, 0, 0.84, 0.3);
+    this.addStatic(new THREE.BoxGeometry(0.34, 0.12, 0.56), PALETTE.darkParts, 0, 0.8, -0.34);
+    this.addStatic(new THREE.BoxGeometry(0.07, 0.52, 0.07), chrome, 0.1, 0.55, 0.66, -0.25);
+    this.addStatic(new THREE.BoxGeometry(0.07, 0.52, 0.07), chrome, -0.1, 0.55, 0.66, -0.25);
     const barGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.6, 8);
     barGeo.rotateZ(Math.PI / 2);
-    this.add(barGeo, chrome, 0, 1.04, 0.58);
-    this.add(new THREE.SphereGeometry(0.07, 10, 8), glow, 0, 0.9, 0.8);
+    this.addStatic(barGeo, chrome, 0, 1.04, 0.58);
     const pipeGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.55, 8);
     pipeGeo.rotateX(Math.PI / 2);
-    this.add(pipeGeo, chrome, 0.16, 0.4, -0.45);
+    this.addStatic(pipeGeo, chrome, 0.16, 0.4, -0.45);
     this.buildRider(false);
+    this.finishRig();
+    this.addMesh(new THREE.SphereGeometry(0.07, 10, 8), glow, 0, 0.9, 0.8);
   }
 
   private buildPasola(): void {
-    const mint = toonMaterial(PALETTE.pasolaMint);
+    const mint = PALETTE.pasolaMint;
+    const chrome = 0xd9d9d9;
     const dark = toonMaterial(PALETTE.darkParts);
-    const cream = toonMaterial(PALETTE.laneDash);
-    const chrome = toonMaterial(0xd9d9d9);
     const glow = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow }));
 
     this.wheelRadius = 0.26;
     const wheelGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.18, 12);
     wheelGeo.rotateZ(Math.PI / 2);
-    this.wheels.push(this.add(wheelGeo, dark, 0, 0.26, -0.55));
-    this.wheels.push(this.add(wheelGeo.clone(), dark, 0, 0.26, 0.62));
+    this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.26, -0.55));
+    this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.26, 0.62));
 
-    this.add(new THREE.BoxGeometry(0.34, 0.09, 0.85), mint, 0, 0.36, 0.02); // step-through floor
-    this.add(new THREE.BoxGeometry(0.38, 0.4, 0.5), mint, 0, 0.55, -0.42); // tail
-    this.add(new THREE.BoxGeometry(0.34, 0.12, 0.5), dark, 0, 0.82, -0.42); // seat
+    this.addStatic(new THREE.BoxGeometry(0.34, 0.09, 0.85), mint, 0, 0.36, 0.02); // step-through floor
+    this.addStatic(new THREE.BoxGeometry(0.38, 0.4, 0.5), mint, 0, 0.55, -0.42); // tail
+    this.addStatic(new THREE.BoxGeometry(0.34, 0.12, 0.5), PALETTE.darkParts, 0, 0.82, -0.42); // seat
     const shield = new THREE.BoxGeometry(0.38, 0.62, 0.1);
     shield.rotateX(-0.18);
-    this.add(shield, mint, 0, 0.72, 0.52);
-    this.add(new THREE.BoxGeometry(0.3, 0.16, 0.2), cream, 0, 1.06, 0.6); // front rack
+    this.addStatic(shield, mint, 0, 0.72, 0.52);
+    this.addStatic(new THREE.BoxGeometry(0.3, 0.16, 0.2), PALETTE.laneDash, 0, 1.06, 0.6); // front rack
     const barGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.52, 8);
     barGeo.rotateZ(Math.PI / 2);
-    this.add(barGeo, chrome, 0, 1.06, 0.5);
-    this.add(new THREE.SphereGeometry(0.06, 10, 8), glow, 0, 0.92, 0.68);
+    this.addStatic(barGeo, chrome, 0, 1.06, 0.5);
     this.buildRider(true);
+    this.finishRig();
+    this.addMesh(new THREE.SphereGeometry(0.06, 10, 8), glow, 0, 0.92, 0.68);
   }
 
   private buildCivic(): void {
-    const red = toonMaterial(PALETTE.flagRed);
-    const dark = toonMaterial(PALETTE.darkParts);
-    const white = toonMaterial(PALETTE.flagWhite);
-    const skin = toonMaterial(PALETTE.skin);
-    const blue = toonMaterial(PALETTE.flagBlue);
+    const red = PALETTE.flagRed;
+    const dark = PALETTE.darkParts;
+    const blue = PALETTE.flagBlue;
+    const darkMat = toonMaterial(PALETTE.darkParts);
 
     this.wheelRadius = 0.3;
     const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.24, 12);
     wheelGeo.rotateZ(Math.PI / 2);
     for (const sz of [-1.28, 1.28]) {
       for (const sx of [-0.76, 0.76]) {
-        this.wheels.push(this.add(wheelGeo.clone(), dark, sx, 0.3, sz));
+        this.wheels.push(this.addMesh(wheelGeo, darkMat, sx, 0.3, sz));
       }
     }
 
-    this.add(new THREE.BoxGeometry(1.7, 0.42, 3.9), red, 0, 0.45, 0);
-    this.add(new THREE.BoxGeometry(1.42, 0.36, 1.8), red, 0, 0.82, -0.15);
-    this.add(new THREE.BoxGeometry(0.3, 0.03, 3.92), white, 0, 0.67, 0); // racing stripe
+    this.addStatic(new THREE.BoxGeometry(1.7, 0.42, 3.9), red, 0, 0.45, 0);
+    this.addStatic(new THREE.BoxGeometry(1.42, 0.36, 1.8), red, 0, 0.82, -0.15);
+    this.addStatic(new THREE.BoxGeometry(0.3, 0.03, 3.92), PALETTE.flagWhite, 0, 0.67, 0); // racing stripe
     const wind = new THREE.BoxGeometry(1.25, 0.32, 0.07);
     wind.rotateX(-0.22);
-    this.add(wind, dark, 0, 0.84, 0.62);
-    this.add(new THREE.BoxGeometry(1.55, 0.07, 0.38), red, 0, 1.0, -1.85); // el aleron
-    this.add(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, -0.55, 0.84, -1.83);
-    this.add(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, 0.55, 0.84, -1.83);
+    this.addStatic(wind, dark, 0, 0.84, 0.62);
+    this.addStatic(new THREE.BoxGeometry(1.55, 0.07, 0.38), red, 0, 1.0, -1.85); // el aleron
+    this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, -0.55, 0.84, -1.83);
+    this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, 0.55, 0.84, -1.83);
     // el tiguere, head out the sunroof
-    this.add(new THREE.SphereGeometry(0.16, 12, 10), skin, 0, 1.12, -0.15);
-    this.add(new THREE.CylinderGeometry(0.175, 0.175, 0.09, 12), blue, 0, 1.22, -0.15);
-    this.add(new THREE.BoxGeometry(0.25, 0.03, 0.15), blue, 0, 1.19, 0.01);
+    this.addStatic(new THREE.SphereGeometry(0.16, 12, 10), PALETTE.skin, 0, 1.12, -0.15);
+    this.addStatic(new THREE.CylinderGeometry(0.175, 0.175, 0.09, 12), blue, 0, 1.22, -0.15);
+    this.addStatic(new THREE.BoxGeometry(0.25, 0.03, 0.15), blue, 0, 1.19, 0.01);
+    this.finishRig();
     // underglow, que se vea
     const glowPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(2.1, 4.3),

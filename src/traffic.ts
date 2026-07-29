@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { toonMaterial, textTexture, worldMaterial } from './world';
+import { toonMaterial, textTexture, worldMaterial, paint, vcToonMaterial } from './world';
 
 export type VehicleType = 'sedan' | 'guagua' | 'camion' | 'civic' | 'motoconcho' | 'guaguaParada' | 'cart';
 export type PowerupKind = 'cafecito' | 'bendicion' | 'iman';
@@ -372,20 +372,25 @@ export class Traffic {
       ['cart', cartAssets()],
     ];
 
-    const darkMat = toonMaterial(PALETTE.darkParts);
-    const greenMat = toonMaterial(PALETTE.platano);
+    const vcMat = vcToonMaterial();
     for (const [type, a] of defs) {
       for (let i = 0; i < a.pool; i++) {
         const group = new THREE.Group();
-        const body = new THREE.Mesh(a.painted, toonMaterial(a.paints[i % a.paints.length]));
-        body.castShadow = true;
-        const dark = new THREE.Mesh(a.dark, darkMat);
-        group.add(body, dark);
+        // Every static part of a vehicle becomes one merged, vertex-colored
+        // mesh. The per-slot paint job is baked into the vertices, so 27 cars
+        // on screen cost 27 draws for their bodies instead of ~95. Only the
+        // animated or unlit extras (blinkers, banner, underglow, heads,
+        // umbrella) stay as their own meshes, via addExtras.
+        const parts = [paint(a.painted.clone(), a.paints[i % a.paints.length])];
+        parts.push(paint(a.dark.clone(), PALETTE.darkParts));
         if (a.accent) {
           const color = a.accentColor === 0 ? ACCENT_VARIED[i % ACCENT_VARIED.length] : a.accentColor!;
-          group.add(new THREE.Mesh(a.accent, toonMaterial(color)));
+          parts.push(paint(a.accent.clone(), color));
         }
-        if (a.green) group.add(new THREE.Mesh(a.green, greenMat));
+        if (a.green) parts.push(paint(a.green.clone(), PALETTE.platano));
+        const body = new THREE.Mesh(mergeGeometries(parts)!, vcMat);
+        body.castShadow = true;
+        group.add(body);
         const blinkers = a.addExtras ? a.addExtras(group) : [];
         group.visible = false;
         scene.add(group);
