@@ -2,10 +2,14 @@
 // survivable-path validation. Everything here is pooled; nothing allocates
 // in the step loop.
 //
-// The sacred rule lives in canPlace(): the 4 driving lanes are never all
-// occupied inside one z window, so a survivable gap always exists. Shoulders
-// (parked guaguas, vendor carts) sit outside that set: they remove escape
-// hatches but never build the wall.
+// The sacred rule lives in canPlace(): before committing a spawn, measure the
+// widest continuous corridor across the WHOLE road among everything that will
+// reach the player at the same time, and refuse the spawn if that corridor is
+// under minCorridorMult player widths. Two things matter here. Shoulders count
+// (parked guaguas and vendor carts narrow the road just as much), and grouping
+// is by arrival time, not by z: oncoming traffic closes at three times the
+// speed of same-direction traffic, so vehicles far apart in z can still land
+// on you together, and vehicles side by side in z often never do.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -330,6 +334,10 @@ function cartAssets(): TypeAssets {
 
 const ACCENT_VARIED = [0xffd3b6, 0xb3d9ff, 0xf2e9dc, 0xcdb4db];
 
+// Scratch buffer for the corridor sweep: flat [start, end, start, end, ...] so
+// spawn validation allocates nothing.
+const _corridorBlocks: number[] = [];
+
 export class Traffic {
   private vehicles: Vehicle[] = [];
   private obstacles: Obstacle[] = [];
@@ -341,6 +349,9 @@ export class Traffic {
   private lastSpeed: number = CONFIG.baseSpeed;
   private lastPlayerX = 0;
   private lastPlayerCv = false;
+  private lastPlayerR: number = CONFIG.playerRadius;
+  private lastPlayerSpeed: number = CONFIG.baseSpeed;
+  private typeHalfW = new Map<VehicleType, number>();
   private spawnAcc = 0;
   private activeCount = 0;
 
@@ -374,6 +385,7 @@ export class Traffic {
 
     const vcMat = vcToonMaterial();
     for (const [type, a] of defs) {
+      this.typeHalfW.set(type, a.halfW);
       for (let i = 0; i < a.pool; i++) {
         const group = new THREE.Group();
         // Every static part of a vehicle becomes one merged, vertex-colored
@@ -550,21 +562,75 @@ export class Traffic {
 
   // ---------------- placement validation ----------------
 
-  private canPlace(lane: number, z: number, halfL: number): boolean {
+  // When the player will reach something sitting at z. Same-direction traffic
+  // closes slowly, oncoming closes fast, so two vehicles far apart in z can
+  // still arrive together. Comparing raw z misses exactly that case.
+  private arrivalTime(z: number, dir: number, speed: number): number {
+    const closing = this.lastPlayerSpeed - dir * speed;
+    return closing > 0.5 ? z / closing : Infinity;
+  }
+
+  private laneX(lane: number): number {
+    if (lane === -1) return ROAD.shoulderCenters[0];
+    if (lane === 4) return ROAD.shoulderCenters[1];
+    return ROAD.laneCenters[lane];
+  }
+
+  // The brief's sacred rule: never commit a spawn that leaves no continuous
+  // gap of at least minCorridorMult player widths. This measures the real
+  // corridor across the whole road, shoulders included (parked guaguas and
+  // vendor carts narrow it too), among everything that ARRIVES together.
+  private widestCorridor(lane: number, halfW: number, tCand: number, tWin: number): number {
+    const blocks = _corridorBlocks;
+    blocks.length = 0;
+    // the candidate itself, plus the lane jitter it may be given
+    const cx = this.laneX(lane);
+    const cw = halfW * CONFIG.vehicleHitboxScale + CONFIG.laneJitterM;
+    blocks.push(cx - cw, cx + cw);
+    for (const v of this.vehicles) {
+      if (!v.active) continue;
+      const t = this.arrivalTime(v.z, v.dir, v.speed);
+      if (!isFinite(t) || Math.abs(t - tCand) > tWin) continue;
+      const w = v.halfW * CONFIG.vehicleHitboxScale;
+      blocks.push(v.x - w, v.x + w);
+    }
+    // widest free run across the drivable width, sweeping the interval starts
+    let widest = 0;
+    let cursor = -ROAD.edgeX;
+    // insertion sort over pairs: the list is tiny and this allocates nothing
+    for (let i = 2; i < blocks.length; i += 2) {
+      const a = blocks[i];
+      const b = blocks[i + 1];
+      let j = i - 2;
+      while (j >= 0 && blocks[j] > a) {
+        blocks[j + 2] = blocks[j];
+        blocks[j + 3] = blocks[j + 1];
+        j -= 2;
+      }
+      blocks[j + 2] = a;
+      blocks[j + 3] = b;
+    }
+    for (let i = 0; i < blocks.length; i += 2) {
+      if (blocks[i] > cursor) {
+        const gap = blocks[i] - cursor;
+        if (gap > widest) widest = gap;
+      }
+      if (blocks[i + 1] > cursor) cursor = blocks[i + 1];
+    }
+    if (ROAD.edgeX - cursor > widest) widest = ROAD.edgeX - cursor;
+    return widest;
+  }
+
+  private canPlace(lane: number, z: number, halfL: number, halfW: number, dir: 1 | -1, speed: number): boolean {
     for (const v of this.vehicles) {
       if (!v.active || v.lane !== lane) continue;
       if (Math.abs(v.z - z) < CONFIG.sameLaneGapM + halfL + v.halfL) return false;
     }
-    if (lane >= 0 && lane <= 3) {
-      const occupied = new Set<number>([lane]);
-      for (const v of this.vehicles) {
-        if (v.active && v.lane >= 0 && v.lane <= 3 && Math.abs(v.z - z) < CONFIG.antiWallWindowM) {
-          occupied.add(v.lane);
-        }
-      }
-      if (occupied.size >= 4) return false;
-    }
-    return true;
+    const tCand = this.arrivalTime(z, dir, speed);
+    if (!isFinite(tCand)) return true; // never reaches the player, cannot wall them
+    const tWin = CONFIG.antiWallWindowM / Math.max(this.lastPlayerSpeed, 1);
+    const need = CONFIG.minCorridorMult * 2 * this.lastPlayerR;
+    return this.widestCorridor(lane, halfW, tCand, tWin) >= need;
   }
 
   private laneHasVehicleNear(lane: number, z: number, window: number): boolean {
@@ -583,7 +649,10 @@ export class Traffic {
     exactX?: number,
   ): boolean {
     if (this.activeCount >= CONFIG.trafficMaxActive) return false;
-    if (!this.canPlace(lane, z, 3.5)) return false;
+    const isStaticType = type === 'guaguaParada' || type === 'cart';
+    const range = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
+    const planSpeed = isStaticType ? 0 : (speedOverride ?? (range[0] + range[1]) / 2);
+    if (!this.canPlace(lane, z, 3.5, this.typeHalfW.get(type) ?? 1, dir, planSpeed)) return false;
     for (const v of this.vehicles) {
       if (v.active || v.type !== type) continue;
       v.active = true;
@@ -591,14 +660,12 @@ export class Traffic {
       v.dir = dir;
       v.z = z;
       v.passed = false;
-      const isStatic = type === 'guaguaParada' || type === 'cart';
-      if (isStatic) {
+      if (isStaticType) {
         v.speed = 0;
         v.driftAmp = 0;
         v.baseX = lane === 4 ? ROAD.shoulderCenters[1] : ROAD.shoulderCenters[0];
         v.group.rotation.y = (Math.random() - 0.5) * 0.14;
       } else {
-        const range = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
         v.speed = speedOverride ?? rand(range[0], range[1]);
         v.driftAmp = exactX === undefined ? Math.random() * 0.3 : 0; // Dominican lane discipline
         v.baseX = exactX ?? ROAD.laneCenters[lane] + rand(-0.4, 0.4);
@@ -773,6 +840,8 @@ export class Traffic {
     this.lastSpeed = ctx.speed;
     this.lastPlayerX = ctx.playerX;
     this.lastPlayerCv = ctx.playerCv;
+    this.lastPlayerR = ctx.playerR;
+    this.lastPlayerSpeed = ctx.speed;
 
     const blinkOn = this.time % 0.9 < 0.45;
 

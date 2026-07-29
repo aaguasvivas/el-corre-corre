@@ -163,7 +163,13 @@ export const CONFIG = {
   // the wrong way, oncoming filler aims for the lane you are actually in.
   cvTargetBias: 0.65, // FEEL: chance a CV-time oncoming spawn picks your lane
   sameLaneGapM: 16, // min same-lane spacing at spawn; keeps convoys threadable
-  antiWallWindowM: 14, // z window in which all 4 lanes must never be occupied at once
+  antiWallWindowM: 14, // window (converted to arrival time) for the corridor check
+  // FEEL / SACRED: the brief's rule. Never commit a spawn unless a continuous
+  // gap of this many player widths survives across the whole road, shoulders
+  // included. Lower it and the game starts walling you; raise it and traffic
+  // thins out. Measure bot survival after changing it.
+  minCorridorMult: 1.7,
+  laneJitterM: 0.4, // lane-center jitter a spawn may be given, budgeted for in validation
   fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
 
   // Wave patterns
