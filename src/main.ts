@@ -529,7 +529,12 @@ requestAnimationFrame(frame);
   worldDist: () => Math.round(world.distance),
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   dog: () => world.debugViralata(),
-  audio: () => ({ unlocked: audio.unlocked, muted: audio.muted, ctx: audio.ctxState }),
+  audio: () => ({
+    unlocked: audio.unlocked,
+    muted: audio.muted,
+    ctx: audio.ctxState,
+    layers: audio.layerGains,
+  }),
   vehicle: () => selectedVehicle,
   selectVehicle: (id: VehicleId) => selectVehicle(id),
   share: () => doShare(),

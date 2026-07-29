@@ -261,7 +261,10 @@ export const CONFIG = {
   // Crash and restart. FEEL: this loop is the whole game
   crashSlowmoSec: 0.5, // real seconds of slow motion before the card appears
   crashTimeScale: 0.2, // sim speed during the slow-mo
-  restartDebounceSec: 0.25, // ignore taps this long after the card shows
+  // FEEL: the brief wants OTRA VEZ responsive within 0.5 s of the crash. The
+  // card lands at crashSlowmoSec; this guard only has to outlast the stray
+  // pointerup from the finger that was still steering.
+  restartDebounceSec: 0.15, // ignore taps this long after the card shows
   closeCallShare: 0.15, // FEEL: "te quedaste a N" shows when within this fraction of the record
 
   // Juice

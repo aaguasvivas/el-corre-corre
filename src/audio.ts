@@ -94,6 +94,13 @@ export class AudioEngine {
     return this.ctx ? this.ctx.state : 'none';
   }
 
+  // Test probe: the intensity layers should visibly swell with the combo.
+  get layerGains(): { hat: number; bass: number } {
+    return this.ctx
+      ? { hat: +this.layerHat.gain.value.toFixed(2), bass: +this.layerBass.gain.value.toFixed(2) }
+      : { hat: 0, bass: 0 };
+  }
+
   setMuted(m: boolean): void {
     this.mutedFlag = m;
     try {
