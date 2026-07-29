@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD } from './config';
+import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 
 const CHUNK_LEN = 30;
 const CHUNK_COUNT = 7;
@@ -268,20 +269,12 @@ function buildAtlas(): Atlas {
   g.fillText('Av. George Washington', 158, 333);
   put('street', 8, 310, 300, 44);
 
-  // La bandera: white cross, blue and red quadrants
+  // La bandera, escudo and all (see flag.ts for why the escudo is not optional)
   const fx = 340;
   const fy = 8;
-  const fw = 150;
-  const fh = 100;
-  g.fillStyle = hex(PALETTE.flagBlue);
-  g.fillRect(fx, fy, fw / 2, fh / 2);
-  g.fillRect(fx + fw / 2, fy + fh / 2, fw / 2, fh / 2);
-  g.fillStyle = hex(PALETTE.flagRed);
-  g.fillRect(fx + fw / 2, fy, fw / 2, fh / 2);
-  g.fillRect(fx, fy + fh / 2, fw / 2, fh / 2);
-  g.fillStyle = '#ffffff';
-  g.fillRect(fx, fy + fh / 2 - 9, fw, 18);
-  g.fillRect(fx + fw / 2 - 9, fy, 18, fh);
+  const fw = 160;
+  const fh = fw / FLAG_ASPECT;
+  drawDominicanFlag(g, fx, fy, fw);
   put('flag', fx, fy, fw, fh);
 
   g.fillStyle = '#ffffff';
@@ -457,7 +450,7 @@ function makeFlagpole(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
   pole.translate(0, 2.5, 0);
   const ball = uvFill(new THREE.SphereGeometry(0.09, 6, 5), rects.white);
   ball.translate(0, 5.05, 0);
-  const flag = quadUV(1.45, 0.95, rects.flag);
+  const flag = quadUV(1.52, 0.95, rects.flag); // 8:5, la bandera's real ratio
   flag.translate(0.78, 4.45, 0);
   flag.rotateY(0.5);
   return mergeGeometries([pole, ball, flag])!;

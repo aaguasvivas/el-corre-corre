@@ -4,6 +4,7 @@
 
 import { VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type RunResult } from './score';
+import { drawDominicanFlag } from './flag';
 
 type Lang = 'es' | 'en';
 const LANG_KEY = 'ecc.v1.lang';
@@ -35,7 +36,7 @@ const STRINGS = {
     shareAsk: '¿Me lo puedes ganar?',
     ariaSound: 'Sonido',
     ariaPause: 'Pausa',
-    gameOverTitles: ['¡Te dieron, loco!', '¡Diablo!', '¡Eso tuvo feo!'],
+    gameOverTitles: ['¡Te dieron, loco!', '¡Diache!', '¡Eso tuvo feo!'],
     cvPill: '¡EN CONTRA VÍA! ×2',
     trickPillBike: '¡CABALLITO! ×1.5',
     trickPillCar: '¡DERRAPE! ×1.5',
@@ -45,7 +46,7 @@ const STRINGS = {
     obelisco: '¡El Obelisco!',
     multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
     nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
-    ladder: ['¡Eso!', '¡Duro!', '¡Diablo!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
+    ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
   },
   en: {
     subtitle: "Let's go, we're late!",
@@ -89,6 +90,29 @@ const VEHICLE_IDS: VehicleId[] = ['pasola', 'motor', 'civic'];
 
 const BANANA_SVG =
   '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 7 C5 15 13 20 20 15 C15 22 4 19 2 9 Z" fill="#f4c430" stroke="#7cb342" stroke-width="1.4"/></svg>';
+
+// La bandera, properly: the white cross quarters it, blue at the upper hoist
+// and lower fly, red at the upper fly and lower hoist, and el escudo in the
+// middle. Without the escudo it just reads as the French flag, which is the
+// one thing a Dominican flag must never do.
+const FLAG_SVG = `<svg class="flag-svg" viewBox="0 0 80 50" role="img" aria-label="Bandera dominicana">
+  <rect width="80" height="50" fill="#ffffff"/>
+  <rect x="0" y="0" width="36" height="21" fill="#002d62"/>
+  <rect x="44" y="0" width="36" height="21" fill="#ce1126"/>
+  <rect x="0" y="29" width="36" height="21" fill="#ce1126"/>
+  <rect x="44" y="29" width="36" height="21" fill="#002d62"/>
+  <g class="escudo">
+    <path d="M39.4 33.2c-5-1.1-7.6-5.2-7.2-10.6" fill="none" stroke="#2f7d32" stroke-width="1.9" stroke-linecap="round"/>
+    <path d="M40.6 33.2c5-1.1 7.6-5.2 7.2-10.6" fill="none" stroke="#2f7d32" stroke-width="1.9" stroke-linecap="round"/>
+    <path d="M33.6 25.4l-1.9 1.5M33 21.9l-2.1.9M33.4 18.6l-1.9-.2" stroke="#2f7d32" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M46.4 25.4l1.9 1.5M47 21.9l2.1.9M46.6 18.6l1.9-.2" stroke="#2f7d32" stroke-width="1.2" stroke-linecap="round"/>
+    <rect x="33.2" y="13.1" width="13.6" height="2.2" rx="1.1" fill="#002d62"/>
+    <rect x="33.8" y="33.4" width="12.4" height="2.2" rx="1.1" fill="#ce1126"/>
+    <path d="M35 16.9h10v8.1L40 30.4 35 25z" fill="#f7f3e8" stroke="#002d62" stroke-width="0.8"/>
+    <rect x="39.3" y="18.5" width="1.4" height="8" fill="#f4c430"/>
+    <rect x="37.1" y="20.8" width="5.8" height="1.4" fill="#f4c430"/>
+  </g>
+</svg>`;
 
 export interface UICallbacks {
   onStart(): void;
@@ -223,7 +247,7 @@ export class UI {
           <span class="logo-el">EL</span>
           <span class="logo-line">CORRE</span>
           <span class="logo-line">CORRE</span>
-          <div class="flagbar"><i class="fb-blue"></i><i class="fb-white"></i><i class="fb-red"></i></div>
+          <div class="flagbar">${FLAG_SVG}</div>
         </div>
         <div id="subtitle" class="subtitle"></div>
         <div id="vrow" class="vrow">${statBars()}</div>
@@ -725,17 +749,20 @@ export class UI {
     stroked('CORRE', 0, 344, 130, '#ffffff', '#002d62', 16);
     g.restore();
 
-    const barW = 420;
-    const seg = barW / 3;
-    const colors = ['#002d62', '#ffffff', '#ce1126'];
-    colors.forEach((col, i) => {
-      g.fillStyle = col;
-      g.fillRect(540 - barW / 2 + i * seg, 420, seg, 16);
-    });
+    // La bandera under the logo, escudo and all. The three-band version this
+    // replaced read as the French flag on a group-chat thumbnail. Sized to the
+    // band between the wordmark and the ¡NUEVO RÉCORD! badge.
+    const flagW = 120;
+    g.save();
+    g.shadowColor = 'rgba(0,45,98,0.35)';
+    g.shadowBlur = 0;
+    g.shadowOffsetY = 4;
+    drawDominicanFlag(g, 540 - flagW / 2, 396, flagW);
+    g.restore();
 
     if (r.isNewRecord) {
       g.save();
-      g.translate(540, 505);
+      g.translate(540, 520); // clears the flag above it
       g.rotate(-0.04);
       g.fillStyle = '#ce1126';
       g.beginPath();

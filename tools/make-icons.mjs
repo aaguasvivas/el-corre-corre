@@ -68,7 +68,77 @@ function surface(size) {
         for (let xx = l; xx < r; xx++) put(xx, yy, col);
       }
     },
+    // filled convex polygon, even-odd scanline. Used for el escudo's shield.
+    poly(pts, col) {
+      const ys = pts.map((p) => p[1] * u);
+      const y0 = Math.floor(Math.min(...ys)), y1 = Math.ceil(Math.max(...ys));
+      for (let yy = y0; yy <= y1; yy++) {
+        const xs = [];
+        for (let i = 0; i < pts.length; i++) {
+          const a = [pts[i][0] * u, pts[i][1] * u];
+          const b = [pts[(i + 1) % pts.length][0] * u, pts[(i + 1) % pts.length][1] * u];
+          if ((a[1] <= yy && b[1] > yy) || (b[1] <= yy && a[1] > yy)) {
+            xs.push(a[0] + ((yy - a[1]) / (b[1] - a[1])) * (b[0] - a[0]));
+          }
+        }
+        xs.sort((p, q) => p - q);
+        for (let i = 0; i + 1 < xs.length; i += 2) {
+          for (let xx = Math.round(xs[i]); xx <= Math.round(xs[i + 1]); xx++) put(xx, yy, col);
+        }
+      }
+    },
+    // thick arc, for the escudo's laurel and palm
+    arc(cx, cy, r, a0, a1, thick, col) {
+      const steps = Math.max(24, Math.ceil((a1 - a0) * r * u));
+      const half = (thick * u) / 2;
+      for (let i = 0; i <= steps; i++) {
+        const a = a0 + ((a1 - a0) * i) / steps;
+        const px0 = (cx + Math.cos(a) * r) * u;
+        const py0 = (cy + Math.sin(a) * r) * u;
+        for (let yy = Math.floor(py0 - half); yy <= Math.ceil(py0 + half); yy++) {
+          for (let xx = Math.floor(px0 - half); xx <= Math.ceil(px0 + half); xx++) {
+            const dx = xx - px0, dy = yy - py0;
+            if (dx * dx + dy * dy <= half * half) put(xx, yy, col);
+          }
+        }
+      }
+    },
   };
+}
+
+// ---------------------------------------------------------------------------
+// La bandera dominicana, matching src/flag.ts. Authored in the same 80 x 50
+// space, then placed. Without el escudo it reads as the French flag.
+// ---------------------------------------------------------------------------
+
+// ox, oy, w are all in the same 1024 authoring space the surface uses.
+function drawFlag(s, ox, oy, w) {
+  const k = w / 80;                 // flag-space unit -> authoring space
+  const L = (n) => n * k;
+  const X = (n) => ox + n * k;
+  const Y = (n) => oy + n * k;
+  const C = {
+    white: [0xff, 0xff, 0xff], blue: [0x00, 0x2d, 0x62], red: [0xce, 0x11, 0x26],
+    green: [0x2f, 0x7d, 0x32], cream: [0xf7, 0xf3, 0xe8], gold: [0xf4, 0xc4, 0x30],
+  };
+  s.rect(X(0), Y(0), L(80), L(50), C.white);
+  s.rect(X(0), Y(0), L(36), L(21), C.blue);
+  s.rect(X(44), Y(29), L(36), L(21), C.blue);
+  s.rect(X(44), Y(0), L(36), L(21), C.red);
+  s.rect(X(0), Y(29), L(36), L(21), C.red);
+  // laurel and palm: two arcs hugging the shield, left and right
+  s.arc(X(40), Y(25.5), L(8.4), Math.PI * 0.55, Math.PI * 1.12, L(1.9), C.green);
+  s.arc(X(40), Y(25.5), L(8.4), Math.PI * -0.12, Math.PI * 0.45, L(1.9), C.green);
+  // DIOS PATRIA LIBERTAD above, REPUBLICA DOMINICANA below
+  s.rect(X(33.2), Y(13.1), L(13.6), L(2.2), C.blue);
+  s.rect(X(33.8), Y(33.4), L(12.4), L(2.2), C.red);
+  // el escudo, with the gold cross
+  s.poly(
+    [[X(35), Y(16.9)], [X(45), Y(16.9)], [X(45), Y(25)], [X(40), Y(30.4)], [X(35), Y(25)]],
+    C.cream,
+  );
+  s.rect(X(39.3), Y(18.5), L(1.4), L(8), C.gold);
+  s.rect(X(37.1), Y(20.8), L(5.8), L(1.4), C.gold);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,24 +221,26 @@ function drawIcon(size) {
   // dashed center line
   for (let y = 500; y < 1024; y += 120) s.rect(501, y, 22, 70, C.centerLine);
 
+  // El motoconcho, lifted to leave the base clear for la bandera
   const cx = 512;
-  s.rect(cx - 46, 742, 92, 168, C.dark);      // rear wheel
-  s.rect(cx - 104, 660, 208, 100, C.red);     // body
-  s.rect(cx - 78, 618, 156, 52, C.dark);      // seat
-  s.rect(cx - 168, 596, 336, 26, C.chrome);   // handlebar
-  s.rect(cx - 154, 590, 40, 40, C.dark);      // grips
-  s.rect(cx + 114, 590, 40, 40, C.dark);
-  s.rect(cx - 128, 606, 62, 96, C.teal);      // arms
-  s.rect(cx + 66, 606, 62, 96, C.teal);
-  s.rect(cx - 70, 470, 140, 150, C.teal);     // torso
-  s.rect(cx - 54, 356, 108, 112, C.skin);     // head
-  s.rect(cx - 68, 322, 136, 50, C.blue);      // gorra
-  s.rect(cx - 68, 360, 136, 18, C.blue);      // brim
+  const dy = -74;
+  s.rect(cx - 46, 742 + dy, 92, 168, C.dark);      // rear wheel
+  s.rect(cx - 104, 660 + dy, 208, 100, C.red);     // body
+  s.rect(cx - 78, 618 + dy, 156, 52, C.dark);      // seat
+  s.rect(cx - 168, 596 + dy, 336, 26, C.chrome);   // handlebar
+  s.rect(cx - 154, 590 + dy, 40, 40, C.dark);      // grips
+  s.rect(cx + 114, 590 + dy, 40, 40, C.dark);
+  s.rect(cx - 128, 606 + dy, 62, 96, C.teal);      // arms
+  s.rect(cx + 66, 606 + dy, 62, 96, C.teal);
+  s.rect(cx - 70, 470 + dy, 140, 150, C.teal);     // torso
+  s.rect(cx - 54, 356 + dy, 108, 112, C.skin);     // head
+  s.rect(cx - 68, 322 + dy, 136, 50, C.blue);      // gorra
+  s.rect(cx - 68, 360 + dy, 136, 18, C.blue);      // brim
 
-  const bw = 780, bx = (1024 - bw) / 2;
-  s.rect(bx, 934, bw / 3, 56, C.blue);
-  s.rect(bx + bw / 3, 934, bw / 3, 56, C.white);
-  s.rect(bx + (2 * bw) / 3, 934, bw / 3, 56, C.red);
+  // La bandera at the base, not a three-band strip: with the escudo it reads
+  // Dominican, without it it reads French.
+  const fw = 232;
+  drawFlag(s, (1024 - fw) / 2, 846, fw);
   return s;
 }
 

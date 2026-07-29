@@ -133,27 +133,15 @@ body {
 
 .flagbar {
   display: flex;
-  width: 76%;
-  height: 10px;
+  justify-content: center;
   margin-top: 12px;
-  border-radius: 6px;
-  overflow: hidden;
 }
 
-.flagbar i {
-  flex: 1;
-}
-
-.fb-blue {
-  background: var(--blue);
-}
-
-.fb-white {
-  background: var(--white);
-}
-
-.fb-red {
-  background: var(--red);
+.flag-svg {
+  width: clamp(52px, 9vh, 76px);
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 3px 0 rgba(0, 45, 98, 0.35);
 }
 
 .subtitle {
@@ -608,8 +596,10 @@ body {
     font-size: 40px;
   }
   .flagbar {
-    height: 6px;
     margin-top: 5px;
+  }
+  .flag-svg {
+    width: 44px;
   }
   .subtitle {
     margin-top: 9px;

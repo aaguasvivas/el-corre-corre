@@ -109,7 +109,7 @@ Route variety: the world transitions every ~1.2km between themed *tramos*, each 
 ## Scoring & the slang ladder
 - Distance +1/m · plátano +10 · near-miss +25 × combo · airtime +15/s · wheelie +5/s — **everything ×2 en contra vía.**
 - Floating popups at event locations (world→screen projected), eased, staggered so they never stack unreadably.
-- **Combo ladder** (popup text at these counts, size/energy escalate): 2 **"¡Eso!"** · 3 **"¡Duro!"** · 5 **"¡Diablo!"** · 7 **"¡Tú ta' loco!"** · 10 **"¡ETE E' UN LOCO!"** · 15 **"¡LEYENDA DEL MALECÓN!"**
+- **Combo ladder** (popup text at these counts, size/energy escalate): 2 **"¡Eso!"** · 3 **"¡Duro!"** · 5 **"¡Diache!"** · 7 **"¡Tú ta' loco!"** · 10 **"¡ETE E' UN LOCO!"** · 15 **"¡LEYENDA DEL MALECÓN!"**
 - Game over: Puntos (big), Récord, Distancia, Plátanos. All-time + per-vehicle records persist in `localStorage`.
 - New record: burst through La Cinta del Récord → flag-color confetti + **"¡NUEVO RÉCORD!"**
 ## Difficulty & spawning
@@ -152,14 +152,14 @@ export const CONFIG = {
 - **SFX:** plátano = 3-note marimba run up · near-miss whoosh · scrape grind · crash = noise burst + falling tone · UI click · bendición bell chord.
 - Mute toggle persisted. AudioContext resumes on first tap.
 ## UI copy — exact strings
-- **Title:** logo **EL CORRE CORRE** (stacked, chunky, slight italic lean, flag-color accent bar) · subtitle *"¡Dale, que vamo' tarde!"* · **"TOCA PA' EMPEZAR"** (desktop: "DALE A ESPACIO") · Récord · mute.
+- **Title:** logo **EL CORRE CORRE** (stacked, chunky, slight italic lean, la bandera dominicana under it: white cross, blue and red quadrants, **el escudo in the middle**; a three-band strip reads as the French flag and is never acceptable) · subtitle *"¡Dale, que vamo' tarde!"* · **"TOCA PA' EMPEZAR"** (desktop: "DALE A ESPACIO") · Récord · mute.
 - **Vehicle cards** (all unlocked, stat bars Velocidad / Manejo / Aguante):
   - **LA PASOLA** — hitbox −25%, best handling, speed cap 36. *"Chiquita pero cumplidora."*
   - **EL MOTOR** (default) — balanced. *"El clásico del barrio."*
   - **EL CIVIC TUNEAO** — +15% speed & score, hitbox +40%, heavier steering, underglow. *"Que se oiga."*
 - **HUD:** score top-center (big) · combo counter with slang tier · plátano count · **"¡EN CONTRA VÍA! ×2"** pulsing when active · pause.
 - **Pause:** "PAUSA" — Seguir / Menú.
-- **Game over:** rotate **"¡Te dieron, loco!"** / **"¡Diablo!"** / **"¡Eso tuvo feo!"** · breakdown · big **OTRA VEZ** · smaller **MENÚ** · Compartir (share card).
+- **Game over:** rotate **"¡Te dieron, loco!"** / **"¡Diache!"** / **"¡Eso tuvo feo!"** · breakdown · big **OTRA VEZ** · smaller **MENÚ** · Compartir (share card).
 - **Share card text:** "EL CORRE CORRE" + score + "en {vehicle} por el Malecón" + subtle "¿Me lo puedes ganar?"
 ## Dominicanidad backlog (sprinkle wherever fitting)
 Colmado name rotation: LA FE · EL PROGRESO · DOÑA TATICA · Banca de lotería storefront · "SE VENDE EMPANADA" sign · cobrador leaning out the stopped guagua ("¡SÚBETE!" speech bubble) · chimi/fritura cart with smoke wisps · plastic chairs on sidewalks · Av. George Washington street sign · DR license plates · chichigua (kite) over the seawall · motoconcho with umbrella rig · domino slam animation at the table · Presidente-green awning (no branding) · Obelisco distance banner.
