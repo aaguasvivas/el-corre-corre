@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { CONFIG, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
-import { Traffic, type ObstacleKind, type PickupKind, type VehicleType } from './traffic';
+import { Traffic, type ObstacleKind, type PickupKind, type StepCtx, type VehicleType } from './traffic';
 import { Score, type RunResult } from './score';
 import { UI } from './ui';
 import { AudioEngine } from './audio';
@@ -49,6 +49,13 @@ let speed: number = CONFIG.baseSpeed;
 let currentEff: number = CONFIG.baseSpeed;
 let currentNorm = 0;
 let elapsed = 0;
+
+// Reused every fixed step so the 120 Hz loop allocates nothing.
+const stepCtx: StepCtx = {
+  ds: 0, dt: 0, elapsed: 0, speed: 0, playerX: 0, playerY: 0, playerR: 0,
+  playerCv: false, live: false, airborne: false, wheelie: false, magnet: false,
+};
+const scoreOpts = { airborne: false, wheelie: false };
 let scrapeTimer = 0;
 let hoyoTimer = 0;
 let crashRealT = 0;
@@ -374,24 +381,27 @@ function stepSim(h: number): void {
   score.setWheelie(live && player.isWheelie);
   ui.setCaballito(live && player.isWheelie);
 
-  traffic.step({
-    ds,
-    dt: h,
-    elapsed,
-    speed: effSpeed,
-    playerX: player.x,
-    playerY: player.y,
-    playerR: player.radius,
-    playerCv: cv,
-    live,
-    airborne: player.isAirborne,
-    wheelie: player.clearsGroundHazards,
-    magnet: imanT > 0,
-  });
+  // Mutated in place: this runs at 120 Hz, and the brief's rule is zero
+  // allocations in hot loops.
+  stepCtx.ds = ds;
+  stepCtx.dt = h;
+  stepCtx.elapsed = elapsed;
+  stepCtx.speed = effSpeed;
+  stepCtx.playerX = player.x;
+  stepCtx.playerY = player.y;
+  stepCtx.playerR = player.radius;
+  stepCtx.playerCv = cv;
+  stepCtx.live = live;
+  stepCtx.airborne = player.isAirborne;
+  stepCtx.wheelie = player.clearsGroundHazards;
+  stepCtx.magnet = imanT > 0;
+  traffic.step(stepCtx);
 
   if (live) {
     player.step(h, effSpeed);
-    score.step(ds, h, { airborne: player.isAirborne, wheelie: player.isWheelie });
+    scoreOpts.airborne = player.isAirborne;
+    scoreOpts.wheelie = player.isWheelie;
+    score.step(ds, h, scoreOpts);
 
     // Score momentum: the run pays more the deeper you get
     if (score.distMult !== shownMult) {

@@ -154,14 +154,25 @@ testable deterministically anyway:
   guaguas/carts; both lane types get traffic). Test runs die; design tests to
   restart on `state() !== 'playing'`.
 
-**Baselines to preserve (re-measure after perf work, flag regressions):**
-- Parked-bot survival: own lane ~27 s; contra vía lane ~9 to 24 s (CV must
-  stay clearly deadlier).
-- Blind zigzag bot: ~30 s median at current difficulty.
-- Rendering: ~190-210 draw calls, ~30 k triangles, pixelRatio capped at 2.
-- Build: clean tsc, single ~540 kB js chunk (~140 kB gzip; the vite chunk-size
+**Baselines to preserve (re-measure after perf work, flag regressions).**
+Updated at the end of Phase 6; the older numbers below it are kept for history.
+- Parked-bot survival, 9 runs each, 45 s cap: own lane median 45 s (6 of 9
+  reach the cap), contra vía median 25.2 s. CV must stay clearly deadlier.
+- Rendering: median ~107 draw calls, p90 ~125, max ~139, ~30 k triangles,
+  pixelRatio capped at 2. The record-tape confetti burst adds +3, not +46.
+- Soak: 20+ min of sim and 300+ runs with DOM node count flat, heap
+  sawtoothing without trend, and correct rendering past 30 km.
+- Build: clean tsc, single ~620 kB js chunk (~164 kB gzip; the vite chunk-size
   warning is accepted).
 - Zero console errors or warnings ever (three.js deprecations count).
+- Pre-Phase-6 history: draw calls were median 195 / p90 218 / max 230, and
+  bot survival was measured with a different bot, so do not compare directly.
+
+**Testing gotcha:** `__ecc.speed()` returns the BASE ramp speed, not the
+effective speed. Pothole, scrape and cafecito modifiers apply to `effSpeed`.
+To measure what the player actually feels, differentiate `worldDist()` over a
+window of at least 0.5 s (it is integer-quantised, so single-tick deltas
+alternate between 0 and full).
 
 **Per-change verification ritual:** `npx tsc --noEmit` -> reload pane ->
 scripted `__ecc` asserts for the changed behavior -> screenshot anything
@@ -170,7 +181,25 @@ descriptive message ending in the standard Claude Code co-author line.
 
 ---
 
-## 5. PHASE 6: Ship prep (the next work, in execution order)
+## 5. PHASE 6: Ship prep, done except the Capacitor wrap
+
+Completed and pushed: the perf pass (5.1), the soak (5.2), the runtime half of
+the QA checklist (5.3), the Game Center hook and the app icon (5.4 partial),
+plus 30 findings from a five-dimension read-only audit. See PLAYTEST.md for
+the evidence table and `git log` for the per-area commits.
+
+**Still open in Phase 6:**
+1. The Capacitor iOS wrap itself, 5.4 steps 1 to 5 and 7. Blocked only on
+   Adelson confirming the bundle id.
+2. The `ship-audit` skill run (5.5) before anyone says "release-ready".
+3. Everything marked REAL DEVICE in 5.3.
+
+`node tools/make-icons.mjs` regenerates `public/icon-1024.png` (the Capacitor
+and App Store source) and `public/icon-180.png` (apple-touch-icon) from the
+locked palette with no dependencies and no browser. Edit the draw calls in
+that file to change the icon; it is deterministic.
+
+### Original plan, kept for reference
 
 Goal per CLAUDE.md: performance audit, 10-minute soak, Capacitor readiness,
 full QA checklist, leaving a clean Game Center hook. Done when every box in

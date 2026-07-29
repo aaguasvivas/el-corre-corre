@@ -128,8 +128,10 @@ export class Score {
   step(ds: number, dt: number, opts: { airborne: boolean; wheelie: boolean }): void {
     this.distance += ds;
     this.distTier = 1;
-    for (const [m, mult] of CONFIG.distMultTiers) {
-      if (this.distance >= m) this.distTier = mult;
+    // Indexed: destructuring in a 120 Hz loop allocates an iterator per tier.
+    for (let i = 0; i < CONFIG.distMultTiers.length; i++) {
+      const tier = CONFIG.distMultTiers[i];
+      if (this.distance >= tier[0]) this.distTier = tier[1];
     }
     this.pointsF += ds * this.mult();
     if (opts.airborne) {
