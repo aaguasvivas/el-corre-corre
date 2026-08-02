@@ -244,10 +244,40 @@ function drawIcon(size) {
   return s;
 }
 
+// The launch screen: golden-hour sky, the sun, the road running to the
+// horizon. Deliberately no text or rider (HIG says launch screens should look
+// like a first frame, and the storyboard aspect-fills this on every device).
+function drawSplash(size) {
+  const s = surface(size);
+  s.vgrad([[0, C.skyTop], [0.5, C.skyMid], [0.74, C.skyWarm], [1, C.skyLow]]);
+  s.circle(512, 470, 300, C.sunHalo);
+  s.circle(512, 470, 210, C.sun);
+  s.wedge(432, 592, 560, 60, 964, 1024, C.asphalt);
+  for (let y = 560; y < 1024; y += 110) s.rect(503, y, 18, 62, C.centerLine);
+  return s;
+}
+
 mkdirSync(resolve(ROOT, 'public'), { recursive: true });
 for (const size of [1024, 180]) {
   const s = drawIcon(size);
   const out = resolve(ROOT, `public/icon-${size}.png`);
   writeFileSync(out, encodePng(size, s.px));
   console.log(`wrote public/icon-${size}.png`);
+}
+
+// If the Capacitor iOS project exists, refresh its icon and splash in place.
+// The splash lives only here, never in public/, so the web bundle stays lean.
+import { existsSync } from 'node:fs';
+const ICONSET = resolve(ROOT, 'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png');
+const SPLASHSET = resolve(ROOT, 'ios/App/App/Assets.xcassets/Splash.imageset');
+if (existsSync(ICONSET)) {
+  writeFileSync(ICONSET, encodePng(1024, drawIcon(1024).px));
+  console.log('wrote ios AppIcon (1024, single-size)');
+}
+if (existsSync(SPLASHSET)) {
+  const splash = encodePng(2732, drawSplash(2732).px);
+  for (const f of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']) {
+    writeFileSync(resolve(SPLASHSET, f), splash);
+  }
+  console.log('wrote ios Splash (2732 x3)');
 }

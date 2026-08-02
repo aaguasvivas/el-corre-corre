@@ -36,9 +36,10 @@ Fixed this phase from the audit, worth a glance:
   accidental caballito, and you can start a second caballito without lifting.
 
 ### Only you can do these
-- A real iPhone pass: 60 fps, safe areas, the share sheet, haptics.
-- Decide the bundle id before the Capacitor wrap. Personal pattern like
-  anota's `dev.anota.app`; your call, nothing is preset.
+- The wrap is built (`dev.elcorrecorre.app`, compiles for simulator). Open it
+  with `npx cap open ios`, pick your signing team, run it on your iPhone.
+- A real iPhone pass: 60 fps, safe areas, the share sheet, real haptics (the
+  Taptic Engine is wired now; web vibrate remains the fallback).
 
 ### Evidence on file (all re-measured this phase)
 - Draw calls: median 195 → 107, p90 218 → 125, max 230 → 139.
