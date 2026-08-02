@@ -37,8 +37,8 @@ Fixed this phase from the audit, worth a glance:
 
 ### Only you can do these
 - A real iPhone pass: 60 fps, safe areas, the share sheet, haptics.
-- Confirm the bundle id before the Capacitor wrap (suggested
-  `dev.coachable.elcorrecorre`).
+- Decide the bundle id before the Capacitor wrap. Personal pattern like
+  anota's `dev.anota.app`; your call, nothing is preset.
 
 ### Evidence on file (all re-measured this phase)
 - Draw calls: median 195 → 107, p90 218 → 125, max 230 → 139.

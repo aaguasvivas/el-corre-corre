@@ -257,8 +257,10 @@ vibrates; iOS web silently no-ops, correct).
 ### 5.4 Capacitor iOS wrap
 
 1. `npm i @capacitor/core @capacitor/ios @capacitor/haptics && npm i -D @capacitor/cli`
-2. `npx cap init "El Corre Corre" dev.coachable.elcorrecorre --web-dir dist`
-   (confirm bundle id with Adelson first).
+2. `npx cap init "El Corre Corre" <BUNDLE_ID> --web-dir dist`. BUNDLE_ID is
+   unset and is Adelson's decision alone. It must be a personal identifier in
+   the style of his other apps (anota uses `dev.anota.app`), and it must never
+   be derived from an employer or any work domain. Do not invent one; ask.
 3. `npm run build && npx cap add ios && npx cap sync`.
 4. Swap `src/haptics.ts` internals to the Capacitor Haptics plugin behind the
    same three functions with dynamic import + web fallback (the file was
