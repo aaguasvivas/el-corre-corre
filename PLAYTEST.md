@@ -5,7 +5,33 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Phase 7 (current): Los Tramos
+## Phone feel round 1 (current): your five notes, addressed
+
+1. **The stray French flags are dead.** They were the Obelisco (three stacked
+   blue/white/red bands read as a wrapped tricolor) and La Cinta (blue top
+   stripe, red bottom stripe read as a horizontal one at speed). The Obelisco
+   now wears mural-colored bands (teal, gold, coral, for the Mirabal mural)
+   plus la bandera itself, escudo and all, facing the road. La Cinta is a
+   white finish tape with gold edges. Flagpoles were already correct.
+2. **Touch steering pushed toward crisp**: the bike chases your finger harder
+   (touchServoGain 9 to 13), a full drag covers more road (1.15 to 1.3
+   widths), carve accel 38 to 42. Tell me: smooth AND responsive now, or did
+   any drift feel disappear?
+3. **The yellow line is no longer free.** El rebase: every few seconds an
+   inner-lane vehicle swings onto the center seam to overtake, both
+   directions, eased in and out so it telegraphs. Measured with parked bots:
+   own lane 43.6 s median, the seam 32.5 s, contra via 31.2 s. The seam is
+   now as deadly as contra via but pays nothing, so the strategy is honest:
+   safe in your lane, double en contra via, nothing on the line.
+4. **Speed arc widened**: starts at 16 (was 18), ramps 0.16/s (was 0.12), so
+   it is calmer for ten seconds and meaner sooner. Density opens at 0.4 and
+   fills over 95 s with a higher late spawn rate. Does the escalation feel
+   like the fun now?
+5. **The tour never stagnates**: tramos are 1000 m now, so the full national
+   lap (Malecon, Zona, Campo) is 3 km and repeats forever. A deep run laps
+   the country twice.
+
+## Phase 7: Los Tramos
 
 The run now tours the country: EL MALECÓN, then LA ZONA COLONIAL at 1200 m,
 then EL CAMPO at 2400 m, then back around. The place name pops at each border

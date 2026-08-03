@@ -1343,7 +1343,7 @@ export class World {
     this.chichiguas.push(new Chichigua(scene, PALETTE.flagRed), new Chichigua(scene, 0xf4c430));
     for (let i = 0; i < 3; i++) this.pelicans.push(new Pelican(scene));
     for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
-    this.buildObelisco(scene);
+    this.buildObelisco(scene, atlas);
   }
 
   private buildSky(scene: THREE.Scene): void {
@@ -1657,11 +1657,12 @@ export class World {
     c.width = 1024;
     c.height = 48;
     const g = c.getContext('2d')!;
+    // Finish-line tape, not a flag: white with gold edges (blue top + red
+    // bottom made it a horizontal tricolor at speed).
     g.fillStyle = '#ffffff';
     g.fillRect(0, 0, 1024, 48);
-    g.fillStyle = hex(PALETTE.flagBlue);
+    g.fillStyle = hex(PALETTE.centerLine);
     g.fillRect(0, 0, 1024, 7);
-    g.fillStyle = hex(PALETTE.flagRed);
     g.fillRect(0, 41, 1024, 7);
     g.fillStyle = hex(PALETTE.flagRed);
     g.font = 'bold 30px sans-serif';
@@ -1710,7 +1711,7 @@ export class World {
     }
   }
 
-  private buildObelisco(scene: THREE.Scene): void {
+  private buildObelisco(scene: THREE.Scene, atlas: Atlas): void {
     this.obelisco = new THREE.Group();
     const cream = toonMaterial(PALETTE.obeliscoCream);
     const add = (geo: THREE.BufferGeometry, mat: THREE.Material, y: number, ry = 0): THREE.Mesh => {
@@ -1725,11 +1726,29 @@ export class World {
     const shaft = add(new THREE.CylinderGeometry(0.52, 1.05, 15, 4), cream, 8.6, Math.PI / 4);
     shaft.castShadow = true;
     add(new THREE.ConeGeometry(0.74, 1.3, 4), cream, 16.7, Math.PI / 4);
-    // DECISION: flag-color bands stand in for the painted mural until real art
-    const bandColors = [PALETTE.flagBlue, PALETTE.flagWhite, PALETTE.flagRed];
+    // Mural-colored bands, deliberately NOT blue/white/red: three stacked
+    // flag stripes wrapped around a shaft read as the French flag, which is
+    // the one thing this game must never do. The real Obelisco wears the
+    // Mirabal mural, so the bands borrow its warm palette instead.
+    const bandColors = [PALETTE.colmadoTeal, 0xf4c430, 0xd77a61];
     bandColors.forEach((color, i) => {
       add(new THREE.BoxGeometry(2.0 - i * 0.06, 0.55, 2.0 - i * 0.06), toonMaterial(color), 3.4 + i * 0.62, Math.PI / 4);
     });
+    // And la bandera itself, correct with el escudo, as a banner facing the
+    // road the player rides on.
+    const banner = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.76, 1.1),
+      worldMaterial(new THREE.MeshBasicMaterial({ map: atlas.tex, side: THREE.DoubleSide })),
+    );
+    const fr = atlas.rects.flag;
+    const uv = banner.geometry.attributes.uv as THREE.BufferAttribute;
+    uv.setXY(0, fr.u0, fr.v1);
+    uv.setXY(1, fr.u1, fr.v1);
+    uv.setXY(2, fr.u0, fr.v0);
+    uv.setXY(3, fr.u1, fr.v0);
+    banner.position.set(-1.15, 5.2, 0);
+    banner.rotation.y = -Math.PI / 2; // face the road
+    this.obelisco.add(banner);
     this.obelisco.position.set(10.4, 0, 0);
     this.obelisco.visible = false;
     scene.add(this.obelisco);
@@ -1789,6 +1808,11 @@ export class World {
 
   debugViralata(): void {
     this.viralata.trigger();
+  }
+
+  // Test probe: where the obelisco is, so screenshots can frame it.
+  get obeliscoState(): { visible: boolean; z: number } {
+    return { visible: this.obelisco.visible, z: +this.obelisco.position.z.toFixed(1) };
   }
 
   step(ds: number, dt: number): void {

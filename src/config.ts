@@ -109,20 +109,21 @@ export const CONFIG = {
   fixedDt: 1 / 120, // fixed sim step; feel is framerate-independent
   maxFrameDt: 0.1, // clamp huge frame gaps (tab switches) so nothing teleports
 
-  // Forward motion. Ramp steepened twice by feel test ("speed IS the fun").
-  baseSpeed: 18,
+  // Forward motion. Phone feel test: "start off slow but pick up speed",
+  // so the floor dropped and the ramp steepened again. Speed IS the fun.
+  baseSpeed: 16,
   maxSpeed: 42,
-  speedRampPerSec: 0.12, // FEEL: how fast a run escalates; linear m/s gained per second
+  speedRampPerSec: 0.16, // FEEL: how fast a run escalates; linear m/s gained per second
 
   // Steering. FEEL: drifty-smooth, not twitchy. Signed off in the Phase 1 test.
   lateralMaxSpeed: 9, // FEEL: top carving speed across the road
-  lateralAccel: 38, // FEEL: how fast you reach carving speed; lower = driftier
+  lateralAccel: 42, // FEEL: how fast you reach carving speed; lower = driftier
   lateralDamping: 6.5, // FEEL: glide after releasing input; higher = stops sooner
   steerLeanMaxDeg: 22, // FEEL: rider lean at full carve
   cameraRollMaxDeg: 4, // FEEL: camera roll with carve; too high = nausea
   leanResponse: 9, // FEEL: how quickly the visual lean catches up to steering
-  touchSteerScale: 1.15, // FEEL: a full-screen drag moves you this many road widths
-  touchServoGain: 9, // FEEL: how hard the bike chases your finger target
+  touchSteerScale: 1.3, // FEEL: a full-screen drag moves you this many road widths
+  touchServoGain: 13, // FEEL: how hard the bike chases your finger target; phone test said "almost there"
   playerHalfWidth: 0.45, // visual half width, used for edge clamping
 
   // Road: 4 lanes, +x = oncoming side (the sea side; DR drives on the right)
@@ -150,11 +151,12 @@ export const CONFIG = {
   spawnAhead: 150,
   despawnBehind: 15,
   telegraphMinSec: 1.5, // sacred: min seconds between a threat appearing and reaching you
-  trafficDensityStart: 0.5,
+  // Phone feel test: bigger arc. Opens calmer, ends meaner.
+  trafficDensityStart: 0.4,
   trafficDensityMax: 1.0,
-  densityRampSec: 70,
-  gentleStartSec: 9,
-  spawnsPerSecAtFull: 1.7, // FEEL: filler spawn attempts per second at full density
+  densityRampSec: 95,
+  gentleStartSec: 10,
+  spawnsPerSecAtFull: 1.85, // FEEL: filler spawn attempts per second at full density
   gentleSpawnFactor: 0.55, // FEEL: spawn rate multiplier during the gentle window
   oncomingUnlockSec: 6, // DECISION: no oncoming traffic in the very first seconds of a run
   trafficMaxActive: 27, // FEEL: hard cap of vehicles on the road at once
@@ -171,6 +173,12 @@ export const CONFIG = {
   minCorridorMult: 1.7,
   laneJitterM: 0.4, // lane-center jitter a spawn may be given, budgeted for in validation
   fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
+  // El rebase: every so often a vehicle swings onto the center seam to
+  // overtake, the most Dominican move on the road and the reason parking on
+  // the yellow line is not a free ride. Phone test found the seam exploit.
+  overtakeEvery: [5, 10], // FEEL: seconds between overtake swings at full density
+  overtakeSec: 2.6, // FEEL: how long the swing holds the seam
+  overtakeUnlockSec: 12, // no seam pressure during the gentle open
 
   // Wave patterns
   patternIntervalMin: 2.8, // FEEL: seconds between authored waves (scaled by density)
@@ -298,7 +306,7 @@ export const CONFIG = {
 
   // Phase 7: Los Tramos. The world cycles Malecon -> Zona Colonial -> Campo,
   // one palette-and-scenery shift per stretch on the same chunk system.
-  tramoLengthM: 1200, // FEEL: meters per themed stretch; a 3-minute run tours all three
+  tramoLengthM: 1000, // FEEL: meters per themed stretch; the full national lap is 3 km and repeats forever
   // FEEL: traffic personality per tramo. Zona runs on carros publicos and
   // motoconchos; el campo belongs to camiones and motoconchos.
   tramoVehicleWeights: {

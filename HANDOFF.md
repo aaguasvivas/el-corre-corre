@@ -156,8 +156,10 @@ testable deterministically anyway:
 
 **Baselines to preserve (re-measure after perf work, flag regressions).**
 Updated at the end of Phase 6; the older numbers below it are kept for history.
-- Parked-bot survival, 9 runs each, 45 s cap: own lane median 45 s (6 of 9
-  reach the cap), contra vía median 25.2 s. CV must stay clearly deadlier.
+- Parked-bot survival after the phone-feel round (7 runs, 60 s cap): own
+  lane median 43.6 s, center seam 32.5 s, contra vía 31.2 s. The seam must
+  never be safer than a real lane (el rebase exists for exactly that), and
+  CV must stay clearly deadlier than your own lane.
 - Rendering: median ~107 draw calls, p90 ~125, max ~139, ~30 k triangles,
   pixelRatio capped at 2. The record-tape confetti burst adds +3, not +46.
 - Soak: 20+ min of sim and 300+ runs with DOM node count flat, heap

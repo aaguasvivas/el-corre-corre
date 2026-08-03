@@ -58,6 +58,7 @@ interface Vehicle {
   passed: boolean;
   driftPhase: number;
   driftAmp: number;
+  overtakeT: number; // seconds into an overtake swing; <0 means not swinging
   blinkers: THREE.Object3D[];
 }
 
@@ -356,6 +357,7 @@ export class Traffic {
   private activeCount = 0;
 
   private nextPatternAt = -1;
+  private nextOvertakeAt = -1;
   private vehiclePauseUntil = 0;
   private nextHoyoAt = -1;
   private nextPoliciaAt = -1;
@@ -409,7 +411,7 @@ export class Traffic {
         this.vehicles.push({
           type, group, active: false, lane: 0, baseX: 0, x: 0, z: 0, dir: 1,
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
-          driftPhase: Math.random() * 7, driftAmp: 0, blinkers,
+          driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, blinkers,
         });
       }
     }
@@ -862,7 +864,18 @@ export class Traffic {
         this.activeCount--;
         continue;
       }
-      if (v.driftAmp > 0) v.x = v.baseX + Math.sin(this.time * 0.55 + v.driftPhase) * v.driftAmp;
+      // x is derived fresh every frame: base, plus lane drift, plus the
+      // overtake swing. Never accumulated, so nothing can walk off its lane.
+      let vx = v.baseX;
+      if (v.driftAmp > 0) vx += Math.sin(this.time * 0.55 + v.driftPhase) * v.driftAmp;
+      if (v.overtakeT >= 0) {
+        // ease onto the seam and back off; lane 1 swings +x, lane 2 swings -x
+        v.overtakeT += dt;
+        const k = Math.sin(Math.PI * Math.min(1, v.overtakeT / CONFIG.overtakeSec));
+        vx += (v.lane === 1 ? 1 : -1) * 1.55 * k;
+        if (v.overtakeT >= CONFIG.overtakeSec) v.overtakeT = -1;
+      }
+      v.x = vx;
       v.group.position.x = v.x;
       v.group.position.z = v.z;
       for (const b of v.blinkers) b.visible = blinkOn;
@@ -970,6 +983,28 @@ export class Traffic {
       if (elapsed >= this.vehiclePauseUntil) this.spawnFiller();
     }
 
+    // El rebase: swing an inner-lane vehicle onto the center seam. This is
+    // why parking on the yellow line is not a free ride: the seam belongs to
+    // whoever is overtaking. Cadence tightens with density.
+    if (elapsed > CONFIG.overtakeUnlockSec) {
+      if (this.nextOvertakeAt < 0) {
+        this.nextOvertakeAt = elapsed + rand(CONFIG.overtakeEvery[0], CONFIG.overtakeEvery[1]);
+      }
+      if (elapsed >= this.nextOvertakeAt) {
+        this.nextOvertakeAt =
+          elapsed + rand(CONFIG.overtakeEvery[0], CONFIG.overtakeEvery[1]) / (0.5 + 0.5 * density);
+        let best: Vehicle | null = null;
+        for (const v of this.vehicles) {
+          // inner lanes only, moving, far enough out to telegraph the swing
+          if (!v.active || v.speed === 0 || v.overtakeT >= 0) continue;
+          if (v.lane !== 1 && v.lane !== 2) continue;
+          if (v.z < 45 || v.z > 150) continue;
+          if (!best || v.z < best.z) best = v; // the nearest telegraphable one
+        }
+        if (best) best.overtakeT = 0;
+      }
+    }
+
     // Standalone obstacles, carts, and power-ups on their own cadence
     this.nextHoyoAt = this.cadence(this.nextHoyoAt, CONFIG.hoyoUnlockSec, CONFIG.hoyoEvery, () => {
       const lane = Math.floor(Math.random() * 4);
@@ -1051,7 +1086,9 @@ export class Traffic {
     for (const v of this.vehicles) {
       v.active = false;
       v.group.visible = false;
+      v.overtakeT = -1;
     }
+    this.nextOvertakeAt = -1;
     for (const o of this.obstacles) {
       o.active = false;
       o.mesh.visible = false;

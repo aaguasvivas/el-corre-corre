@@ -579,6 +579,7 @@ requestAnimationFrame(frame);
   radius: () => +player.radius.toFixed(3),
   distMult: () => score.distMult,
   tramo: () => world.tramo,
+  obelisco: () => world.obeliscoState,
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },
