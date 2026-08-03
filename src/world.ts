@@ -379,26 +379,51 @@ function makeSignSet(rects: Record<string, AtlasRect>, nameIdx: number): THREE.B
   return mergeGeometries([sign, awning])!;
 }
 
+// A real palm reads as one smooth lean, not a staircase: the trunk is a chain
+// of short segments whose angle grows a little each step, every segment
+// starting exactly where the last one ended. Fronds are two boxes each, an
+// inner piece that rises and an outer piece that droops from its tip, which
+// is what gives the crown its arc.
 function makePalm(lean: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
+  const SEGS = 6;
+  const segLen = 0.8;
   let px = 0;
   let py = 0;
-  const widths = [0.34, 0.3, 0.26, 0.22];
-  for (let i = 0; i < 4; i++) {
-    cbox(parts, widths[i], 1.25, widths[i], px, py + 0.6, 0, PALETTE.palmTrunk, 0, 0, lean * 0.22);
-    py += 1.12;
-    px += lean * (i + 1) * 0.21;
+  for (let i = 0; i < SEGS; i++) {
+    const w = 0.32 - i * 0.03; // taper toward the crown
+    const a = lean * (0.12 + i * 0.11); // the curve: each segment tilts a bit more
+    const g = new THREE.BoxGeometry(w, segLen + 0.14, w); // slight overlap hides seams
+    g.translate(0, (segLen + 0.14) / 2 - 0.07, 0); // pivot at the segment base
+    g.rotateZ(-a); // positive lean bends toward +x (the sea)
+    g.translate(px, py, 0);
+    parts.push(paint(g, i % 2 ? PALETTE.palmTrunk : 0x84675a)); // subtle ring banding
+    px += Math.sin(a) * segLen;
+    py += Math.cos(a) * segLen;
   }
   const cx = px;
-  const cy = py + 0.25;
+  const cy = py + 0.18;
   const greens = [0x43a047, 0x3a8f3f, 0x4caf50];
-  for (let k = 0; k < 7; k++) {
-    const frond = new THREE.BoxGeometry(2.0, 0.06, 0.46);
-    frond.translate(1.05, 0, 0);
-    frond.rotateZ(-0.42 - (k % 2) * 0.16);
-    frond.rotateY((k / 7) * Math.PI * 2 + 0.4);
-    frond.translate(cx, cy + 0.3, 0);
-    parts.push(paint(frond, greens[k % 3]));
+  for (let k = 0; k < 8; k++) {
+    const droop = 0.55 + (k % 3) * 0.14;
+    const len = 1.9 + (k % 2) * 0.35;
+    const rise = 0.34 - (k % 3) * 0.1;
+    // inner half rises away from the crown
+    const inner = new THREE.BoxGeometry(len * 0.52, 0.06, 0.42);
+    inner.translate(len * 0.26, 0, 0);
+    inner.rotateZ(rise);
+    // outer half hangs off the inner tip and droops
+    const tipX = Math.cos(rise) * len * 0.52;
+    const tipY = Math.sin(rise) * len * 0.52;
+    const outer = new THREE.BoxGeometry(len * 0.55, 0.05, 0.3);
+    outer.translate(len * 0.27, 0, 0);
+    outer.rotateZ(-droop);
+    outer.translate(tipX, tipY, 0);
+    for (const half of [inner, outer]) {
+      half.rotateY((k / 8) * Math.PI * 2 + 0.35);
+      half.translate(cx, cy, 0);
+      parts.push(paint(half, greens[k % 3]));
+    }
   }
   for (let n = 0; n < 3; n++) {
     cgeo(
@@ -406,7 +431,7 @@ function makePalm(lean: number): THREE.BufferGeometry {
       new THREE.SphereGeometry(0.12, 6, 5),
       0x6d4c41,
       cx + Math.cos(n * 2.1) * 0.22,
-      cy + 0.12,
+      cy + 0.05,
       Math.sin(n * 2.1) * 0.22,
     );
   }

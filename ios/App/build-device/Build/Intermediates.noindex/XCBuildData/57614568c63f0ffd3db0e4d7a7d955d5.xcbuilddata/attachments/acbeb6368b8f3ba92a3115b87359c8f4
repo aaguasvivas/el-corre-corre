@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary.dia",
+    "emit-module-dependencies" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary-emit-module.dia",
+    "pch" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary.swiftdeps"
+  },
+  "/Users/Adelson/Desktop/personal/el-corre-corre/node_modules/@capacitor/haptics/ios/Sources/HapticsPlugin/Haptics.swift" : {
+    "const-values" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.swiftconstvalues",
+    "dependencies" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.d",
+    "diagnostics" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.dia",
+    "index-unit-output-path" : "/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.o",
+    "llvm-bc" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.bc",
+    "object" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.o",
+    "swift-dependencies" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics.swiftdeps",
+    "swiftmodule" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/Haptics~partial.swiftmodule"
+  },
+  "/Users/Adelson/Desktop/personal/el-corre-corre/node_modules/@capacitor/haptics/ios/Sources/HapticsPlugin/HapticsPlugin.swift" : {
+    "const-values" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.swiftconstvalues",
+    "dependencies" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.d",
+    "diagnostics" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.dia",
+    "index-unit-output-path" : "/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.o",
+    "llvm-bc" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.bc",
+    "object" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.o",
+    "swift-dependencies" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.swiftdeps",
+    "swiftmodule" : "/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Debug-iphoneos/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin~partial.swiftmodule"
+  }
+}
