@@ -291,8 +291,13 @@ export class Player {
     const tilt = upright ? 0.08 : 0.3;
     this.addStatic(new THREE.BoxGeometry(0.36, 0.5, 0.26), shirt, 0, 1.24, -0.14, tilt);
     this.addStatic(new THREE.SphereGeometry(0.17, 12, 10), PALETTE.skin, 0, 1.62, 0);
-    this.addStatic(new THREE.CylinderGeometry(0.185, 0.185, 0.1, 12), blue, 0, 1.72, 0);
-    this.addStatic(new THREE.BoxGeometry(0.26, 0.035, 0.16), blue, 0, 1.69, 0.16);
+    // la gorra: a squashed dome that actually covers the crown of the head
+    // (the old thin cylinder let the scalp poke out above it, which read as
+    // a headband on a bald man), plus the brim out front
+    const crown = new THREE.SphereGeometry(0.19, 12, 10);
+    crown.scale(1, 0.72, 1);
+    this.addStatic(crown, blue, 0, 1.665, 0);
+    this.addStatic(new THREE.BoxGeometry(0.26, 0.035, 0.16), blue, 0, 1.7, 0.19);
     this.addStatic(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, 0.25, 1.28, 0.18, -0.7);
     this.addStatic(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, -0.25, 1.28, 0.18, -0.7);
     this.addStatic(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, 0.17, 0.62, -0.2, 0.55);
@@ -378,10 +383,15 @@ export class Player {
     this.addStatic(new THREE.BoxGeometry(1.55, 0.07, 0.38), red, 0, 1.0, -1.85); // el aleron
     this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, -0.55, 0.84, -1.83);
     this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, 0.55, 0.84, -1.83);
-    // el tiguere, head out the sunroof
+    // el tiguere, head out the sunroof: a dark rim marks the opening so the
+    // head reads as emerging through it, not clipping through solid roof
+    this.addStatic(new THREE.BoxGeometry(0.52, 0.05, 0.52), dark, 0, 1.01, -0.15);
     this.addStatic(new THREE.SphereGeometry(0.16, 12, 10), PALETTE.skin, 0, 1.12, -0.15);
-    this.addStatic(new THREE.CylinderGeometry(0.175, 0.175, 0.09, 12), blue, 0, 1.22, -0.15);
-    this.addStatic(new THREE.BoxGeometry(0.25, 0.03, 0.15), blue, 0, 1.19, 0.01);
+    // la gorra, a real dome (see buildRider), not a headband
+    const crown = new THREE.SphereGeometry(0.18, 12, 10);
+    crown.scale(1, 0.72, 1);
+    this.addStatic(crown, blue, 0, 1.16, -0.15);
+    this.addStatic(new THREE.BoxGeometry(0.25, 0.03, 0.15), blue, 0, 1.19, 0.03);
     this.finishRig();
     // underglow, que se vea
     const glowPlane = new THREE.Mesh(
