@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>El Corre Corre</title>
+  <meta name="description" content="Esquiva guaguas, tira caballitos y corre en contra vía por el Malecón de Santo Domingo. Un juego dominicano de una sola mano: toca y dale." />
+  <style>
+    :root {
+      --sky: #6ec6e6; --horizon: #ffd9a0; --sun: #fff3c4;
+      --sea: #17a2b8; --deep: #0e7490; --navy: #002d62; --red: #ce1126;
+      --cream: #f2e9dc; --gold: #f4c430; --ink: #1c2431;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--ink);
+      background: linear-gradient(180deg, var(--sky) 0%, var(--horizon) 52%, var(--sun) 66%, var(--sea) 66.2%, var(--deep) 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6; -webkit-font-smoothing: antialiased; min-height: 100vh;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 64px 22px 96px; text-align: center; }
+    .logo {
+      display: inline-block; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      font-size: clamp(44px, 10vw, 72px); line-height: 0.95; color: #fff;
+      text-shadow: 0 3px 0 var(--navy), 0 6px 18px rgba(0, 45, 98, 0.35);
+      transform: rotate(-2deg); margin: 8px 0 4px;
+    }
+    .logo small { display: block; font-size: 0.38em; letter-spacing: 6px; }
+    .tag { color: var(--navy); font-weight: 700; font-size: 19px; margin: 10px 0 6px; }
+    .tag-en { color: rgba(0, 45, 98, 0.72); font-size: 15px; margin: 0 0 30px; }
+    .card {
+      background: rgba(255, 255, 255, 0.92); border-radius: 20px; padding: 26px 24px;
+      margin: 22px 0; text-align: left; box-shadow: 0 10px 30px rgba(0, 45, 98, 0.18);
+    }
+    .card h2 { margin: 0 0 8px; font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: var(--red); }
+    .card p { margin: 0 0 10px; }
+    .badge {
+      display: inline-block; background: var(--navy); color: #fff; font-weight: 800;
+      border-radius: 999px; padding: 12px 26px; font-size: 15px; letter-spacing: 1px; margin-top: 10px;
+    }
+    .flag { display: block; width: 84px; border-radius: 6px; box-shadow: 0 3px 10px rgba(0,0,0,0.25); margin: 16px auto 0; }
+    footer { margin-top: 44px; color: rgba(255, 255, 255, 0.9); font-size: 14px; }
+    footer a { color: #fff; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo"><small>E L</small>CORRE<br />CORRE</div>
+    <svg class="flag" viewBox="0 0 80 50" xmlns="http://www.w3.org/2000/svg" aria-label="Bandera dominicana">
+      <rect width="80" height="50" fill="#fff" />
+      <rect x="0" y="0" width="33" height="19" fill="#002d62" />
+      <rect x="47" y="0" width="33" height="19" fill="#ce1126" />
+      <rect x="0" y="31" width="33" height="19" fill="#ce1126" />
+      <rect x="47" y="31" width="33" height="19" fill="#002d62" />
+      <circle cx="40" cy="25" r="6.5" fill="none" stroke="#2a9d8f" stroke-width="1.6" />
+      <rect x="38.7" y="21.5" width="2.6" height="7" fill="#ce1126" />
+      <rect x="36.5" y="23.7" width="7" height="2.6" fill="#002d62" />
+    </svg>
+    <p class="tag">¡Dale, que vamo' tarde!</p>
+    <p class="tag-en">A one-thumb Dominican arcade run down the Malecón.</p>
+
+    <div class="card">
+      <h2>El juego</h2>
+      <p>Tú en un motor, el Malecón de Santo Domingo al atardecer, y el tráfico de siempre: guaguas, carros públicos, camiones de plátanos y motoconchos. Esquiva con el dedo, tira un caballito sobre los hoyos, y si te atreves, métete en contra vía: puntos x2.</p>
+      <p>La corrida da la vuelta al país: El Malecón, La Zona Colonial y El Campo. Sin internet, sin cuentas. Toca y dale.</p>
+    </div>
+
+    <div class="card">
+      <h2>The game</h2>
+      <p>You, a motorbike, Santo Domingo's Malecón at golden hour, and the usual traffic. Steer with a finger, wheelie over potholes, and if you dare, ride against traffic for double points. The run tours the whole country and never stops.</p>
+      <p>Offline, no accounts. Tap and go.</p>
+    </div>
+
+    <span class="badge">PRÓXIMAMENTE EN EL APP STORE</span>
+
+    <footer>
+      <a href="privacy.html">Privacidad / Privacy</a> ·
+      <a href="mailto:adelsonaguasvivas@gmail.com">Soporte / Support</a>
+    </footer>
+  </div>
+</body>
+</html>

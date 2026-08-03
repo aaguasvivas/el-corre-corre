@@ -91,9 +91,16 @@ tumbles, stars, no people or animals ever hit). Everything else: None.
 ## Privacy
 
 The game makes zero network requests and collects nothing. Privacy label:
-**Data Not Collected**. You will still need a privacy policy URL for the
-form. TODO: decide the URL (a one-paragraph page on any domain you own
-works; happy to draft it).
+**Data Not Collected** (the Anota answer, and it is true here too).
+
+Pages live in `site/` (bilingual, game palette), following the Anota
+GitHub Pages pattern:
+
+- Privacy policy URL: `https://aaguasvivas.github.io/el-corre-corre-site/privacy.html`
+- Support / marketing URL: `https://aaguasvivas.github.io/el-corre-corre-site/`
+
+Publishing step: create the public `el-corre-corre-site` repo, push
+`site/`, enable Pages (needs Adelson's go, then it is one command).
 
 ## Screenshots (I generate these when you say go)
 
@@ -103,6 +110,5 @@ Zona Colonial, El Campo with gallinas, game over card with COMPARTIR.
 
 ## TODO decisions (yours)
 
-1. Privacy policy URL (see above).
-2. Support URL for the listing (your GitHub profile or a page on a domain
-   you pick; the repo is private so the repo URL itself is a bad fit).
+1. Say go on publishing the `el-corre-corre-site` repo (URLs above), or
+   name a domain if you want the Capi treatment instead.

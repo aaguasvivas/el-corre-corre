@@ -51,5 +51,9 @@
 	<true/>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<!-- No custom crypto, so App Store Connect skips the export-compliance
+	     question on every build (the Anota/Capi launch pattern). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
