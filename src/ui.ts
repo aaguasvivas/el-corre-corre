@@ -45,6 +45,7 @@ const STRINGS = {
     air: '¡AIRE!',
     obelisco: '¡El Obelisco!',
     multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
+    tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
     ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
   },
@@ -82,6 +83,8 @@ const STRINGS = {
     air: 'AIR!',
     obelisco: 'The Obelisco!',
     multUp: (n: number) => `MULTIPLIER ×${n}!`,
+    // Places keep their names in both languages
+    tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     nearMiss: ['So close!', 'By a hair!'],
     ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
   },
@@ -633,6 +636,10 @@ export class UI {
 
   popupMultUp(n: number): void {
     this.popup(this.t().multUp(n), 50, 40, 'pop-lg pop-gold');
+  }
+
+  popupTramo(t: 'malecon' | 'zona' | 'campo'): void {
+    this.popup(this.t().tramoNames[t], 50, 26, 'pop-lg');
   }
 
   bannerNewRecord(): void {

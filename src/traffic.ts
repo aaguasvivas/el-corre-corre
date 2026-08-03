@@ -803,10 +803,18 @@ export class Traffic {
     if (!this.laneHasVehicleNear(lane, z, 12)) this.spawnPickup(kind, x, z);
   }
 
+  // Los Tramos: each stretch has its own traffic personality. World tells us
+  // where we are; the filler mix follows.
+  private tramo: keyof typeof CONFIG.tramoVehicleWeights = 'malecon';
+
+  setTramo(t: keyof typeof CONFIG.tramoVehicleWeights): void {
+    this.tramo = t;
+  }
+
   private spawnFiller(): void {
     const allowOncoming = this.elapsed >= CONFIG.oncomingUnlockSec;
     const dir: 1 | -1 = allowOncoming && Math.random() < CONFIG.oncomingShare ? -1 : 1;
-    const w = CONFIG.vehicleWeights;
+    const w = CONFIG.tramoVehicleWeights[this.tramo] ?? CONFIG.vehicleWeights;
     const opts: Array<readonly [VehicleType, number]> = [
       ['sedan', w.sedan],
       ['motoconcho', w.motoconcho],

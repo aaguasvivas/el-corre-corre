@@ -296,6 +296,17 @@ export const CONFIG = {
   obeliscoEveryM: 800,
   viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
 
+  // Phase 7: Los Tramos. The world cycles Malecon -> Zona Colonial -> Campo,
+  // one palette-and-scenery shift per stretch on the same chunk system.
+  tramoLengthM: 1200, // FEEL: meters per themed stretch; a 3-minute run tours all three
+  // FEEL: traffic personality per tramo. Zona runs on carros publicos and
+  // motoconchos; el campo belongs to camiones and motoconchos.
+  tramoVehicleWeights: {
+    malecon: { sedan: 32, motoconcho: 22, guagua: 16, camion: 12, civic: 18 },
+    zona: { sedan: 40, motoconcho: 26, guagua: 10, camion: 5, civic: 19 },
+    campo: { sedan: 16, motoconcho: 30, guagua: 14, camion: 32, civic: 8 },
+  },
+
   // Phase 4: el sonido del barrio (100% WebAudio synthesis)
   audioBpm: 120, // FEEL: dembow drives; 108 read as reggaeton in the feel test
   musicVolume: 0.5, // FEEL: music bus level

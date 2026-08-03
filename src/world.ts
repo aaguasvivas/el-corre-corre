@@ -27,6 +27,20 @@ const CONFETTI_COUNT = 46;
 const BELT_COUNT = 3;
 
 // ---------------------------------------------------------------------------
+// Los Tramos (Phase 7): the run tours the country. Theme is a pure function
+// of distance, so belts and road chunks can each ask "what will the world be
+// when the player reaches me" and recycle into the right dress.
+// ---------------------------------------------------------------------------
+
+export type Tramo = 'malecon' | 'zona' | 'campo';
+const TRAMO_ORDER: Tramo[] = ['malecon', 'zona', 'campo'];
+
+export function tramoFor(d: number): Tramo {
+  const i = Math.floor(Math.max(0, d) / CONFIG.tramoLengthM) % TRAMO_ORDER.length;
+  return TRAMO_ORDER[i];
+}
+
+// ---------------------------------------------------------------------------
 // The bend field
 // ---------------------------------------------------------------------------
 
@@ -367,6 +381,115 @@ function makeColmadoBody(width: number): Sized {
   return { geo: mergeGeometries(parts)!, width };
 }
 
+// La Zona Colonial: taller openings, wooden shutters, a wrought-iron balcony
+// running the full front, heavier cornice. Body stays white for instance tint.
+function makeZonaFacade(width: number, cols: number): Sized {
+  const parts: THREE.BufferGeometry[] = [];
+  const depth = 7;
+  const H = 7.2;
+  const IRON = 0x241f1d;
+  const SHUTTER = 0x2f5d3a;
+  cbox(parts, depth, H, width, 0, H / 2, 0, 0xffffff);
+  cbox(parts, depth + 0.4, 0.5, width + 0.4, 0, H + 0.2, 0, 0xf2ead8); // cornice
+  cbox(parts, depth + 0.2, 0.25, width + 0.2, 0, 3.62, 0, 0xf2ead8); // string course
+  const fx = depth / 2 + 0.05;
+  const span = width - 2.0;
+  for (let i = 0; i < cols; i++) {
+    const wz = -span / 2 + (span / Math.max(1, cols - 1)) * i;
+    // ground floor: tall arched doors (a box with a small header reads arched enough)
+    cbox(parts, 0.14, 2.7, 1.05, fx, 1.35, wz, 0x3a2c22);
+    cbox(parts, 0.2, 0.18, 1.3, fx, 2.85, wz, 0xf2ead8);
+    // upper floor: shuttered French windows onto the balcony
+    cbox(parts, 0.12, 2.0, 0.5, fx, 5.1, wz - 0.29, SHUTTER);
+    cbox(parts, 0.12, 2.0, 0.5, fx, 5.1, wz + 0.29, SHUTTER);
+  }
+  // the balcony: slab, top rail, and iron pickets across the whole front
+  cbox(parts, 0.9, 0.1, width - 0.6, fx + 0.4, 4.1, 0, 0xf2ead8);
+  cbox(parts, 0.05, 0.06, width - 0.7, fx + 0.82, 5.0, 0, IRON);
+  const pickets = Math.max(6, Math.round(width * 1.4));
+  for (let b = 0; b <= pickets; b++) {
+    cbox(parts, 0.045, 0.9, 0.045, fx + 0.82, 4.6, -(width - 0.8) / 2 + ((width - 0.8) / pickets) * b, IRON);
+  }
+  // farolito: a little iron lantern beside the center door
+  cbox(parts, 0.3, 0.05, 0.05, fx + 0.15, 3.2, 0.85, IRON);
+  cbox(parts, 0.16, 0.24, 0.16, fx + 0.32, 3.05, 0.85, 0xffe9a8);
+  return { geo: mergeGeometries(parts)!, width };
+}
+
+// Wrought-iron street lamp: the Zona swaps its power poles for these.
+function makeIronLamp(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const IRON = 0x241f1d;
+  cbox(parts, 0.5, 0.22, 0.5, 0, 0.11, 0, IRON);
+  cgeo(parts, new THREE.CylinderGeometry(0.06, 0.1, 3.4, 6), IRON, 0, 1.8, 0);
+  cbox(parts, 0.55, 0.06, 0.06, 0.22, 3.5, 0, IRON);
+  cbox(parts, 0.2, 0.32, 0.2, 0.44, 3.3, 0, 0xffe9a8); // the glass
+  cbox(parts, 0.26, 0.06, 0.26, 0.44, 3.5, 0, IRON); // its little roof
+  return mergeGeometries(parts)!;
+}
+
+// El Campo: a small wooden house, colors baked per variant because the zinc
+// roof must stay zinc (instance tint would wash it).
+function makeCampoHouse(width: number, body: number, trim: number): Sized {
+  const parts: THREE.BufferGeometry[] = [];
+  const depth = 5;
+  const H = 2.7;
+  cbox(parts, depth, H, width, 0, H / 2 + 0.25, 0, body);
+  // stilts and the little porch
+  for (const sz of [-width / 2 + 0.3, width / 2 - 0.3]) {
+    cbox(parts, 0.22, 0.3, 0.22, -depth / 2 + 0.3, 0.12, sz, 0x6b5645);
+    cbox(parts, 0.22, 0.3, 0.22, depth / 2 - 0.3, 0.12, sz, 0x6b5645);
+  }
+  // vertical plank lines
+  const planks = Math.round(width * 1.6);
+  for (let p = 0; p <= planks; p++) {
+    cbox(parts, 0.06, H - 0.2, 0.05, depth / 2 + 0.02, H / 2 + 0.25, -width / 2 + (width / planks) * p, trim);
+  }
+  // door and shuttered window, painted trim
+  cbox(parts, 0.14, 1.7, 0.85, depth / 2 + 0.06, 1.12, -width * 0.22, 0x3a2c22);
+  cbox(parts, 0.2, 0.14, 1.0, depth / 2 + 0.06, 2.05, -width * 0.22, trim);
+  cbox(parts, 0.12, 0.9, 0.9, depth / 2 + 0.06, 1.5, width * 0.24, trim);
+  // zinc roof, one shallow slope with a lip
+  const roof = new THREE.BoxGeometry(depth + 1.0, 0.1, width + 0.9);
+  roof.rotateZ(0.16);
+  roof.translate(0, H + 0.55, 0);
+  parts.push(paint(roof, 0xb8b2a8));
+  return { geo: mergeGeometries(parts)!, width };
+}
+
+// One platano plant; instanced by the dozen into field rows.
+function makePlatanoPlant(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  cgeo(parts, new THREE.CylinderGeometry(0.14, 0.2, 1.5, 6), 0x8bc34a, 0, 0.75, 0);
+  for (let k = 0; k < 5; k++) {
+    const leaf = new THREE.BoxGeometry(1.7, 0.05, 0.5);
+    leaf.translate(0.8, 0, 0);
+    leaf.rotateZ(0.45 - (k % 3) * 0.3);
+    leaf.rotateY((k / 5) * Math.PI * 2 + 0.6);
+    leaf.translate(0, 1.5, 0);
+    parts.push(paint(leaf, k % 2 ? 0x7cb342 : 0x66a83b));
+  }
+  return mergeGeometries(parts)!;
+}
+
+// Roadside fritura stand: counter, tarp roof, the pot of oil doing its work.
+function makeFritura(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  cbox(parts, 1.1, 0.9, 2.4, 0, 0.45, 0, 0x8a6f52); // counter
+  cbox(parts, 1.2, 0.06, 2.5, 0, 0.94, 0, 0xd9c7a7);
+  for (const sz of [-1.1, 1.1]) {
+    cbox(parts, 0.08, 2.1, 0.08, -0.45, 1.05, sz, 0x6b5645);
+    cbox(parts, 0.08, 2.1, 0.08, 0.45, 1.05, sz, 0x6b5645);
+  }
+  const tarp = new THREE.BoxGeometry(1.7, 0.06, 2.9);
+  tarp.rotateZ(0.12);
+  tarp.translate(0, 2.2, 0);
+  parts.push(paint(tarp, 0xe63946));
+  cgeo(parts, new THREE.CylinderGeometry(0.24, 0.24, 0.3, 8), 0x2a2624, 0.2, 1.09, -0.5); // el caldero
+  cbox(parts, 0.5, 0.35, 0.4, 0.1, 1.15, 0.7, 0xf4c430); // platanos waiting their turn
+  return mergeGeometries(parts)!;
+}
+
 function makeSignSet(rects: Record<string, AtlasRect>, nameIdx: number): THREE.BufferGeometry {
   const depth = 6.5;
   const sign = quadUV(3.5, 0.75, rects[`sign${nameIdx}`]);
@@ -554,6 +677,12 @@ interface BeltAssets {
   fruit: THREE.BufferGeometry;
   chair: THREE.BufferGeometry;
   street: THREE.BufferGeometry;
+  // Los Tramos
+  zonaFacades: Sized[];
+  ironLamp: THREE.BufferGeometry;
+  campoHouses: Sized[];
+  platanoPlant: THREE.BufferGeometry;
+  fritura: THREE.BufferGeometry;
 }
 
 function buildBeltAssets(atlas: Atlas): BeltAssets {
@@ -583,8 +712,19 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
     fruit: makeFruitStand(),
     chair: makeChair(),
     street: makeStreetSign(atlas.rects),
+    zonaFacades: [makeZonaFacade(9, 3), makeZonaFacade(12, 4), makeZonaFacade(7.5, 2)],
+    ironLamp: makeIronLamp(),
+    campoHouses: [
+      makeCampoHouse(4.2, 0x6fc7be, 0xffffff),
+      makeCampoHouse(3.6, 0xf4c430, 0x2a9d8f),
+      makeCampoHouse(4.6, 0xff8b94, 0xffffff),
+    ],
+    platanoPlant: makePlatanoPlant(),
+    fritura: makeFritura(),
   };
 }
+
+const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0xffffff, 0xa8c6a1, 0xf2d0a4];
 
 const PASTELS = PALETTE.buildingPastels;
 const COLMADO_TINTS = [PALETTE.colmadoTeal, PALETTE.colmadoRed, 0xf4c430, 0xffffff];
@@ -605,6 +745,11 @@ class Belt {
   private fruitIM: THREE.InstancedMesh;
   private chairIM: THREE.InstancedMesh;
   private streetIM: THREE.InstancedMesh;
+  private zonaFacadeIMs: THREE.InstancedMesh[] = [];
+  private lampIM: THREE.InstancedMesh;
+  private campoHouseIMs: THREE.InstancedMesh[] = [];
+  private platanoIM: THREE.InstancedMesh;
+  private frituraIM: THREE.InstancedMesh;
   private assets: BeltAssets;
   private signCursor: number;
 
@@ -636,10 +781,15 @@ class Belt {
     this.fruitIM = im(assets.fruit, assets.vcMat, 2);
     this.chairIM = im(assets.chair, assets.vcMat, 4);
     this.streetIM = im(assets.street, assets.atlasMat, 2);
+    for (const zf of assets.zonaFacades) this.zonaFacadeIMs.push(im(zf.geo, assets.vcMat, 6));
+    this.lampIM = im(assets.ironLamp, assets.vcMat, 12);
+    for (const ch of assets.campoHouses) this.campoHouseIMs.push(im(ch.geo, assets.vcMat, 4));
+    this.platanoIM = im(assets.platanoPlant, assets.vcMat, 90);
+    this.frituraIM = im(assets.fritura, assets.vcMat, 2);
     scene.add(this.group);
   }
 
-  fill(): void {
+  fill(tramo: Tramo): void {
     const L = CONFIG.beltLen;
     const counts = new Map<THREE.InstancedMesh, number>();
     const place = (
@@ -662,36 +812,84 @@ class Belt {
       counts.set(mesh, i + 1);
     };
 
-    // Buildings along the far side, fronts flush at x = -12.3
+    // Buildings along the far side, fronts flush at x = -12.3. Which buildings
+    // depends on the tramo this belt is dressing itself as.
     let cursor = rand(2, 6);
-    let colmadosUsed = 0;
-    let pastelIdx = Math.floor(Math.random() * PASTELS.length);
-    while (cursor < L - 4) {
-      const wantColmado = colmadosUsed < 2 && Math.random() < 0.3;
-      if (wantColmado) {
-        const vi = Math.floor(Math.random() * this.assets.colmados.length);
-        const v = this.assets.colmados[vi];
-        if (cursor + v.width > L - 2) break;
-        const z = cursor + v.width / 2;
-        const tint = COLMADO_TINTS[Math.floor(Math.random() * COLMADO_TINTS.length)];
-        place(this.colmadoIMs[vi], -12.3 - 3.25, 0, z, 0, 1, tint);
-        place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, z);
-        this.signCursor++;
-        colmadosUsed++;
-        cursor += v.width + rand(0.4, 2.4);
-      } else {
-        const vi = Math.floor(Math.random() * this.assets.facades.length);
-        const v = this.assets.facades[vi];
-        if (cursor + v.width > L - 2) break;
-        const z = cursor + v.width / 2;
-        place(this.facadeIMs[vi], -12.3 - 3.5, 0, z, 0, 1, PASTELS[pastelIdx % PASTELS.length]);
-        pastelIdx++;
-        cursor += v.width + rand(0, 2.2);
+    if (tramo === 'malecon') {
+      let colmadosUsed = 0;
+      let pastelIdx = Math.floor(Math.random() * PASTELS.length);
+      while (cursor < L - 4) {
+        const wantColmado = colmadosUsed < 2 && Math.random() < 0.3;
+        if (wantColmado) {
+          const vi = Math.floor(Math.random() * this.assets.colmados.length);
+          const v = this.assets.colmados[vi];
+          if (cursor + v.width > L - 2) break;
+          const z = cursor + v.width / 2;
+          const tint = COLMADO_TINTS[Math.floor(Math.random() * COLMADO_TINTS.length)];
+          place(this.colmadoIMs[vi], -12.3 - 3.25, 0, z, 0, 1, tint);
+          place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, z);
+          this.signCursor++;
+          colmadosUsed++;
+          cursor += v.width + rand(0.4, 2.4);
+        } else {
+          const vi = Math.floor(Math.random() * this.assets.facades.length);
+          const v = this.assets.facades[vi];
+          if (cursor + v.width > L - 2) break;
+          const z = cursor + v.width / 2;
+          place(this.facadeIMs[vi], -12.3 - 3.5, 0, z, 0, 1, PASTELS[pastelIdx % PASTELS.length]);
+          pastelIdx++;
+          cursor += v.width + rand(0, 2.2);
+        }
+      }
+    } else if (tramo === 'zona') {
+      // Colonial fronts packed tight, one colmado allowed (the Zona has them too)
+      let colmadosUsed = 0;
+      let tintIdx = Math.floor(Math.random() * ZONA_TINTS.length);
+      while (cursor < L - 4) {
+        if (colmadosUsed < 1 && Math.random() < 0.14) {
+          const vi = Math.floor(Math.random() * this.assets.colmados.length);
+          const v = this.assets.colmados[vi];
+          if (cursor + v.width > L - 2) break;
+          place(this.colmadoIMs[vi], -12.3 - 3.25, 0, cursor + v.width / 2, 0, 1, 0xffffff);
+          place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, cursor + v.width / 2);
+          this.signCursor++;
+          colmadosUsed++;
+          cursor += v.width + rand(0.2, 0.9);
+        } else {
+          const vi = Math.floor(Math.random() * this.assets.zonaFacades.length);
+          const v = this.assets.zonaFacades[vi];
+          if (cursor + v.width > L - 2) break;
+          place(this.zonaFacadeIMs[vi], -12.3 - 3.5, 0, cursor + v.width / 2, 0, 1, ZONA_TINTS[tintIdx % ZONA_TINTS.length]);
+          tintIdx++;
+          cursor += v.width + rand(0, 0.8); // wall-to-wall, the colonial block
+        }
+      }
+    } else {
+      // El campo: houses breathe, and the platanal fills the land behind them
+      while (cursor < L - 6) {
+        const vi = Math.floor(Math.random() * this.assets.campoHouses.length);
+        const v = this.assets.campoHouses[vi];
+        if (cursor + v.width > L - 4) break;
+        place(this.campoHouseIMs[vi], -12.3 - 2.5, 0, cursor + v.width / 2, rand(-0.08, 0.08));
+        cursor += v.width + rand(7, 15);
+      }
+      if (Math.random() < 0.6) {
+        place(this.frituraIM, -10.6, 0, rand(8, L - 8), rand(-0.4, 0.4) + Math.PI / 2);
+      }
+      // field rows, jittered so they read planted, not printed
+      for (let row = 0; row < 3; row++) {
+        const rx = -15.5 - row * 3.1;
+        for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
+          place(this.platanoIM, rx + rand(-0.7, 0.7), 0, z, rand(0, 6.3), rand(0.8, 1.25));
+        }
       }
     }
 
-    // Palms: sea promenade thick, far side sparse
-    for (let z = rand(3, 10); z < L - 3; z += rand(12, 21)) {
+    // Palms: the Malecon promenade is thick with them, the Zona keeps a few,
+    // el campo scatters them on both sides like the carretera does
+    const palmStep: [number, number] =
+      tramo === 'malecon' ? [12, 21] : tramo === 'zona' ? [24, 40] : [16, 30];
+    for (let z = rand(3, 10); z < L - 3; z += rand(palmStep[0], palmStep[1])) {
       place(
         this.palmIMs[Math.random() < 0.6 ? 0 : 1],
         9.9 + rand(-0.4, 0.5),
@@ -701,29 +899,42 @@ class Belt {
         rand(0.85, 1.2),
       );
     }
-    for (let i = 0; i < 2; i++) {
-      if (Math.random() < 0.7) {
+    const farPalms = tramo === 'campo' ? 4 : 2;
+    for (let i = 0; i < farPalms; i++) {
+      if (Math.random() < (tramo === 'campo' ? 0.9 : 0.7)) {
         place(this.palmIMs[1], -10.6 + rand(-0.3, 0.3), 0, rand(6, L - 6), rand(0, 6.3), rand(0.8, 1.05));
       }
     }
 
-    // Seawall balusters and power poles on fixed grids so they chain seamlessly
+    // Seawall balusters always; street lighting by tramo (iron in the Zona,
+    // wires on the Malecon, sparser wires out in el campo)
     for (let i = 0; i <= 20; i++) place(this.postIM, 11.85, 0, i * 6);
-    for (let i = 0; i < 5; i++) place(this.poleIM, -11.7, 0, i * 24);
-
-    for (let i = 0; i < 3; i++) {
-      if (Math.random() < 0.55) place(this.flagIM, 10.55, 0, rand(6, L - 6), rand(0, 6.3));
+    if (tramo === 'zona') {
+      for (let i = 0; i < 9; i++) place(this.lampIM, -11.5, 0, 4 + i * 13.5);
+      for (let i = 0; i < 4; i++) place(this.lampIM, 10.4, 0, 10 + i * 30, Math.PI);
+    } else if (tramo === 'malecon') {
+      for (let i = 0; i < 5; i++) place(this.poleIM, -11.7, 0, i * 24);
+    } else {
+      for (let i = 0; i < 3; i++) place(this.poleIM, -11.7, 0, 8 + i * 44);
     }
-    if (Math.random() < 0.65) place(this.dominoIM, -10.2, 0, rand(8, L - 8), rand(0, 6.3));
+
+    const flagChance = tramo === 'malecon' ? 0.55 : tramo === 'zona' ? 0.35 : 0.15;
+    for (let i = 0; i < 3; i++) {
+      if (Math.random() < flagChance) place(this.flagIM, 10.55, 0, rand(6, L - 6), rand(0, 6.3));
+    }
+    if (tramo !== 'campo' && Math.random() < 0.65) {
+      place(this.dominoIM, -10.2, 0, rand(8, L - 8), rand(0, 6.3));
+    }
     if (Math.random() < 0.55) {
       place(this.fruitIM, Math.random() < 0.7 ? -10.4 : 10.3, 0, rand(8, L - 8), rand(0, 6.3));
     }
-    for (let i = 0; i < 4; i++) {
+    const chairTries = tramo === 'campo' ? 2 : 4;
+    for (let i = 0; i < chairTries; i++) {
       if (Math.random() < 0.75) {
         place(this.chairIM, rand(-10.9, -9.4), 0, rand(4, L - 4), rand(0, 6.3));
       }
     }
-    if (Math.random() < 0.7) place(this.streetIM, -11.3, 0, rand(10, L - 10));
+    if (tramo !== 'campo' && Math.random() < 0.7) place(this.streetIM, -11.3, 0, rand(10, L - 10));
 
     for (const m of this.group.children) {
       const imMesh = m as THREE.InstancedMesh;
@@ -984,6 +1195,82 @@ class Pelican {
   }
 }
 
+// Las gallinas del campo. Peck by the far sidewalk, and when the player gets
+// close they scatter AWAY from the road, never toward it, same law as the
+// viralata: ambience can never be hit.
+let _henGeos: THREE.BufferGeometry[] | null = null;
+function henGeometries(): THREE.BufferGeometry[] {
+  if (_henGeos) return _henGeos;
+  const build = (body: number): THREE.BufferGeometry => {
+    const parts: THREE.BufferGeometry[] = [];
+    cbox(parts, 0.3, 0.26, 0.42, 0, 0.3, 0, body);
+    cbox(parts, 0.2, 0.2, 0.16, 0, 0.44, -0.26, body); // tail up
+    cbox(parts, 0.12, 0.2, 0.12, 0, 0.5, 0.24, body); // neck
+    cbox(parts, 0.14, 0.14, 0.16, 0, 0.62, 0.28, body); // head
+    cbox(parts, 0.04, 0.09, 0.1, 0, 0.73, 0.28, 0xce1126); // comb
+    cbox(parts, 0.05, 0.05, 0.1, 0, 0.6, 0.4, 0xf4a261); // beak
+    cbox(parts, 0.04, 0.18, 0.04, -0.07, 0.09, 0, 0xf4a261);
+    cbox(parts, 0.04, 0.18, 0.04, 0.07, 0.09, 0, 0xf4a261);
+    return mergeGeometries(parts)!;
+  };
+  _henGeos = [build(0xf2e9dc), build(0x8a5a3b), build(0xffffff)];
+  return _henGeos;
+}
+
+class Gallina {
+  group = new THREE.Group();
+  private state: 'hidden' | 'pecking' | 'scatter' = 'hidden';
+  private t = 0;
+  private nextAt = rand(3, 9);
+
+  constructor(scene: THREE.Scene, geoIdx: number) {
+    const m = new THREE.Mesh(henGeometries()[geoIdx % 3], vcToonMaterial());
+    m.castShadow = true;
+    this.group.add(m);
+    this.group.visible = false;
+    scene.add(this.group);
+  }
+
+  update(ds: number, dt: number, campo: boolean): void {
+    if (this.state === 'hidden') {
+      if (!campo) return;
+      this.nextAt -= dt;
+      if (this.nextAt <= 0) {
+        this.state = 'pecking';
+        this.t = 0;
+        this.group.visible = true;
+        // far sidewalk; the player physically cannot reach past -8.45
+        this.group.position.set(-9.5 - Math.random() * 1.1, 0, 60 + Math.random() * 110);
+        this.group.rotation.set(0, rand(0, 6.3), 0);
+      }
+      return;
+    }
+    this.t += dt;
+    const p = this.group.position;
+    p.z -= ds;
+    if (p.z < -25 || p.x < -13) {
+      this.state = 'hidden';
+      this.group.visible = false;
+      this.group.rotation.set(0, 0, 0);
+      this.nextAt = rand(5, 12);
+      return;
+    }
+    if (this.state === 'pecking') {
+      this.group.rotation.x = Math.max(0, Math.sin(this.t * 6)) * 0.28; // head-down pecks
+      if (p.z < 26) {
+        this.state = 'scatter';
+        this.t = 0;
+        this.group.rotation.x = 0;
+        this.group.rotation.y = -Math.PI / 2; // face away from the road
+      }
+    } else {
+      p.x -= 3.4 * dt; // away, always away
+      p.y = Math.abs(Math.sin(this.t * 16)) * 0.12;
+      this.group.rotation.z = Math.sin(this.t * 22) * 0.14; // flapping panic
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 interface Confetto {
@@ -1018,11 +1305,19 @@ export class World {
   private shimmerA!: THREE.CanvasTexture;
   private shimmerB!: THREE.CanvasTexture;
   private glintMat!: THREE.MeshBasicMaterial;
+  private roadMats!: Record<Tramo, THREE.MeshToonMaterial>;
+  private tramoNow: Tramo = 'malecon';
+  onTramoChange: ((t: Tramo) => void) | null = null;
+  private gallinas: Gallina[] = [];
   private D = 0;
   private t = 0;
 
   get distance(): number {
     return this.D;
+  }
+
+  get tramo(): Tramo {
+    return this.tramoNow;
   }
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
@@ -1040,13 +1335,14 @@ export class World {
     for (let i = 0; i < BELT_COUNT; i++) {
       const belt = new Belt(scene, assets, i);
       belt.group.position.z = -20 + i * CONFIG.beltLen;
-      belt.fill();
+      belt.fill(tramoFor(this.D + belt.group.position.z));
       this.belts.push(belt);
     }
 
     this.viralata = new Viralata(scene);
     this.chichiguas.push(new Chichigua(scene, PALETTE.flagRed), new Chichigua(scene, 0xf4c430));
     for (let i = 0; i < 3; i++) this.pelicans.push(new Pelican(scene));
+    for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
     this.buildObelisco(scene);
   }
 
@@ -1242,7 +1538,16 @@ export class World {
     ridge(-95, 300, 80, 24, 0.5);
   }
 
-  private buildRoad(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
+  // One road texture per tramo, all built at boot: warm asphalt on the
+  // Malecon, cobble-toned stone in the Zona, faded patchy blacktop with dirt
+  // shoulders out in el campo. Chunks swap materials as they recycle, and all
+  // three share one shader program, so the swap costs nothing.
+  private roadTexture(
+    renderer: THREE.WebGLRenderer,
+    base: number,
+    shoulder: number,
+    tramo: Tramo,
+  ): THREE.CanvasTexture {
     const c = document.createElement('canvas');
     c.width = 512;
     c.height = 1024;
@@ -1250,9 +1555,9 @@ export class World {
     const pmx = c.width / ROAD.fullWidth;
     const pmy = c.height / CHUNK_LEN;
 
-    g.fillStyle = hex(PALETTE.asphalt);
+    g.fillStyle = hex(base);
     g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = hex(PALETTE.asphaltShoulder);
+    g.fillStyle = hex(shoulder);
     g.fillRect(0, 0, CONFIG.shoulderWidth * pmx, c.height);
     g.fillRect(c.width - CONFIG.shoulderWidth * pmx, 0, CONFIG.shoulderWidth * pmx, c.height);
 
@@ -1260,6 +1565,30 @@ export class World {
       g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.06)';
       const s = 1 + Math.random() * 2.2;
       g.fillRect(Math.random() * c.width, Math.random() * c.height, s, s);
+    }
+
+    if (tramo === 'zona') {
+      // cobbles: offset courses of faintly lighter and darker sets
+      const cw = 0.62 * pmx;
+      const ch = 0.5 * pmy;
+      for (let row = 0; row < CHUNK_LEN / 0.5; row++) {
+        const off = row % 2 ? cw / 2 : 0;
+        for (let col = -1; col < ROAD.fullWidth / 0.62 + 1; col++) {
+          g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)';
+          g.fillRect(col * cw + off + 1, row * ch + 1, cw - 2, ch - 2);
+        }
+      }
+    } else if (tramo === 'campo') {
+      // patched blacktop: big faded blotches and a dusting near the shoulders
+      for (let i = 0; i < 26; i++) {
+        g.fillStyle = Math.random() < 0.5 ? 'rgba(217,199,167,0.08)' : 'rgba(0,0,0,0.1)';
+        const w = (1 + Math.random() * 3) * pmx;
+        const h = (1.5 + Math.random() * 4) * pmy;
+        g.fillRect(Math.random() * c.width, Math.random() * c.height, w, h);
+      }
+      g.fillStyle = 'rgba(217,199,167,0.22)';
+      g.fillRect(0, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
+      g.fillRect(c.width - CONFIG.shoulderWidth * pmx * 1.25, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
     }
 
     const vline = (xM: number, wM: number, color: string): void => {
@@ -1281,12 +1610,34 @@ export class World {
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    return tex;
+  }
 
-    const mat = worldMaterial(new THREE.MeshToonMaterial({ map: tex, gradientMap: getGradientMap() }));
+  private buildRoad(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
+    this.roadMats = {
+      malecon: worldMaterial(
+        new THREE.MeshToonMaterial({
+          map: this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon'),
+          gradientMap: getGradientMap(),
+        }),
+      ),
+      zona: worldMaterial(
+        new THREE.MeshToonMaterial({
+          map: this.roadTexture(renderer, 0x45414a, 0x4f4a50, 'zona'),
+          gradientMap: getGradientMap(),
+        }),
+      ),
+      campo: worldMaterial(
+        new THREE.MeshToonMaterial({
+          map: this.roadTexture(renderer, 0x4a443c, 0x5a4f42, 'campo'),
+          gradientMap: getGradientMap(),
+        }),
+      ),
+    };
     const geo = new THREE.PlaneGeometry(ROAD.fullWidth, CHUNK_LEN, 1, 8);
     geo.rotateX(-Math.PI / 2);
     for (let i = 0; i < CHUNK_COUNT; i++) {
-      const chunk = new THREE.Mesh(geo, mat);
+      const chunk = new THREE.Mesh(geo, this.roadMats.malecon);
       chunk.position.z = -CHUNK_LEN + i * CHUNK_LEN;
       chunk.receiveShadow = true;
       scene.add(chunk);
@@ -1447,17 +1798,28 @@ export class World {
     CURVE_U.off.value = curveOffset(this.D);
     CURVE_U.slope.value = curveSlope(this.D);
 
+    // Which tramo is under the wheels; announce the border crossings
+    const tHere = tramoFor(this.D);
+    if (tHere !== this.tramoNow) {
+      this.tramoNow = tHere;
+      this.onTramoChange?.(tHere);
+    }
+
     for (let i = 0; i < this.chunks.length; i++) {
       const chunk = this.chunks[i];
       chunk.position.z -= ds;
-      if (chunk.position.z < RECYCLE_Z) chunk.position.z += CHUNK_COUNT * CHUNK_LEN;
+      if (chunk.position.z < RECYCLE_Z) {
+        chunk.position.z += CHUNK_COUNT * CHUNK_LEN;
+        // dress the recycled chunk for the tramo it will sit in
+        chunk.material = this.roadMats[tramoFor(this.D + chunk.position.z)];
+      }
     }
 
     for (const belt of this.belts) {
       belt.group.position.z -= ds;
       if (belt.group.position.z < -(CONFIG.beltLen + 20)) {
         belt.group.position.z += CONFIG.beltLen * BELT_COUNT;
-        belt.fill();
+        belt.fill(tramoFor(this.D + belt.group.position.z));
       }
       // The belts keep frustumCulled off, because a manual bounding sphere
       // would have to be inflated for the bend field. One cheap z test still
@@ -1466,7 +1828,11 @@ export class World {
       belt.group.visible = belt.group.position.z + CONFIG.beltLen > -12;
     }
 
-    // El Obelisco, every ~800 m
+    // El Obelisco, every ~800 m, but it is a Malecon landmark: skip the
+    // milestones that would land it in the Zona or out in el campo
+    while (!this.obelisco.visible && tramoFor(this.nextObeliscoAt) !== 'malecon') {
+      this.nextObeliscoAt += CONFIG.obeliscoEveryM;
+    }
     if (!this.obelisco.visible && this.nextObeliscoAt - this.D < 190) {
       this.obelisco.visible = true;
       this.obeliscoPassed = false;
@@ -1487,6 +1853,8 @@ export class World {
     this.viralata.update(ds, dt);
     for (const k of this.chichiguas) k.update(ds, dt);
     for (const p of this.pelicans) p.update(ds, dt);
+    const campoNow = this.tramoNow === 'campo';
+    for (const gal of this.gallinas) gal.update(ds, dt, campoNow);
 
     // Sea life
     this.shimmerA.offset.y = (this.shimmerA.offset.y + dt * 0.05) % 1;

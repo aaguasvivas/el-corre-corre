@@ -5,6 +5,26 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
+## Phase 7 (current): Los Tramos
+
+The run now tours the country: EL MALECÓN, then LA ZONA COLONIAL at 1200 m,
+then EL CAMPO at 2400 m, then back around. The place name pops at each border
+with a bell. Feel for:
+
+1. **Does each tramo read at a glance?** Zona: cobbled road, wall-to-wall
+   colonial fronts, iron balconies and lamps. Campo: patched blacktop, dirt
+   shoulders, zinc-roofed wooden houses, platano fields, gallinas that
+   scatter away from the road. If you screenshot any moment, can a Dominican
+   friend name where you are?
+2. **Transitions happen at belt seams (~120 m).** Do they read as arriving
+   somewhere, or do you catch scenery popping?
+3. **Traffic personality per tramo**: more carros publicos y motoconchos in
+   the Zona, camiones out in el campo. Noticeable over a long run?
+4. **The palms.** Trunks now curve smoothly into their lean (they used to
+   stair-step). Better?
+5. **El Obelisco** only appears on Malecon stretches now. Does its return
+   still land as a milestone?
+
 ## Phase 6 (current): ship prep
 
 Most of this phase is invisible if it worked. Four things you CAN feel:

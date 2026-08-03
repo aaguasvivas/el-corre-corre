@@ -240,6 +240,17 @@ world.onObeliscoPass = () => {
   audio.bell();
 };
 
+// Los Tramos: the world announces border crossings; traffic changes its mix,
+// the player gets the place name. The world keeps touring on the title screen
+// too, so traffic always follows, but the popup is for live runs only.
+world.onTramoChange = (t) => {
+  traffic.setTramo(t);
+  if (state === 'playing') {
+    ui.popupTramo(t);
+    audio.bell();
+  }
+};
+
 // Everything scoped to a single run. Both starting a run and abandoning one
 // back to the title go through here, otherwise the dead run's cars, hoyos and
 // plátanos sit frozen on the scrolling title screen.
@@ -567,6 +578,7 @@ requestAnimationFrame(frame);
   fov: () => Math.round(camera.fov * 10) / 10,
   radius: () => +player.radius.toFixed(3),
   distMult: () => score.distMult,
+  tramo: () => world.tramo,
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },
