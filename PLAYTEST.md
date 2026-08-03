@@ -5,7 +5,18 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Phone feel round 1 (current): your five notes, addressed
+## Phone feel round 2 (current): "chill, then LIT"
+
+1. **The arc**: ten gentle seconds to feel the controls, real density by
+   about a minute (densityRampSec 95 to 50), and a fuller road at the top
+   (spawn rate 1.85 to 2.35/s, cap 33, waves every 2.2 to 3.8 s, rebase
+   every 4 to 8 s). Parked bots that used to idle 43 s die everywhere now;
+   surviving means actively finding space. Question for your thumbs: does
+   minute two feel hectic in the good way, or unfair?
+2. **Plátanos are plátanos now**: curved, tapered, dark tips, spinning.
+   Do they read instantly at speed?
+
+## Phone feel round 1: your five notes, addressed
 
 1. **The stray French flags are dead.** They were the Obelisco (three stacked
    blue/white/red bands read as a wrapped tricolor) and La Cinta (blue top

@@ -151,15 +151,17 @@ export const CONFIG = {
   spawnAhead: 150,
   despawnBehind: 15,
   telegraphMinSec: 1.5, // sacred: min seconds between a threat appearing and reaching you
-  // Phone feel test: bigger arc. Opens calmer, ends meaner.
+  // Phone feel round 2: "starts chill so you can test the controls, then it
+  // gets LIT". Ten gentle seconds, real density by about a minute, and a
+  // full road at the top where finding space is the skill.
   trafficDensityStart: 0.4,
   trafficDensityMax: 1.0,
-  densityRampSec: 95,
+  densityRampSec: 50, // FEEL: seconds until the road is fully awake
   gentleStartSec: 10,
-  spawnsPerSecAtFull: 1.85, // FEEL: filler spawn attempts per second at full density
+  spawnsPerSecAtFull: 2.35, // FEEL: filler spawn attempts per second at full density
   gentleSpawnFactor: 0.55, // FEEL: spawn rate multiplier during the gentle window
   oncomingUnlockSec: 6, // DECISION: no oncoming traffic in the very first seconds of a run
-  trafficMaxActive: 27, // FEEL: hard cap of vehicles on the road at once
+  trafficMaxActive: 33, // FEEL: hard cap of vehicles on the road at once
   oncomingShare: 0.5, // FEEL: fraction of filler spawns that come at you
   // Contra via must be RISKIER than your own lane, not emptier. While you ride
   // the wrong way, oncoming filler aims for the lane you are actually in.
@@ -176,13 +178,13 @@ export const CONFIG = {
   // El rebase: every so often a vehicle swings onto the center seam to
   // overtake, the most Dominican move on the road and the reason parking on
   // the yellow line is not a free ride. Phone test found the seam exploit.
-  overtakeEvery: [5, 10], // FEEL: seconds between overtake swings at full density
+  overtakeEvery: [4, 8], // FEEL: seconds between overtake swings at full density
   overtakeSec: 2.6, // FEEL: how long the swing holds the seam
   overtakeUnlockSec: 12, // no seam pressure during the gentle open
 
   // Wave patterns
-  patternIntervalMin: 2.8, // FEEL: seconds between authored waves (scaled by density)
-  patternIntervalMax: 5.0,
+  patternIntervalMin: 2.2, // FEEL: seconds between authored waves (scaled by density)
+  patternIntervalMax: 3.8,
 
   // Traffic speeds (m/s) per archetype: [min, max]
   vehicleSpeeds: {

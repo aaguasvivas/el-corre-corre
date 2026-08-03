@@ -497,20 +497,41 @@ export class Traffic {
   // ---------------- pickups ----------------
 
   private buildPickups(scene: THREE.Scene): void {
-    const bunch = (() => {
-      const parts: THREE.BufferGeometry[] = [];
-      for (const a of [-0.4, 0, 0.4]) {
-        const g = new THREE.BoxGeometry(0.16, 0.5, 0.16);
-        g.rotateZ(a);
-        g.translate(a * 0.28, 0.25, 0);
-        parts.push(g);
+    // An actual platano: five box segments walking an arc (ends up, belly
+    // down), tapered toward both ends, with dark tips. The old three fanned
+    // sticks read as anything but a banana.
+    const platanoGeo = (() => {
+      const fruit: THREE.BufferGeometry[] = [];
+      const tips: THREE.BufferGeometry[] = [];
+      const SEG = 5;
+      const R = 0.34;
+      const ARC = 1.85;
+      const step = (ARC * R) / SEG;
+      const place = (g: THREE.BufferGeometry, a: number): void => {
+        g.rotateZ(a - Math.PI / 2); // long axis follows the arc tangent
+        g.translate(Math.sin(a) * R, 0.2 + R - Math.cos(a) * R, 0);
+      };
+      for (let i = 0; i < SEG; i++) {
+        const t = (i + 0.5) / SEG;
+        const thick = 0.11 * (0.6 + 0.5 * Math.sin(Math.PI * t)); // fat middle
+        const g = new THREE.BoxGeometry(thick, step + 0.03, thick);
+        place(g, -ARC / 2 + ARC * t);
+        fruit.push(g);
       }
-      return mergeGeometries(parts)!;
+      for (const sgn of [-1, 1]) {
+        const tip = new THREE.BoxGeometry(0.06, 0.1, 0.06);
+        place(tip, sgn * (ARC / 2 + 0.08));
+        tips.push(tip);
+      }
+      return { fruit: mergeGeometries(fruit)!, tips: mergeGeometries(tips)! };
     })();
     const platanoMat = toonMaterial(PALETTE.platano);
+    const tipMat = toonMaterial(0x4a3b26);
     for (let i = 0; i < 40; i++) {
       const group = new THREE.Group();
-      group.add(new THREE.Mesh(bunch, platanoMat));
+      group.add(new THREE.Mesh(platanoGeo.fruit, platanoMat));
+      group.add(new THREE.Mesh(platanoGeo.tips, tipMat));
+      group.rotation.z = 0.14; // a little rake so the spin shows the curve
       group.visible = false;
       scene.add(group);
       this.pickups.push({ kind: 'platano', group, active: false, x: 0, y: 0.55, z: 0, phase: Math.random() * 7 });
