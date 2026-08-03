@@ -465,7 +465,7 @@ export class UI {
       for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
         const id = card.dataset.v as VehicleId;
         const rec = card.querySelector<HTMLElement>(`[data-rec="${id}"]`);
-        if (rec) rec.textContent = this.lastRecords[id] > 0 ? `${t.record} ${this.lastRecords[id]}` : '·';
+        if (rec) rec.textContent = this.lastRecords[id] > 0 ? `${t.record} ${this.lastRecords[id]}` : '';
       }
     }
   }
@@ -482,7 +482,8 @@ export class UI {
       const id = card.dataset.v as VehicleId;
       card.classList.toggle('sel', id === selected);
       const rec = card.querySelector<HTMLElement>(`[data-rec="${id}"]`)!;
-      rec.textContent = records[id] > 0 ? `${t.record} ${records[id]}` : '·';
+      // empty when no record yet; .vc-rec min-height keeps the card from shifting
+      rec.textContent = records[id] > 0 ? `${t.record} ${records[id]}` : '';
     }
   }
 
