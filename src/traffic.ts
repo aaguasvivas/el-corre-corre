@@ -876,6 +876,28 @@ export class Traffic {
 
     const blinkOn = this.time % 0.9 < 0.45;
 
+    // El que va alante manda: same lane, same direction, nobody drives
+    // through the vehicle ahead. A faster follower that closes inside its
+    // headway matches the leader's speed instead of ghosting through.
+    // Spawn validation only guarantees the moment of spawn; this holds the
+    // promise for the rest of every vehicle's life.
+    for (const v of this.vehicles) {
+      if (!v.active || v.speed === 0) continue;
+      let leaderSpeed = -1;
+      let bestGap = Infinity;
+      for (const o of this.vehicles) {
+        if (o === v || !o.active || o.lane !== v.lane || o.dir !== v.dir) continue;
+        const gap = (o.z - v.z) * v.dir - o.halfL - v.halfL;
+        if (gap >= -0.5 && gap < bestGap) {
+          bestGap = gap;
+          leaderSpeed = o.speed;
+        }
+      }
+      if (leaderSpeed >= 0 && bestGap < 2 + v.speed * 0.12 && leaderSpeed < v.speed) {
+        v.speed = leaderSpeed;
+      }
+    }
+
     for (const v of this.vehicles) {
       if (!v.active) continue;
       v.z += (v.dir === 1 ? v.speed : -v.speed) * dt - ds;
@@ -1022,7 +1044,20 @@ export class Traffic {
           if (v.z < 45 || v.z > 150) continue;
           if (!best || v.z < best.z) best = v; // the nearest telegraphable one
         }
-        if (best) best.overtakeT = 0;
+        // Only swing if the seam neighborhood is clear: a rebase into the
+        // side of an inner-lane neighbor looks exactly like the ghosting
+        // this system exists to prevent.
+        if (best) {
+          let clear = true;
+          for (const o of this.vehicles) {
+            if (o === best || !o.active) continue;
+            if ((o.lane === 1 || o.lane === 2) && Math.abs(o.z - best.z) < 8) {
+              clear = false;
+              break;
+            }
+          }
+          if (clear) best.overtakeT = 0;
+        }
       }
     }
 
@@ -1101,6 +1136,27 @@ export class Traffic {
 
   debugSpawnVehicle(type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number): boolean {
     return this.spawnVehicle(type, lane, z, dir, undefined, exactX);
+  }
+
+  // Test probe: active vehicle pairs whose boxes materially interpenetrate.
+  // Anything above zero is traffic ghosting through traffic.
+  get overlapCount(): number {
+    let n = 0;
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const a = this.vehicles[i];
+      if (!a.active) continue;
+      for (let j = i + 1; j < this.vehicles.length; j++) {
+        const b = this.vehicles[j];
+        if (!b.active) continue;
+        if (
+          Math.abs(a.x - b.x) < (a.halfW + b.halfW) * 0.8 &&
+          Math.abs(a.z - b.z) < (a.halfL + b.halfL) * 0.8
+        ) {
+          n++;
+        }
+      }
+    }
+    return n;
   }
 
   reset(): void {

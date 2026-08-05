@@ -580,6 +580,7 @@ requestAnimationFrame(frame);
   distMult: () => score.distMult,
   tramo: () => world.tramo,
   obelisco: () => world.obeliscoState,
+  overlaps: () => traffic.overlapCount,
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },
