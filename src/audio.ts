@@ -70,6 +70,7 @@ export class AudioEngine {
   private nextStepAt = 0;
   private wheeliePrev = false;
   private nextHornAt = 0;
+  private resumeCooldown = 0;
 
   constructor() {
     const unlock = (): void => this.unlock();
@@ -118,7 +119,13 @@ export class AudioEngine {
       this.ctx = new AudioContext();
       this.buildGraph();
     }
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    // iOS can leave the context 'suspended' OR, WebKit-only, 'interrupted'
+    // (a call, Siri, another app taking the audio session; no
+    // visibilitychange fires for those). Checking === 'suspended' missed
+    // the interrupted case and the music never came back. Any non-running
+    // state gets the resume nudge, and a user gesture is the most reliable
+    // place to do it.
+    if ((this.ctx.state as string) !== 'running') void this.ctx.resume();
   }
 
   private buildGraph(): void {
@@ -207,10 +214,27 @@ export class AudioEngine {
   }
 
   update(dt: number, u: AudioUpdateCtx): void {
-    void dt;
     const ctx = this.ctx;
-    if (!ctx || ctx.state !== 'running') return;
+    if (!ctx) return;
+    if ((ctx.state as string) !== 'running') {
+      // an interruption that ended without a gesture or visibility change:
+      // keep nudging (throttled) so the music heals on its own
+      this.resumeCooldown -= dt;
+      if (this.resumeCooldown <= 0) {
+        this.resumeCooldown = 2;
+        void ctx.resume();
+      }
+      return;
+    }
     const now = ctx.currentTime;
+
+    // Whatever path got us into a live run, the dembow must be armed: a
+    // quick restart that skipped startRun can never leave it silent.
+    if (u.running && !this.running) {
+      this.running = true;
+      this.step = 0;
+      this.nextStepAt = now + 0.05;
+    }
 
     if (this.running && u.running) {
       // Layers swell with the run; ~0.3 s fades, never a pop

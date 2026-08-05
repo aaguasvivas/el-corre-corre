@@ -383,15 +383,17 @@ export class Player {
     this.addStatic(new THREE.BoxGeometry(1.55, 0.07, 0.38), red, 0, 1.0, -1.85); // el aleron
     this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, -0.55, 0.84, -1.83);
     this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, 0.55, 0.84, -1.83);
-    // el tiguere, head out the sunroof: a dark rim marks the opening so the
-    // head reads as emerging through it, not clipping through solid roof
-    this.addStatic(new THREE.BoxGeometry(0.52, 0.05, 0.52), dark, 0, 1.01, -0.15);
-    this.addStatic(new THREE.SphereGeometry(0.16, 12, 10), PALETTE.skin, 0, 1.12, -0.15);
-    // la gorra, a real dome (see buildRider), not a headband
-    const crown = new THREE.SphereGeometry(0.18, 12, 10);
+    // El tiguere standing out the sunroof. The head used to sit half inside
+    // the roof volume, which read as clipping no matter what rim was under
+    // it. Now a torso rises from the opening and the whole head floats
+    // clear above the roofline: unmistakably a person, never a stuck ball.
+    this.addStatic(new THREE.BoxGeometry(0.52, 0.05, 0.52), dark, 0, 1.01, -0.15); // the opening
+    this.addStatic(new THREE.BoxGeometry(0.3, 0.26, 0.2), PALETTE.colmadoTeal, 0, 1.12, -0.15); // shoulders
+    this.addStatic(new THREE.SphereGeometry(0.15, 12, 10), PALETTE.skin, 0, 1.36, -0.15);
+    const crown = new THREE.SphereGeometry(0.17, 12, 10);
     crown.scale(1, 0.72, 1);
-    this.addStatic(crown, blue, 0, 1.16, -0.15);
-    this.addStatic(new THREE.BoxGeometry(0.25, 0.03, 0.15), blue, 0, 1.19, 0.03);
+    this.addStatic(crown, blue, 0, 1.4, -0.15);
+    this.addStatic(new THREE.BoxGeometry(0.24, 0.03, 0.14), blue, 0, 1.43, 0.02);
     this.finishRig();
     // underglow, que se vea
     const glowPlane = new THREE.Mesh(
