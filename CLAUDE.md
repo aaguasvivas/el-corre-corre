@@ -160,7 +160,7 @@ export const CONFIG = {
 - **HUD:** score top-center (big) · combo counter with slang tier · plátano count · **"¡EN CONTRA VÍA! ×2"** pulsing when active · pause.
 - **Pause:** "PAUSA" — Seguir / Menú.
 - **Game over:** rotate **"¡Te dieron, loco!"** / **"¡Diache!"** / **"¡Eso tuvo feo!"** · breakdown · big **OTRA VEZ** · smaller **MENÚ** · Compartir (share card).
-- **Share card text:** "EL CORRE CORRE" + score + "en {vehicle} por el Malecón" + subtle "¿Me lo puedes ganar?"
+- **Share card text:** "EL CORRE CORRE" + score + "en {vehicle} por el Malecón" + subtle "¿Me puedes ganar?"
 ## Dominicanidad backlog (sprinkle wherever fitting)
 Colmado name rotation: LA FE · EL PROGRESO · DOÑA TATICA · Banca de lotería storefront · "SE VENDE EMPANADA" sign · cobrador leaning out the stopped guagua ("¡SÚBETE!" speech bubble) · chimi/fritura cart with smoke wisps · plastic chairs on sidewalks · Av. George Washington street sign · DR license plates · chichigua (kite) over the seawall · motoconcho with umbrella rig · domino slam animation at the table · Presidente-green awning (no branding) · Obelisco distance banner.
 ## Tuning guide (feeling → knob)
