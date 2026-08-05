@@ -2,9 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>LastAccessedDate</key>
-	<date>2026-08-05T06:28:07Z</date>
-	<key>WorkspacePath</key>
-	<string>/Users/Adelson/Desktop/personal/el-corre-corre/ios/App/App.xcworkspace</string>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>teamID</key>
+  <string>JQ39X3L553</string>
+  <key>destination</key>
+  <string>export</string>
 </dict>
 </plist>
