@@ -150,25 +150,50 @@ function selectVehicle(id: VehicleId): void {
   player.setVehicle(id, equippedHex(id));
   player.reset();
   ui.updateVehicles(id, vehicleRecords());
-  ui.updatePinturas(ownedPinturas(id), equippedPintura(id), score.bank);
+  previewIdx = equippedPintura(id);
+  refreshPinturaUI();
   ui.showTitle(score.record);
   audio.click();
 }
 
-// Tap on a paint dot: equip if owned, buy-and-equip if affordable, complain
-// gently if not.
-function onPintura(idx: number): void {
+// The cycler previews paints live on the bike; equipping or buying is the
+// tap on the chip. previewIdx is transient: leaving the title or starting a
+// run snaps the bike back to what is actually equipped.
+let previewIdx = 0;
+
+function refreshPinturaUI(): void {
+  const v = selectedVehicle;
+  const p = PINTURAS[v][previewIdx];
+  ui.updatePinturaCycle({
+    hex: p.hex,
+    owned: ownedPinturas(v).has(previewIdx),
+    equipped: previewIdx === equippedPintura(v),
+    price: p.price,
+    bank: score.bank,
+  });
+}
+
+function onPinturaCycle(dir: 1 | -1): void {
+  if (state !== 'title') return;
+  const v = selectedVehicle;
+  const n = PINTURAS[v].length;
+  previewIdx = (previewIdx + dir + n) % n;
+  player.setVehicle(v, PINTURAS[v][previewIdx].hex); // live preview on the bike
+  refreshPinturaUI();
+  audio.click();
+}
+
+function onPinturaTap(): void {
   if (state !== 'title') return;
   const v = selectedVehicle;
   const owned = ownedPinturas(v);
-  if (!owned.has(idx)) {
-    const price = PINTURAS[v][idx].price;
-    if (!score.spend(price)) {
+  if (!owned.has(previewIdx)) {
+    if (!score.spend(PINTURAS[v][previewIdx].price)) {
       ui.flashBank();
       audio.click();
       return;
     }
-    owned.add(idx);
+    owned.add(previewIdx);
     try {
       localStorage.setItem(pintOwnedKey(v), [...owned].filter((i) => i > 0).join(','));
     } catch {
@@ -177,16 +202,17 @@ function onPintura(idx: number): void {
     ui.popupPintura();
     audio.platano();
     haptics.medium();
+  } else if (previewIdx === equippedPintura(v)) {
+    return; // already wearing it
   } else {
     audio.click();
   }
   try {
-    localStorage.setItem(pintEquipKey(v), String(idx));
+    localStorage.setItem(pintEquipKey(v), String(previewIdx));
   } catch {
     // fine
   }
-  player.setVehicle(v, PINTURAS[v][idx].hex);
-  ui.updatePinturas(owned, idx, score.bank);
+  refreshPinturaUI();
 }
 
 function goToMenu(): void {
@@ -197,7 +223,9 @@ function goToMenu(): void {
   resetRunState();
   ui.showTitle(score.record);
   ui.updateVehicles(selectedVehicle, vehicleRecords());
-  ui.updatePinturas(ownedPinturas(selectedVehicle), equippedPintura(selectedVehicle), score.bank);
+  previewIdx = equippedPintura(selectedVehicle);
+  player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
+  refreshPinturaUI();
   audio.click();
 }
 
@@ -215,7 +243,8 @@ const ui = new UI(document.getElementById('ui')!, {
   onSelectVehicle: selectVehicle,
   onMenu: goToMenu,
   onShare: doShare,
-  onPintura,
+  onPinturaCycle,
+  onPinturaTap,
 });
 ui.setMuted(audio.muted);
 
@@ -344,6 +373,9 @@ function resetRunState(): void {
 
 function startRun(): void {
   if (state !== 'title' && state !== 'gameover') return;
+  // Drop any unpurchased pintura preview: you ride what you own.
+  previewIdx = equippedPintura(selectedVehicle);
+  player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
   score.reset();
   resetRunState();
   state = 'playing';
@@ -607,7 +639,8 @@ function frame(now: number): void {
 
 ui.showTitle(score.record);
 ui.updateVehicles(selectedVehicle, vehicleRecords());
-ui.updatePinturas(ownedPinturas(selectedVehicle), equippedPintura(selectedVehicle), score.bank);
+previewIdx = equippedPintura(selectedVehicle);
+refreshPinturaUI();
 // Compile every shader while the title is up. renderer.compile walks the whole
 // scene, not just the visible parts, so the pooled traffic, obstacles and the
 // 46 confetti get their programs built here instead of hitching mid-run, worst

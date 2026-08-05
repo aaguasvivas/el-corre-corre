@@ -2,7 +2,7 @@
 // the share card. Spanish-first with an EN flip. The slang stays Dominican in
 // both languages.
 
-import { PINTURAS, VEHICLES, type VehicleId } from './config';
+import { VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type RunResult } from './score';
 import { drawDominicanFlag } from './flag';
 
@@ -47,6 +47,7 @@ const STRINGS = {
     multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: '¡Pintura nueva!',
+    pinturaEquip: 'PONER',
     nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
     ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
   },
@@ -87,6 +88,7 @@ const STRINGS = {
     // Places keep their names in both languages
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: 'New paint!',
+    pinturaEquip: 'USE',
     nearMiss: ['So close!', 'By a hair!'],
     ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
   },
@@ -128,7 +130,8 @@ export interface UICallbacks {
   onSelectVehicle(v: VehicleId): void;
   onMenu(): void;
   onShare(): void;
-  onPintura(idx: number): void; // tap on a paint dot of the selected vehicle
+  onPinturaCycle(dir: 1 | -1): void; // flip through paints; the bike previews live
+  onPinturaTap(): void; // equip the previewed paint, or buy it if locked
 }
 
 function readLang(): Lang {
@@ -159,19 +162,20 @@ function statBars(): string {
     const v = VEHICLES[id];
     const bar = (label: string, n: number): string =>
       `<div class="vc-stat"><span>${label}</span><div class="vc-bar"><b style="width:${n * 20}%"></b></div></div>`;
-    const dots = PINTURAS[id]
-      .map(
-        (p, i) =>
-          `<button class="paint-dot" type="button" data-p="${i}" style="background:#${p.hex.toString(16).padStart(6, '0')}"><span class="paint-price">${p.price > 0 ? p.price : ''}</span></button>`,
-      )
-      .join('');
     return `
       <div class="vcard" data-v="${id}">
         <div class="vc-name">${v.name}</div>
         ${bar('VEL', v.stats.vel)}${bar('MAN', v.stats.man)}${bar('AGU', v.stats.agu)}
         <div class="vc-tag">${v.tagline}</div>
         <div class="vc-rec" data-rec="${id}"></div>
-        <div class="vc-paints" data-paints="${id}">${dots}</div>
+        <div class="vc-pcycle">
+          <button class="pc-arrow pc-prev" type="button" aria-label="anterior">&#8249;</button>
+          <div class="pc-chip">
+            <span class="pc-swatch"></span>
+            <span class="pc-label"></span>
+          </div>
+          <button class="pc-arrow pc-next" type="button" aria-label="siguiente">&#8250;</button>
+        </div>
       </div>`;
   }).join('');
 }
@@ -393,18 +397,19 @@ export class UI {
         e.stopPropagation();
         this.cb.onSelectVehicle(card.dataset.v as VehicleId);
       });
-      // Paint dots live inside the card but must not re-select the vehicle.
-      for (const dot of card.querySelectorAll<HTMLElement>('.paint-dot')) {
-        dot.addEventListener('pointerdown', (e) => {
-          e.stopPropagation();
-          if (card.dataset.v !== this.selectedVehicle) {
-            // dots on an unselected card just select that vehicle
-            this.cb.onSelectVehicle(card.dataset.v as VehicleId);
-            return;
-          }
-          this.cb.onPintura(Number(dot.dataset.p));
-        });
-      }
+      // The pintura cycler lives inside the card but must not re-select the
+      // vehicle. On an unselected card any tap just selects that vehicle.
+      const guard = (e: Event, fn: () => void): void => {
+        e.stopPropagation();
+        if (card.dataset.v !== this.selectedVehicle) {
+          this.cb.onSelectVehicle(card.dataset.v as VehicleId);
+          return;
+        }
+        fn();
+      };
+      card.querySelector('.pc-prev')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaCycle(-1)));
+      card.querySelector('.pc-next')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaCycle(1)));
+      card.querySelector('.pc-chip')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaTap()));
     }
     this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
     this.btnMenu.addEventListener('pointerdown', (e) => {
@@ -493,21 +498,27 @@ export class UI {
     }
   }
 
-  // Las Pinturas: dot states on the selected card, plus the wallet chip.
-  updatePinturas(owned: ReadonlySet<number>, equipped: number, bank: number): void {
-    this.setBank(bank);
+  // Las Pinturas: the cycler on the selected card shows one paint at a
+  // time. The chip's label carries the state: nothing (equipped), PONER
+  // (owned, tap to wear it), or the price (locked, tap to buy).
+  updatePinturaCycle(state: { hex: number; owned: boolean; equipped: boolean; price: number; bank: number }): void {
+    this.setBank(state.bank);
+    const t = this.t();
     for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
       const mine = card.dataset.v === this.selectedVehicle;
       card.classList.toggle('show-paints', mine);
       if (!mine) continue;
-      for (const dot of card.querySelectorAll<HTMLElement>('.paint-dot')) {
-        const i = Number(dot.dataset.p);
-        const own = owned.has(i);
-        dot.classList.toggle('own', own);
-        dot.classList.toggle('equip', i === equipped);
-        const price = dot.querySelector<HTMLElement>('.paint-price');
-        if (price) price.style.display = own ? 'none' : '';
-      }
+      const swatch = card.querySelector<HTMLElement>('.pc-swatch');
+      const label = card.querySelector<HTMLElement>('.pc-label');
+      const chip = card.querySelector<HTMLElement>('.pc-chip');
+      if (!swatch || !label || !chip) continue;
+      swatch.style.background = `#${state.hex.toString(16).padStart(6, '0')}`;
+      chip.classList.toggle('equip', state.equipped);
+      chip.classList.toggle('locked', !state.owned);
+      chip.classList.toggle('poor', !state.owned && state.bank < state.price);
+      if (state.equipped) label.textContent = '';
+      else if (state.owned) label.textContent = t.pinturaEquip;
+      else label.innerHTML = `${state.price} ${BANANA_SVG}`;
     }
   }
 

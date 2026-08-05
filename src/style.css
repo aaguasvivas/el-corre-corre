@@ -209,49 +209,80 @@ body {
   60% { background: rgba(206, 17, 38, 0.75); transform: translateX(4px); }
 }
 
-/* paint dots: hidden on unselected cards to keep the row calm */
-.vc-paints {
+/* the pintura cycler: one paint at a time, big targets, the bike itself
+   is the preview. Hidden on unselected cards. */
+.vc-pcycle {
   display: none;
+  align-items: center;
   justify-content: center;
-  gap: 7px;
-  margin-top: 7px;
-  padding-bottom: 12px;
+  gap: 10px;
+  margin-top: 8px;
 }
 
-.vcard.show-paints .vc-paints {
+.vcard.show-paints .vc-pcycle {
   display: flex;
 }
 
-.paint-dot {
-  position: relative;
-  width: 21px;
-  height: 21px;
+.pc-arrow {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  padding: 0;
+  border: 0;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--cream);
+  font-size: 22px;
+  line-height: 1;
+  font-family: inherit;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-.paint-dot.own {
-  border-color: rgba(255, 255, 255, 0.75);
+.pc-arrow:active {
+  background: rgba(255, 255, 255, 0.3);
 }
 
-.paint-dot.equip {
-  border-color: var(--cream);
-  box-shadow: 0 0 0 2px rgba(244, 196, 48, 0.9);
+.pc-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 74px;
+  justify-content: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.paint-price {
-  position: absolute;
-  top: 21px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 8.5px;
-  letter-spacing: 0.3px;
+.pc-chip.equip {
+  border-color: var(--gold);
+  box-shadow: 0 0 8px rgba(244, 196, 48, 0.45);
+}
+
+.pc-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  flex: none;
+}
+
+.pc-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  letter-spacing: 0.6px;
   color: var(--cream);
-  opacity: 0.85;
-  font-family: inherit;
+}
+
+.pc-label:empty {
+  display: none;
+}
+
+.pc-chip.poor .pc-label {
+  opacity: 0.55;
 }
 
 .chip {
