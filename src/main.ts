@@ -5,7 +5,7 @@
 import './style.css';
 import '@fontsource/lilita-one';
 import * as THREE from 'three';
-import { CONFIG, ROAD, VEHICLES, type VehicleId } from './config';
+import { CONFIG, PINTURAS, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
 import { Traffic, type ObstacleKind, type PickupKind, type StepCtx, type VehicleType } from './traffic';
@@ -28,6 +28,38 @@ function readVehicle(): VehicleId {
   } catch {
     return 'motor';
   }
+}
+
+// Las Pinturas: ownership and the equipped paint per vehicle. Index 0 (the
+// factory paint) is always owned.
+const pintOwnedKey = (v: VehicleId): string => `ecc.v1.pinturas.${v}`;
+const pintEquipKey = (v: VehicleId): string => `ecc.v1.pintura.${v}`;
+
+function ownedPinturas(v: VehicleId): Set<number> {
+  const owned = new Set<number>([0]);
+  try {
+    for (const part of (localStorage.getItem(pintOwnedKey(v)) ?? '').split(',')) {
+      const i = Number(part);
+      if (Number.isInteger(i) && i > 0 && i < PINTURAS[v].length) owned.add(i);
+    }
+  } catch {
+    // fine
+  }
+  return owned;
+}
+
+function equippedPintura(v: VehicleId): number {
+  try {
+    const i = Number(localStorage.getItem(pintEquipKey(v)) ?? 0);
+    if (Number.isInteger(i) && i >= 0 && i < PINTURAS[v].length && ownedPinturas(v).has(i)) return i;
+  } catch {
+    // fine
+  }
+  return 0;
+}
+
+function equippedHex(v: VehicleId): number {
+  return PINTURAS[v][equippedPintura(v)].hex;
 }
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -115,11 +147,46 @@ function selectVehicle(id: VehicleId): void {
     // fine
   }
   score.setVehicle(id);
-  player.setVehicle(id);
+  player.setVehicle(id, equippedHex(id));
   player.reset();
   ui.updateVehicles(id, vehicleRecords());
+  ui.updatePinturas(ownedPinturas(id), equippedPintura(id), score.bank);
   ui.showTitle(score.record);
   audio.click();
+}
+
+// Tap on a paint dot: equip if owned, buy-and-equip if affordable, complain
+// gently if not.
+function onPintura(idx: number): void {
+  if (state !== 'title') return;
+  const v = selectedVehicle;
+  const owned = ownedPinturas(v);
+  if (!owned.has(idx)) {
+    const price = PINTURAS[v][idx].price;
+    if (!score.spend(price)) {
+      ui.flashBank();
+      audio.click();
+      return;
+    }
+    owned.add(idx);
+    try {
+      localStorage.setItem(pintOwnedKey(v), [...owned].filter((i) => i > 0).join(','));
+    } catch {
+      // fine
+    }
+    ui.popupPintura();
+    audio.platano();
+    haptics.medium();
+  } else {
+    audio.click();
+  }
+  try {
+    localStorage.setItem(pintEquipKey(v), String(idx));
+  } catch {
+    // fine
+  }
+  player.setVehicle(v, PINTURAS[v][idx].hex);
+  ui.updatePinturas(owned, idx, score.bank);
 }
 
 function goToMenu(): void {
@@ -130,6 +197,7 @@ function goToMenu(): void {
   resetRunState();
   ui.showTitle(score.record);
   ui.updateVehicles(selectedVehicle, vehicleRecords());
+  ui.updatePinturas(ownedPinturas(selectedVehicle), equippedPintura(selectedVehicle), score.bank);
   audio.click();
 }
 
@@ -147,6 +215,7 @@ const ui = new UI(document.getElementById('ui')!, {
   onSelectVehicle: selectVehicle,
   onMenu: goToMenu,
   onShare: doShare,
+  onPintura,
 });
 ui.setMuted(audio.muted);
 
@@ -232,7 +301,7 @@ const player = new Player(scene, {
     }
   },
 });
-player.setVehicle(selectedVehicle);
+player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
 
 world.onObeliscoPass = () => {
   if (state !== 'playing') return;
@@ -538,6 +607,7 @@ function frame(now: number): void {
 
 ui.showTitle(score.record);
 ui.updateVehicles(selectedVehicle, vehicleRecords());
+ui.updatePinturas(ownedPinturas(selectedVehicle), equippedPintura(selectedVehicle), score.bank);
 // Compile every shader while the title is up. renderer.compile walks the whole
 // scene, not just the visible parts, so the pooled traffic, obstacles and the
 // 46 confetti get their programs built here instead of hitching mid-run, worst
@@ -581,6 +651,7 @@ requestAnimationFrame(frame);
   tramo: () => world.tramo,
   obelisco: () => world.obeliscoState,
   overlaps: () => traffic.overlapCount,
+  bank: () => score.bank,
   start: () => {
     if (state === 'title' || state === 'gameover') startRun();
   },

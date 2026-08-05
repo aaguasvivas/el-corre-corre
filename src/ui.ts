@@ -2,7 +2,7 @@
 // the share card. Spanish-first with an EN flip. The slang stays Dominican in
 // both languages.
 
-import { VEHICLES, type VehicleId } from './config';
+import { PINTURAS, VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type RunResult } from './score';
 import { drawDominicanFlag } from './flag';
 
@@ -46,6 +46,7 @@ const STRINGS = {
     obelisco: '¡El Obelisco!',
     multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
+    pinturaNew: '¡Pintura nueva!',
     nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
     ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
   },
@@ -85,6 +86,7 @@ const STRINGS = {
     multUp: (n: number) => `MULTIPLIER ×${n}!`,
     // Places keep their names in both languages
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
+    pinturaNew: 'New paint!',
     nearMiss: ['So close!', 'By a hair!'],
     ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
   },
@@ -126,6 +128,7 @@ export interface UICallbacks {
   onSelectVehicle(v: VehicleId): void;
   onMenu(): void;
   onShare(): void;
+  onPintura(idx: number): void; // tap on a paint dot of the selected vehicle
 }
 
 function readLang(): Lang {
@@ -156,12 +159,19 @@ function statBars(): string {
     const v = VEHICLES[id];
     const bar = (label: string, n: number): string =>
       `<div class="vc-stat"><span>${label}</span><div class="vc-bar"><b style="width:${n * 20}%"></b></div></div>`;
+    const dots = PINTURAS[id]
+      .map(
+        (p, i) =>
+          `<button class="paint-dot" type="button" data-p="${i}" style="background:#${p.hex.toString(16).padStart(6, '0')}"><span class="paint-price">${p.price > 0 ? p.price : ''}</span></button>`,
+      )
+      .join('');
     return `
       <div class="vcard" data-v="${id}">
         <div class="vc-name">${v.name}</div>
         ${bar('VEL', v.stats.vel)}${bar('MAN', v.stats.man)}${bar('AGU', v.stats.agu)}
         <div class="vc-tag">${v.tagline}</div>
         <div class="vc-rec" data-rec="${id}"></div>
+        <div class="vc-paints" data-paints="${id}">${dots}</div>
       </div>`;
   }).join('');
 }
@@ -271,6 +281,7 @@ export class UI {
           <span id="ctrl-trick"></span>
         </div>
         <div id="title-record" class="title-record"></div>
+        <div id="title-bank" class="title-bank">${BANANA_SVG}<span id="bank-n">0</span></div>
       </div>
       <div id="gameover" class="screen hidden">
         <div class="card">
@@ -382,6 +393,18 @@ export class UI {
         e.stopPropagation();
         this.cb.onSelectVehicle(card.dataset.v as VehicleId);
       });
+      // Paint dots live inside the card but must not re-select the vehicle.
+      for (const dot of card.querySelectorAll<HTMLElement>('.paint-dot')) {
+        dot.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          if (card.dataset.v !== this.selectedVehicle) {
+            // dots on an unselected card just select that vehicle
+            this.cb.onSelectVehicle(card.dataset.v as VehicleId);
+            return;
+          }
+          this.cb.onPintura(Number(dot.dataset.p));
+        });
+      }
     }
     this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
     this.btnMenu.addEventListener('pointerdown', (e) => {
@@ -468,6 +491,41 @@ export class UI {
         if (rec) rec.textContent = this.lastRecords[id] > 0 ? `${t.record} ${this.lastRecords[id]}` : '';
       }
     }
+  }
+
+  // Las Pinturas: dot states on the selected card, plus the wallet chip.
+  updatePinturas(owned: ReadonlySet<number>, equipped: number, bank: number): void {
+    this.setBank(bank);
+    for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
+      const mine = card.dataset.v === this.selectedVehicle;
+      card.classList.toggle('show-paints', mine);
+      if (!mine) continue;
+      for (const dot of card.querySelectorAll<HTMLElement>('.paint-dot')) {
+        const i = Number(dot.dataset.p);
+        const own = owned.has(i);
+        dot.classList.toggle('own', own);
+        dot.classList.toggle('equip', i === equipped);
+        const price = dot.querySelector<HTMLElement>('.paint-price');
+        if (price) price.style.display = own ? 'none' : '';
+      }
+    }
+  }
+
+  setBank(n: number): void {
+    const el = document.getElementById('bank-n');
+    if (el) el.textContent = String(n);
+  }
+
+  flashBank(): void {
+    const chip = document.getElementById('title-bank');
+    if (!chip) return;
+    chip.classList.remove('deny');
+    void chip.offsetWidth; // restart the animation
+    chip.classList.add('deny');
+  }
+
+  popupPintura(): void {
+    this.popup(this.t().pinturaNew, 50, 40, 'pop-lg pop-gold');
   }
 
   updateVehicles(selected: VehicleId, records: Record<VehicleId, number>): void {

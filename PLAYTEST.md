@@ -5,7 +5,20 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Phone feel round 2 (current): "chill, then LIT"
+## Las Pinturas + traffic honesty (current)
+
+1. **Las Pinturas**: your lifetime plátanos are a wallet now (the banana
+   chip on the title screen; your collected total carries over). Five
+   paints per vehicle on the selected card: tap to equip, tap a locked one
+   to buy (400 / 900 / 1600 / 3000). Does buying feel earned at the
+   current earn rate, or too grindy? Is the gold one tempting?
+2. **Traffic never ghosts**: same-lane followers match the leader's speed
+   instead of driving through, and el rebase only swings when the seam is
+   clear. Watch a full run: do you ever see vehicles overlap now?
+3. The music self-heals after calls, Siri, or app switches. If it ever
+   stays silent more than a couple seconds, that is a new bug: report it.
+
+## Phone feel round 2: "chill, then LIT"
 
 1. **The arc**: ten gentle seconds to feel the controls, real density by
    about a minute (densityRampSec 95 to 50), and a fuller road at the top

@@ -33,7 +33,15 @@ interface Rig {
   group: THREE.Group;
   wheels: THREE.Mesh[];
   wheelRadius: number;
+  paint: number; // the pintura this rig was built with
 }
+
+// Factory paints (pintura index 0 in config's PINTURAS).
+const DEFAULT_PAINT: Record<VehicleId, number> = {
+  motor: PALETTE.flagRed,
+  pasola: PALETTE.pasolaMint,
+  civic: PALETTE.flagRed,
+};
 
 interface Particle {
   mesh: THREE.Mesh;
@@ -62,6 +70,8 @@ export class Player {
   private wheels: THREE.Mesh[] = [];
   private wheelRadius = 0.32;
   private rigs: Partial<Record<VehicleId, Rig>> = {};
+  private paintFor: Partial<Record<VehicleId, number>> = {};
+  private paintHex: number = DEFAULT_PAINT.motor;
   private buildTarget!: THREE.Group;
   private staticParts: THREE.BufferGeometry[] = [];
   private aura!: THREE.Mesh;
@@ -210,24 +220,40 @@ export class Player {
     this.root.add(this.stars);
   }
 
-  // Rigs are built once and kept: swapping rides on the title screen is a
-  // visibility flip, not a rebuild, so there is no hitch and nothing to dispose.
-  setVehicle(id: VehicleId): void {
+  // Rigs are cached per vehicle: swapping rides on the title screen is a
+  // visibility flip. A rig only rebuilds when its pintura changes.
+  setVehicle(id: VehicleId, paintHex?: number): void {
     this.vehicle = id;
     const v = VEHICLES[id];
     this.edgeMax = ROAD.edgeX - CONFIG.playerHalfWidth * v.hitbox;
     this.wheelieAngleMax = id === 'civic' ? 0.3 : 0.5;
     this.wheelieLift = id === 'civic' ? 0.42 : 0.62;
 
+    if (paintHex !== undefined) this.paintFor[id] = paintHex;
+    const want = this.paintFor[id] ?? DEFAULT_PAINT[id];
+
+    // A cached rig wearing the wrong pintura gets torn down and repainted.
+    // Geometries only: rig meshes share vcToonMaterial with traffic and
+    // critters, so materials must never be disposed from here.
     let rig = this.rigs[id];
+    if (rig && rig.paint !== want) {
+      this.leanGroup.remove(rig.group);
+      rig.group.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.geometry) m.geometry.dispose();
+      });
+      rig = undefined;
+      this.rigs[id] = undefined;
+    }
     if (!rig) {
+      this.paintHex = want;
       const group = new THREE.Group();
       this.buildTarget = group;
       this.wheels = [];
       if (id === 'pasola') this.buildPasola();
       else if (id === 'civic') this.buildCivic();
       else this.buildMoto();
-      rig = { group, wheels: this.wheels, wheelRadius: this.wheelRadius };
+      rig = { group, wheels: this.wheels, wheelRadius: this.wheelRadius, paint: want };
       this.rigs[id] = rig;
       this.leanGroup.add(group);
     }
@@ -305,7 +331,7 @@ export class Player {
   }
 
   private buildMoto(): void {
-    const red = PALETTE.flagRed;
+    const red = this.paintHex;
     const chrome = 0xd9d9d9;
     const dark = toonMaterial(PALETTE.darkParts);
     const glow = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow }));
@@ -333,7 +359,7 @@ export class Player {
   }
 
   private buildPasola(): void {
-    const mint = PALETTE.pasolaMint;
+    const mint = this.paintHex;
     const chrome = 0xd9d9d9;
     const dark = toonMaterial(PALETTE.darkParts);
     const glow = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow }));
@@ -360,7 +386,7 @@ export class Player {
   }
 
   private buildCivic(): void {
-    const red = PALETTE.flagRed;
+    const red = this.paintHex;
     const dark = PALETTE.darkParts;
     const blue = PALETTE.flagBlue;
     const darkMat = toonMaterial(PALETTE.darkParts);

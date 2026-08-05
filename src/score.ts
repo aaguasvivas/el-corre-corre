@@ -212,6 +212,18 @@ export class Score {
     };
   }
 
+  // Las Pinturas: the lifetime platano total is the wallet.
+  get bank(): number {
+    return this.platanosLifetime;
+  }
+
+  spend(n: number): boolean {
+    if (this.platanosLifetime < n) return false;
+    this.platanosLifetime -= n;
+    writeInt(PLATANOS_KEY, this.platanosLifetime);
+    return true;
+  }
+
   // Defensive save (e.g. app backgrounded mid-run, or quitting from PAUSE).
   // Mirrors finishRun on BOTH records: banking points without the distance
   // would leave La Cinta del Récord stranded at an older distance than the

@@ -104,6 +104,38 @@ export const VEHICLES: Record<VehicleId, VehicleDef> = {
   },
 } as const;
 
+// Las Pinturas: the platano wallet finally spends. Index 0 is the factory
+// paint, always owned. Prices tuned to the earn rate (a decent run banks
+// 20-60 platanos): first unlock inside a session or two, the gold one a flex.
+export interface Pintura {
+  hex: number;
+  price: number;
+}
+
+export const PINTURAS: Record<VehicleId, ReadonlyArray<Pintura>> = {
+  motor: [
+    { hex: 0xce1126, price: 0 }, // rojo del barrio
+    { hex: 0x2b2f36, price: 400 }, // negro tinto
+    { hex: 0x27b598, price: 900 }, // verde colmado (shifted off the rider's shirt teal)
+    { hex: 0x002d62, price: 1600 }, // azul marino
+    { hex: 0xf4c430, price: 3000 }, // oro fino
+  ],
+  pasola: [
+    { hex: 0x7fd8c9, price: 0 }, // menta de fabrica
+    { hex: 0xff8b94, price: 400 }, // rosa chicle
+    { hex: 0xb3d9ff, price: 900 }, // cielo
+    { hex: 0xcdb4db, price: 1600 }, // lila
+    { hex: 0xf4c430, price: 3000 }, // oro fino
+  ],
+  civic: [
+    { hex: 0xce1126, price: 0 }, // rojo que se oiga
+    { hex: 0x9d4edd, price: 400 }, // morado neon
+    { hex: 0x17a2b8, price: 900 }, // turquesa
+    { hex: 0x24242a, price: 1600 }, // negro mate
+    { hex: 0xf4c430, price: 3000 }, // oro fino
+  ],
+} as const;
+
 export const CONFIG = {
   // Simulation
   fixedDt: 1 / 120, // fixed sim step; feel is framerate-independent

@@ -185,6 +185,75 @@ body {
   min-height: 20px;
 }
 
+/* Las Pinturas: the platano wallet on the title screen */
+.title-bank {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(0, 45, 98, 0.55);
+  color: var(--cream);
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+.title-bank.deny {
+  animation: bank-deny 0.45s ease;
+}
+
+@keyframes bank-deny {
+  0%, 100% { background: rgba(0, 45, 98, 0.55); transform: translateX(0); }
+  25% { background: rgba(206, 17, 38, 0.75); transform: translateX(-4px); }
+  60% { background: rgba(206, 17, 38, 0.75); transform: translateX(4px); }
+}
+
+/* paint dots: hidden on unselected cards to keep the row calm */
+.vc-paints {
+  display: none;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 7px;
+  padding-bottom: 12px;
+}
+
+.vcard.show-paints .vc-paints {
+  display: flex;
+}
+
+.paint-dot {
+  position: relative;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.paint-dot.own {
+  border-color: rgba(255, 255, 255, 0.75);
+}
+
+.paint-dot.equip {
+  border-color: var(--cream);
+  box-shadow: 0 0 0 2px rgba(244, 196, 48, 0.9);
+}
+
+.paint-price {
+  position: absolute;
+  top: 21px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8.5px;
+  letter-spacing: 0.3px;
+  color: var(--cream);
+  opacity: 0.85;
+  font-family: inherit;
+}
+
 .chip {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 12px);
