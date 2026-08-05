@@ -4,10 +4,12 @@
 // The whole point of this module is that the flag must never read as the
 // French one. That means all four things: the white cross, blue at the upper
 // hoist and lower fly, red at the upper fly and lower hoist, and el escudo in
-// the middle. The escudo is simplified to what survives at small sizes, a
-// wreath around a shield with the gold cross, the blue ribbon above and the
-// red below, because the real one (Bible, spears, lettering) turns to mush
-// below about 200 px.
+// the middle. The escudo keeps the real one's defining anatomy at the sizes
+// we draw: the shield is itself quartered by a white cross with blue and red
+// quarters (a small flag inside the flag), the open Bible sits at the
+// center with the small gold cross above it, branches flank the shield, the
+// blue ribbon rides above and the red below. Only the lettering is dropped;
+// it turns to mush below about 200 px.
 //
 // Authored in an 80 x 50 space, the flag's real 8:5 ratio, and scaled by
 // width. The SVG twin of this lives in ui.ts as FLAG_SVG; keep them in step.
@@ -69,21 +71,54 @@ export function drawDominicanFlag(
   g.fillStyle = '#ce1126';
   g.fillRect(px(33.8), py(33.4), S(12.4), S(2.2));
 
-  // el escudo
-  g.beginPath();
-  g.moveTo(px(35), py(16.9));
-  g.lineTo(px(45), py(16.9));
-  g.lineTo(px(45), py(25));
-  g.lineTo(px(40), py(30.4));
-  g.lineTo(px(35), py(25));
-  g.closePath();
-  g.fillStyle = '#f7f3e8';
-  g.fill();
+  // el escudo: the shield is quartered like the flag itself
+  const shieldPath = (): void => {
+    g.beginPath();
+    g.moveTo(px(35), py(16.9));
+    g.lineTo(px(45), py(16.9));
+    g.lineTo(px(45), py(25));
+    g.lineTo(px(40), py(30.4));
+    g.lineTo(px(35), py(25));
+    g.closePath();
+  };
+  g.save();
+  shieldPath();
+  g.clip();
+  // white field, then the four quarters; the gaps between them ARE the cross
+  g.fillStyle = '#ffffff';
+  g.fillRect(px(35), py(16.9), S(10), S(13.5));
+  g.fillStyle = '#002d62';
+  g.fillRect(px(35), py(16.9), S(4.2), S(4.8)); // upper hoist blue
+  g.fillRect(px(40.8), py(23.3), S(4.2), S(7.2)); // lower fly blue
+  g.fillStyle = '#ce1126';
+  g.fillRect(px(40.8), py(16.9), S(4.2), S(4.8)); // upper fly red
+  g.fillRect(px(35), py(23.3), S(4.2), S(7.2)); // lower hoist red
+  g.restore();
+  shieldPath();
   g.strokeStyle = '#002d62';
   g.lineWidth = S(0.8);
   g.stroke();
+  // la Biblia abierta at the center of the cross
+  g.fillStyle = '#f7f3e8';
+  g.strokeStyle = '#002d62';
+  g.lineWidth = S(0.5);
+  g.beginPath();
+  g.moveTo(px(40), py(23.2));
+  g.lineTo(px(37.4), py(22.5));
+  g.lineTo(px(37.4), py(24.6));
+  g.lineTo(px(40), py(25.4));
+  g.lineTo(px(42.6), py(24.6));
+  g.lineTo(px(42.6), py(22.5));
+  g.closePath();
+  g.fill();
+  g.stroke();
+  g.beginPath();
+  g.moveTo(px(40), py(23.2));
+  g.lineTo(px(40), py(25.4));
+  g.stroke();
+  // the small gold cross above the Bible
   g.fillStyle = '#f4c430';
-  g.fillRect(px(39.3), py(18.5), S(1.4), S(8));
-  g.fillRect(px(37.1), py(20.8), S(5.8), S(1.4));
+  g.fillRect(px(39.6), py(18.2), S(0.8), S(3.6));
+  g.fillRect(px(38.4), py(19.2), S(3.2), S(0.8));
   g.restore();
 }

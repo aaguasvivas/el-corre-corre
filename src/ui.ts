@@ -115,9 +115,19 @@ const FLAG_SVG = `<svg class="flag-svg" viewBox="0 0 80 50" role="img" aria-labe
     <path d="M46.4 25.4l1.9 1.5M47 21.9l2.1.9M46.6 18.6l1.9-.2" stroke="#2f7d32" stroke-width="1.2" stroke-linecap="round"/>
     <rect x="33.2" y="13.1" width="13.6" height="2.2" rx="1.1" fill="#002d62"/>
     <rect x="33.8" y="33.4" width="12.4" height="2.2" rx="1.1" fill="#ce1126"/>
-    <path d="M35 16.9h10v8.1L40 30.4 35 25z" fill="#f7f3e8" stroke="#002d62" stroke-width="0.8"/>
-    <rect x="39.3" y="18.5" width="1.4" height="8" fill="#f4c430"/>
-    <rect x="37.1" y="20.8" width="5.8" height="1.4" fill="#f4c430"/>
+    <clipPath id="ecc-shield"><path d="M35 16.9h10v8.1L40 30.4 35 25z"/></clipPath>
+    <path d="M35 16.9h10v8.1L40 30.4 35 25z" fill="#ffffff"/>
+    <g clip-path="url(#ecc-shield)">
+      <rect x="35" y="16.9" width="4.2" height="4.8" fill="#002d62"/>
+      <rect x="40.8" y="16.9" width="4.2" height="4.8" fill="#ce1126"/>
+      <rect x="35" y="23.3" width="4.2" height="7.2" fill="#ce1126"/>
+      <rect x="40.8" y="23.3" width="4.2" height="7.2" fill="#002d62"/>
+    </g>
+    <path d="M35 16.9h10v8.1L40 30.4 35 25z" fill="none" stroke="#002d62" stroke-width="0.8"/>
+    <path d="M40 23.2 37.4 22.5v2.1L40 25.4l2.6-.8v-2.1z" fill="#f7f3e8" stroke="#002d62" stroke-width="0.5"/>
+    <path d="M40 23.2v2.2" stroke="#002d62" stroke-width="0.5"/>
+    <rect x="39.6" y="18.2" width="0.8" height="3.6" fill="#f4c430"/>
+    <rect x="38.4" y="19.2" width="3.2" height="0.8" fill="#f4c430"/>
   </g>
 </svg>`;
 
@@ -170,12 +180,10 @@ function statBars(): string {
         <div class="vc-rec" data-rec="${id}"></div>
         <div class="vc-pcycle">
           <button class="pc-arrow pc-prev" type="button" aria-label="anterior">&#8249;</button>
-          <div class="pc-chip">
-            <span class="pc-swatch"></span>
-            <span class="pc-label"></span>
-          </div>
+          <button class="pc-swatch" type="button" aria-label="pintura"></button>
           <button class="pc-arrow pc-next" type="button" aria-label="siguiente">&#8250;</button>
         </div>
+        <div class="pc-state"><span class="pc-label"></span></div>
       </div>`;
   }).join('');
 }
@@ -409,7 +417,7 @@ export class UI {
       };
       card.querySelector('.pc-prev')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaCycle(-1)));
       card.querySelector('.pc-next')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaCycle(1)));
-      card.querySelector('.pc-chip')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaTap()));
+      card.querySelector('.pc-swatch')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaTap()));
     }
     this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
     this.btnMenu.addEventListener('pointerdown', (e) => {
@@ -510,12 +518,11 @@ export class UI {
       if (!mine) continue;
       const swatch = card.querySelector<HTMLElement>('.pc-swatch');
       const label = card.querySelector<HTMLElement>('.pc-label');
-      const chip = card.querySelector<HTMLElement>('.pc-chip');
-      if (!swatch || !label || !chip) continue;
+      if (!swatch || !label) continue;
       swatch.style.background = `#${state.hex.toString(16).padStart(6, '0')}`;
-      chip.classList.toggle('equip', state.equipped);
-      chip.classList.toggle('locked', !state.owned);
-      chip.classList.toggle('poor', !state.owned && state.bank < state.price);
+      swatch.classList.toggle('equip', state.equipped);
+      swatch.classList.toggle('locked', !state.owned);
+      label.classList.toggle('poor', !state.owned && state.bank < state.price);
       if (state.equipped) label.textContent = '';
       else if (state.owned) label.textContent = t.pinturaEquip;
       else label.innerHTML = `${state.price} ${BANANA_SVG}`;
