@@ -6,48 +6,6 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>4054D6BA-5856-40AA-A5FF-5E6E114F8A01</key>
-		<dict>
-			<key>className</key>
-			<string>IDECommandLineBuildLog</string>
-			<key>documentTypeString</key>
-			<string>&lt;nil&gt;</string>
-			<key>domainType</key>
-			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
-			<key>fileName</key>
-			<string>4054D6BA-5856-40AA-A5FF-5E6E114F8A01.xcactivitylog</string>
-			<key>hasPrimaryLog</key>
-			<true/>
-			<key>primaryObservable</key>
-			<dict>
-				<key>highLevelStatus</key>
-				<string>W</string>
-				<key>totalNumberOfAnalyzerIssues</key>
-				<integer>0</integer>
-				<key>totalNumberOfErrors</key>
-				<integer>0</integer>
-				<key>totalNumberOfTestFailures</key>
-				<integer>0</integer>
-				<key>totalNumberOfWarnings</key>
-				<integer>1</integer>
-			</dict>
-			<key>schemeIdentifier-containerName</key>
-			<string>App project</string>
-			<key>schemeIdentifier-schemeName</key>
-			<string>App</string>
-			<key>schemeIdentifier-sharedScheme</key>
-			<integer>1</integer>
-			<key>signature</key>
-			<string>Building workspace App with scheme App and configuration Debug</string>
-			<key>timeStartedRecording</key>
-			<real>807609352.55011296</real>
-			<key>timeStoppedRecording</key>
-			<real>807609372.54016197</real>
-			<key>title</key>
-			<string>Building workspace App with scheme App and configuration Debug</string>
-			<key>uniqueIdentifier</key>
-			<string>4054D6BA-5856-40AA-A5FF-5E6E114F8A01</string>
-		</dict>
 		<key>4AC8915F-970B-4EA9-8E2D-8E5AE510175E</key>
 		<dict>
 			<key>className</key>
@@ -89,6 +47,48 @@
 			<string>Building workspace App with scheme App and configuration Debug</string>
 			<key>uniqueIdentifier</key>
 			<string>4AC8915F-970B-4EA9-8E2D-8E5AE510175E</string>
+		</dict>
+		<key>DE236FF5-A4C9-4897-A48B-5F87D4C9949A</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>DE236FF5-A4C9-4897-A48B-5F87D4C9949A.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>1</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>App project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>App</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building workspace App with scheme App and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>807611508.39322495</real>
+			<key>timeStoppedRecording</key>
+			<real>807611511.11124206</real>
+			<key>title</key>
+			<string>Building workspace App with scheme App and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>DE236FF5-A4C9-4897-A48B-5F87D4C9949A</string>
 		</dict>
 	</dict>
 </dict>

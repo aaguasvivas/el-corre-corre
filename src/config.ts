@@ -335,12 +335,18 @@ export const CONFIG = {
   curveLen2: 111,
   worldDrop: 0.00013, // FEEL: how much the distant road curls below the horizon
   beltLen: 120, // scenery recycles in two alternating belts of this length
-  obeliscoEveryM: 800,
+  // With 600 m tramos the Malecon owns bands starting every 1800 m; 700
+  // lets the milestone-skip land the Obelisco mid-band roughly every other
+  // Malecon return instead of never.
+  obeliscoEveryM: 700,
   viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
 
   // Phase 7: Los Tramos. The world cycles Malecon -> Zona Colonial -> Campo,
   // one palette-and-scenery shift per stretch on the same chunk system.
-  tramoLengthM: 1000, // FEEL: meters per themed stretch; the full national lap is 3 km and repeats forever
+  // FEEL: meters per themed stretch. Phone verdict: an 80k run can die
+  // before 1 km, so at 1000 nobody ever left the Malecon. At 600 a border
+  // crosses every ~25 s of riding and the full national lap is 1.8 km.
+  tramoLengthM: 600,
   // FEEL: traffic personality per tramo. Zona runs on carros publicos and
   // motoconchos; el campo belongs to camiones and motoconchos.
   tramoVehicleWeights: {
