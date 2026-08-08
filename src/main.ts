@@ -683,6 +683,7 @@ requestAnimationFrame(frame);
   distMult: () => score.distMult,
   tramo: () => world.tramo,
   obelisco: () => world.obeliscoState,
+  belts: () => world.beltState,
   overlaps: () => traffic.overlapCount,
   bank: () => score.bank,
   start: () => {

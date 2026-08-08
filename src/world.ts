@@ -25,6 +25,17 @@ const CHUNK_COUNT = 7;
 const RECYCLE_Z = -35;
 const CONFETTI_COUNT = 46;
 const BELT_COUNT = 3;
+// Belts start slightly behind the camera so the scenery beside the player is
+// never missing. That offset also fixes their phase forever: belt starts land
+// at world positions congruent to -BELT_PHASE (mod beltLen), and a tramo
+// (600 m) is an exact multiple of a belt (120 m), so a border lands at the
+// same spot inside a belt every single time. Dressing a belt by its START
+// therefore ran every crossing 100 m late, and dressing it by exactly the
+// border sat on a knife edge that always fell to the old side. Belts are
+// dressed by their MIDPOINT instead: whichever tramo owns most of the belt
+// wins, no tie is possible (midpoints land 40 mod 120, borders 0 mod 120),
+// and a crossing shows up 20 m early rather than 100 m late.
+const BELT_PHASE = 20;
 
 // ---------------------------------------------------------------------------
 // Los Tramos (Phase 7): the run tours the country. Theme is a pure function
@@ -736,6 +747,7 @@ const _color = new THREE.Color();
 
 class Belt {
   group = new THREE.Group();
+  tramo: Tramo = 'malecon'; // what this belt was last dressed as (test probe)
   private facadeIMs: THREE.InstancedMesh[] = [];
   private colmadoIMs: THREE.InstancedMesh[] = [];
   private signIMs: THREE.InstancedMesh[] = [];
@@ -792,6 +804,7 @@ class Belt {
   }
 
   fill(tramo: Tramo): void {
+    this.tramo = tramo;
     const L = CONFIG.beltLen;
     const counts = new Map<THREE.InstancedMesh, number>();
     const place = (
@@ -1379,8 +1392,8 @@ export class World {
     const assets = buildBeltAssets(atlas);
     for (let i = 0; i < BELT_COUNT; i++) {
       const belt = new Belt(scene, assets, i);
-      belt.group.position.z = -20 + i * CONFIG.beltLen;
-      belt.fill(tramoFor(this.D + belt.group.position.z));
+      belt.group.position.z = -BELT_PHASE + i * CONFIG.beltLen;
+      belt.fill(tramoFor(this.D + belt.group.position.z + CONFIG.beltLen / 2));
       this.belts.push(belt);
     }
 
@@ -1862,6 +1875,18 @@ export class World {
     this.viralata.trigger();
   }
 
+  // Test probe: which stretch of world each scenery belt covers and what it
+  // was dressed as, so a border crossing can be measured instead of eyeballed.
+  get beltState(): Array<{ from: number; to: number; tramo: Tramo }> {
+    return this.belts
+      .map((b) => ({
+        from: +(this.D + b.group.position.z).toFixed(0),
+        to: +(this.D + b.group.position.z + CONFIG.beltLen).toFixed(0),
+        tramo: b.tramo,
+      }))
+      .sort((a, b) => a.from - b.from);
+  }
+
   // Test probe: where the obelisco is, so screenshots can frame it.
   get obeliscoState(): { visible: boolean; z: number } {
     return { visible: this.obelisco.visible, z: +this.obelisco.position.z.toFixed(1) };
@@ -1913,7 +1938,7 @@ export class World {
       belt.group.position.z -= ds;
       if (belt.group.position.z < -(CONFIG.beltLen + 20)) {
         belt.group.position.z += CONFIG.beltLen * BELT_COUNT;
-        belt.fill(tramoFor(this.D + belt.group.position.z));
+        belt.fill(tramoFor(this.D + belt.group.position.z + CONFIG.beltLen / 2));
       }
       // The belts keep frustumCulled off, because a manual bounding sphere
       // would have to be inflated for the bend field. One cheap z test still
