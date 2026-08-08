@@ -47,6 +47,7 @@ const STRINGS = {
     multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: '¡Pintura nueva!',
+    tramoKicker: 'LLEGASTE A',
     pinturaEquip: 'PONER',
     nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
     ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
@@ -88,6 +89,7 @@ const STRINGS = {
     // Places keep their names in both languages
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: 'New paint!',
+    tramoKicker: 'YOU REACHED',
     pinturaEquip: 'USE',
     nearMiss: ['So close!', 'By a hair!'],
     ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
@@ -274,6 +276,7 @@ export class UI {
       </div>
       <div id="popup-layer"></div>
       <div id="banner"></div>
+      <div id="tramo-card"><span id="tramo-kicker"></span><span id="tramo-name"></span></div>
       <div id="title" class="screen hidden">
         <button id="lang" class="chip" type="button"></button>
         <button id="mute" class="chip chip-mute" type="button" aria-label="Sonido">
@@ -715,8 +718,18 @@ export class UI {
     this.popup(this.t().multUp(n), 50, 40, 'pop-lg pop-gold');
   }
 
+  // Arriving somewhere new is the payoff for a long run, so it gets its own
+  // announcement rather than sharing the near-miss popup pool.
   popupTramo(t: 'malecon' | 'zona' | 'campo'): void {
-    this.popup(this.t().tramoNames[t], 50, 26, 'pop-lg');
+    const card = document.getElementById('tramo-card');
+    const kicker = document.getElementById('tramo-kicker');
+    const name = document.getElementById('tramo-name');
+    if (!card || !kicker || !name) return;
+    kicker.textContent = this.t().tramoKicker;
+    name.textContent = this.t().tramoNames[t];
+    card.classList.remove('show');
+    void card.offsetWidth; // restart the animation on back-to-back crossings
+    card.classList.add('show');
   }
 
   bannerNewRecord(): void {

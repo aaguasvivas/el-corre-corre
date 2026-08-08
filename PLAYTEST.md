@@ -5,7 +5,20 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Los Tramos, for real this time (current)
+## Tramo pacing, tuned to a 2000 m run (current)
+
+Tramos are 1000 m now, tuned against Adelson's stated ~2000 m average:
+under a kilometer you stay home on the Malecón (so the first crossing is
+earned), a decent run reaches La Zona, a good one makes El Campo, and the
+full national lap is 3 km. Arriving now gets its own announcement,
+"LLEGASTE A / LA ZONA COLONIAL" on a flag-blue plate, not the red record
+banner. El Obelisco stands exactly once per lap, 500 m into each Malecón.
+
+Feel-test: 1) does reaching a new tramo land as an achievement now? 2) is
+one crossing per ~1000 m the right rhythm, or still too often / too rare?
+3) does the arrival card read without stealing your eyes from traffic?
+
+## Los Tramos, for real this time
 
 The tramos were changing every 600 m the whole time. The problem was that
 the sea, the seawall and the palms filled the left half of the screen in

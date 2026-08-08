@@ -335,18 +335,22 @@ export const CONFIG = {
   curveLen2: 111,
   worldDrop: 0.00013, // FEEL: how much the distant road curls below the horizon
   beltLen: 120, // scenery recycles in two alternating belts of this length
-  // With 600 m tramos the Malecon owns bands starting every 1800 m; 700
-  // lets the milestone-skip land the Obelisco mid-band roughly every other
-  // Malecon return instead of never.
-  obeliscoEveryM: 700,
+  // The Obelisco stands once per national lap, this far into each Malecon
+  // stretch. It is one monument, so it must not appear twice in a lap, and
+  // being reachable early is what makes it a landmark instead of a rumor.
+  // Keep below tramoLengthM so it always lands inside the Malecon.
+  obeliscoOffsetM: 500,
   viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
 
   // Phase 7: Los Tramos. The world cycles Malecon -> Zona Colonial -> Campo,
   // one palette-and-scenery shift per stretch on the same chunk system.
-  // FEEL: meters per themed stretch. Phone verdict: an 80k run can die
-  // before 1 km, so at 1000 nobody ever left the Malecon. At 600 a border
-  // crosses every ~25 s of riding and the full national lap is 1.8 km.
-  tramoLengthM: 600,
+  // FEEL: meters per themed stretch, tuned against a ~2000 m average run.
+  // At 600 the country flew past often enough to stop being an event. At
+  // 1000 a decent run reaches La Zona, a good one makes El Campo, and the
+  // full national lap is 3 km, so arriving somewhere new stays an
+  // achievement instead of scenery. Runs under a kilometer stay home on the
+  // Malecon, which is what makes the first crossing land.
+  tramoLengthM: 1000,
   // FEEL: traffic personality per tramo. Zona runs on carros publicos and
   // motoconchos; el campo belongs to camiones and motoconchos.
   tramoVehicleWeights: {

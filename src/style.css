@@ -917,6 +917,52 @@ body {
   animation: banner-pop 1.8s ease forwards;
 }
 
+/* Arriving in a new tramo. Deliberately not the record banner's red stroke:
+   this is a place, not a score. Gold rule above and below, flag blue plate. */
+#tramo-card {
+  position: absolute;
+  top: 21%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-12px);
+  opacity: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 26px;
+  border-top: 3px solid var(--gold);
+  border-bottom: 3px solid var(--gold);
+  background: rgba(0, 45, 98, 0.72);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 92vw;
+}
+
+#tramo-card.show {
+  animation: tramo-arrive 2.6s ease forwards;
+}
+
+#tramo-kicker {
+  font-size: clamp(10px, 2.6vw, 14px);
+  letter-spacing: 3px;
+  color: var(--cream);
+  opacity: 0.85;
+}
+
+#tramo-name {
+  font-size: clamp(20px, min(4.4vh, 7vw), 40px);
+  letter-spacing: 1px;
+  color: var(--white);
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.28);
+}
+
+@keyframes tramo-arrive {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-12px) scale(0.92); }
+  12% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  80% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-8px) scale(1); }
+}
+
 @keyframes banner-pop {
   0% {
     transform: translateX(-50%) scale(0) rotate(-4deg);

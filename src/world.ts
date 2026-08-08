@@ -1351,7 +1351,7 @@ export class World {
   private chichiguas: Chichigua[] = [];
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
-  private nextObeliscoAt: number = CONFIG.obeliscoEveryM;
+  private nextObeliscoAt: number = CONFIG.obeliscoOffsetM;
   private obeliscoPassed = false;
   onObeliscoPass: (() => void) | null = null;
   private shimmerA!: THREE.CanvasTexture;
@@ -1875,6 +1875,16 @@ export class World {
     this.viralata.trigger();
   }
 
+  // One Obelisco per national lap, always the same distance into the Malecon
+  // stretch. Computed from the odometer rather than stepped forward, so it
+  // cannot drift, double up inside one Malecon, or be left behind when the
+  // world has already run past it.
+  private scheduleObelisco(): void {
+    const lap = CONFIG.tramoLengthM * TRAMO_ORDER.length;
+    const at = Math.floor(this.D / lap) * lap + CONFIG.obeliscoOffsetM;
+    this.nextObeliscoAt = at > this.D ? at : at + lap;
+  }
+
   // Test probe: which stretch of world each scenery belt covers and what it
   // was dressed as, so a border crossing can be measured instead of eyeballed.
   get beltState(): Array<{ from: number; to: number; tramo: Tramo }> {
@@ -1949,9 +1959,6 @@ export class World {
 
     // El Obelisco, every ~800 m, but it is a Malecon landmark: skip the
     // milestones that would land it in the Zona or out in el campo
-    while (!this.obelisco.visible && tramoFor(this.nextObeliscoAt) !== 'malecon') {
-      this.nextObeliscoAt += CONFIG.obeliscoEveryM;
-    }
     if (!this.obelisco.visible && this.nextObeliscoAt - this.D < 190) {
       this.obelisco.visible = true;
       this.obeliscoPassed = false;
@@ -1965,7 +1972,7 @@ export class World {
       }
       if (this.obelisco.position.z < -35) {
         this.obelisco.visible = false;
-        this.nextObeliscoAt += CONFIG.obeliscoEveryM;
+        this.scheduleObelisco();
       }
     }
 
