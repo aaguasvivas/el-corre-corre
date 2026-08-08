@@ -5,7 +5,26 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Las Pinturas + traffic honesty (current)
+## Los Tramos, for real this time (current)
+
+The tramos were changing every 600 m the whole time. The problem was that
+the sea, the seawall and the palms filled the left half of the screen in
+ALL THREE, so only the right-side buildings changed and no crossing ever
+registered. Now each tramo owns the whole frame:
+
+- **El Malecón**: sea, seawall, palms, city on the right. Unchanged.
+- **La Zona Colonial**: colonial fronts on BOTH sides, a narrow cobbled
+  canyon. No sea at all.
+- **El Campo**: the water itself drains to farmland over ~1.5 s at the
+  border, plátano rows and campo houses on both shoulders, wooden fence
+  posts instead of balusters.
+
+Feel-test: 1) does a crossing now read instantly, without looking at the
+popup? 2) the change completes over about 130 m (belts dress in 120 m
+blocks), does that land as arriving somewhere or as popping? 3) does el
+campo feel like the carretera, or do you miss the sea?
+
+## Las Pinturas + traffic honesty
 
 1. **Las Pinturas**: your lifetime plátanos are a wallet now (the banana
    chip on the title screen; your collected total carries over). Five

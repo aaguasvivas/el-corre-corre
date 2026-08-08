@@ -34,6 +34,8 @@ const BELT_COUNT = 3;
 
 export type Tramo = 'malecon' | 'zona' | 'campo';
 const TRAMO_ORDER: Tramo[] = ['malecon', 'zona', 'campo'];
+// What the sea becomes out in el campo: sun-dried pasture, not sea green.
+const FIELD_COLOR = new THREE.Color(0x9cae54);
 
 export function tramoFor(d: number): Tramo {
   const i = Math.floor(Math.max(0, d) / CONFIG.tramoLengthM) % TRAMO_ORDER.length;
@@ -781,10 +783,10 @@ class Belt {
     this.fruitIM = im(assets.fruit, assets.vcMat, 2);
     this.chairIM = im(assets.chair, assets.vcMat, 4);
     this.streetIM = im(assets.street, assets.atlasMat, 2);
-    for (const zf of assets.zonaFacades) this.zonaFacadeIMs.push(im(zf.geo, assets.vcMat, 6));
+    for (const zf of assets.zonaFacades) this.zonaFacadeIMs.push(im(zf.geo, assets.vcMat, 14));
     this.lampIM = im(assets.ironLamp, assets.vcMat, 12);
-    for (const ch of assets.campoHouses) this.campoHouseIMs.push(im(ch.geo, assets.vcMat, 4));
-    this.platanoIM = im(assets.platanoPlant, assets.vcMat, 90);
+    for (const ch of assets.campoHouses) this.campoHouseIMs.push(im(ch.geo, assets.vcMat, 12));
+    this.platanoIM = im(assets.platanoPlant, assets.vcMat, 200);
     this.frituraIM = im(assets.fritura, assets.vcMat, 2);
     scene.add(this.group);
   }
@@ -809,6 +811,7 @@ class Belt {
       _dummy.updateMatrix();
       mesh.setMatrixAt(i, _dummy.matrix);
       if (tint !== undefined) mesh.setColorAt(i, _color.set(tint));
+      else if (mesh.instanceColor) mesh.setColorAt(i, _color.set(0xffffff));
       counts.set(mesh, i + 1);
     };
 
@@ -906,9 +909,45 @@ class Belt {
       }
     }
 
-    // Seawall balusters always; street lighting by tramo (iron in the Zona,
-    // wires on the Malecon, sparser wires out in el campo)
-    for (let i = 0; i <= 20; i++) place(this.postIM, 11.85, 0, i * 6);
+    // The sea side. This is half the screen, so it carries the tramo as much
+    // as the buildings do: the seawall belongs to the Malecon, La Zona walls
+    // you into a colonial canyon, and el campo opens into plantain rows.
+    if (tramo === 'malecon') {
+      for (let i = 0; i <= 20; i++) place(this.postIM, 11.85, 0, i * 6);
+    } else if (tramo === 'zona') {
+      // facades face the road, so they need turning around over here
+      let sx = rand(1, 5);
+      let tintIdx = Math.floor(Math.random() * ZONA_TINTS.length);
+      while (sx < L - 4) {
+        const vi = Math.floor(Math.random() * this.assets.zonaFacades.length);
+        const v = this.assets.zonaFacades[vi];
+        if (sx + v.width > L - 2) break;
+        place(
+          this.zonaFacadeIMs[vi],
+          12.3 + 3.5,
+          0,
+          sx + v.width / 2,
+          Math.PI,
+          1,
+          ZONA_TINTS[tintIdx % ZONA_TINTS.length],
+        );
+        tintIdx++;
+        sx += v.width + rand(0, 0.8);
+      }
+    } else {
+      // el platanal on both shoulders, and the fence that keeps it there
+      for (let i = 0; i <= 20; i++) place(this.postIM, 11.85, 0, i * 6, 0, 0.85, 0x9a7b52);
+      for (let row = 0; row < 3; row++) {
+        const rx = 13.2 + row * 3.1; // close enough to read at phone FOV
+        for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
+          place(this.platanoIM, rx + rand(-0.7, 0.7), 0, z, rand(0, 6.3), rand(0.8, 1.25));
+        }
+      }
+      if (Math.random() < 0.5) {
+        const vi = Math.floor(Math.random() * this.assets.campoHouses.length);
+        place(this.campoHouseIMs[vi], 12.3 + 2.5, 0, rand(8, L - 8), Math.PI + rand(-0.08, 0.08));
+      }
+    }
     if (tramo === 'zona') {
       for (let i = 0; i < 9; i++) place(this.lampIM, -11.5, 0, 4 + i * 13.5);
       for (let i = 0; i < 4; i++) place(this.lampIM, 10.4, 0, 10 + i * 30, Math.PI);
@@ -1306,6 +1345,12 @@ export class World {
   private shimmerB!: THREE.CanvasTexture;
   private glintMat!: THREE.MeshBasicMaterial;
   private roadMats!: Record<Tramo, THREE.MeshToonMaterial>;
+  // The water, and everything that sparkles on it, so el campo can turn it
+  // into farmland instead of leaving the Caribbean parked next to a
+  // plantain field.
+  private seaMats: Array<{ mat: THREE.MeshToonMaterial; sea: THREE.Color }> = [];
+  private waterFx: Array<{ mat: THREE.Material & { opacity: number }; base: number }> = [];
+  private landBlend = 0; // 0 = open water, 1 = fields all the way out
   private tramoNow: Tramo = 'malecon';
   onTramoChange: ((t: Tramo) => void) | null = null;
   private gallinas: Gallina[] = [];
@@ -1451,9 +1496,14 @@ export class World {
     const flat = (w: number, l: number, color: number, x: number, y: number): void => {
       const geo = new THREE.PlaneGeometry(w, l, 1, 24);
       geo.rotateX(-Math.PI / 2);
-      const m = new THREE.Mesh(geo, toonMaterial(color));
+      const mat = toonMaterial(color);
+      const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, 120);
       scene.add(m);
+      // Kept so the water can turn to land: el campo is inland, and the sea
+      // sitting there unchanged was why crossing a border never read as
+      // leaving the Malecon.
+      this.seaMats.push({ mat, sea: new THREE.Color(color) });
     };
     flat(33, 420, PALETTE.seaNear, 12 + 16.5, -0.5);
     flat(195, 420, PALETTE.seaDeep, 45 + 97.5, -0.55);
@@ -1480,12 +1530,13 @@ export class World {
     const mkShimmer = (tex: THREE.CanvasTexture, opacity: number, y: number): void => {
       const geo = new THREE.PlaneGeometry(38, 420, 1, 16);
       geo.rotateX(-Math.PI / 2);
-      const m = new THREE.Mesh(
-        geo,
-        worldMaterial(new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false })),
+      const mat = worldMaterial(
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false }),
       );
+      const m = new THREE.Mesh(geo, mat);
       m.position.set(30, y, 120);
       scene.add(m);
+      this.waterFx.push({ mat, base: opacity }); // fades out when the water does
     };
     mkShimmer(this.shimmerA, 0.22, -0.42);
     mkShimmer(this.shimmerB, 0.15, -0.4);
@@ -1519,6 +1570,7 @@ export class World {
     const glint = new THREE.Mesh(glintGeo, this.glintMat);
     glint.position.set(56, -0.38, 100);
     scene.add(glint);
+    this.waterFx.push({ mat: this.glintMat, base: 0.42 });
   }
 
   private buildMountains(scene: THREE.Scene): void {
@@ -1827,6 +1879,24 @@ export class World {
     if (tHere !== this.tramoNow) {
       this.tramoNow = tHere;
       this.onTramoChange?.(tHere);
+    }
+
+    // El campo is inland: the sea drains to farmland over about a second and
+    // a half, and every sparkle on the water goes with it. This is the half
+    // of the screen the player is actually looking at, so it is what makes a
+    // border crossing register at all.
+    const wantLand = tHere === 'campo' ? 1 : 0;
+    if (this.landBlend !== wantLand) {
+      const k = Math.min(1, dt / 1.5);
+      this.landBlend += (wantLand - this.landBlend) * (k * 6);
+      if (Math.abs(this.landBlend - wantLand) < 0.004) this.landBlend = wantLand;
+      for (const s of this.seaMats) {
+        s.mat.color.copy(s.sea).lerp(FIELD_COLOR, this.landBlend);
+      }
+      for (const w of this.waterFx) {
+        w.mat.opacity = w.base * (1 - this.landBlend);
+        w.mat.visible = w.mat.opacity > 0.01;
+      }
     }
 
     for (let i = 0; i < this.chunks.length; i++) {
