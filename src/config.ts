@@ -178,6 +178,7 @@ export const CONFIG = {
   // Atmosphere
   fogNear: 60,
   fogFar: 140,
+  rimStrength: 0.5, // FEEL: golden silhouette light on everything; 0 kills it
 
   // Spawning. Pressure raised after the Phase 4 feel test.
   spawnAhead: 150,

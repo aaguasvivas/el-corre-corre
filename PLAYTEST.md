@@ -5,7 +5,26 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Tramo pacing, tuned to a 2000 m run (current)
+## Look pass round 1 (current): Erickson's "love the feel, not the look"
+
+Four changes, all code, zero new assets, same palette:
+
+1. **Golden rim light** on every toon surface: silhouettes catch the low
+   sun. This is the single biggest "colored boxes" to "low-poly at
+   sunset" move.
+2. **The air changes per tramo**: peach haze on the Malecon, rosier and
+   closer inside the colonial canyon, dusty gold and more open in el
+   campo. Fog, sun, ambient and rim all glide at the border.
+3. **Clouds** drifting high over the sea.
+4. **A quiet vignette** over the frame (DOM, zero GPU cost).
+
+Feel-test: 1) show Erickson WITHOUT saying what changed; ask him to rate
+the look again. 2) Any frame that reads worse or noisy? 3) FPS still
+smooth on both phones? Round 2 candidates if the direction is right:
+beveled vehicle silhouettes, warm window glow at dusk, baked corner
+shading on buildings, speed-line particles.
+
+## Tramo pacing, tuned to a 2000 m run
 
 Tramos are 1000 m now, tuned against Adelson's stated ~2000 m average:
 under a kilometer you stay home on the Malecón (so the first crossing is

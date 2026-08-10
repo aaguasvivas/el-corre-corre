@@ -48,6 +48,38 @@ const TRAMO_ORDER: Tramo[] = ['malecon', 'zona', 'campo'];
 // What the sea becomes out in el campo: sun-dried pasture, not sea green.
 const FIELD_COLOR = new THREE.Color(0x9cae54);
 
+// Each tramo gets its own light. The buildings already change at the border;
+// this makes the AIR change with them: the Malecon's peach afternoon, a
+// rosier closer haze inside the colonial canyon, dusty gold out in el campo.
+// All lerped in step(), so crossing a border changes the weather, never pops.
+interface Atmo {
+  fog: THREE.Color;
+  fogFar: number;
+  sun: THREE.Color;
+  sunI: number;
+  hemiSky: THREE.Color;
+  hemiGround: THREE.Color;
+  rim: THREE.Color; // premultiplied by CONFIG.rimStrength
+}
+
+function atmo(fog: number, fogFar: number, sun: number, sunI: number, hemiSky: number, hemiGround: number, rim: number): Atmo {
+  return {
+    fog: new THREE.Color(fog),
+    fogFar,
+    sun: new THREE.Color(sun),
+    sunI,
+    hemiSky: new THREE.Color(hemiSky),
+    hemiGround: new THREE.Color(hemiGround),
+    rim: new THREE.Color(rim).multiplyScalar(CONFIG.rimStrength),
+  };
+}
+
+const ATMOS: Record<Tramo, Atmo> = {
+  malecon: atmo(PALETTE.skyHorizon, 140, 0xffe3b3, 1.7, 0xbfe3ef, 0xe8c39a, PALETTE.skyHorizon),
+  zona: atmo(0xf7c6ab, 140, 0xffd7a8, 1.62, 0xb7d0e6, 0xe0b691, 0xffc79f),
+  campo: atmo(0xeed7a4, 156, 0xffeabf, 1.78, 0xc9e2da, 0xdcc18c, 0xffe3ae),
+};
+
 export function tramoFor(d: number): Tramo {
   const i = Math.floor(Math.max(0, d) / CONFIG.tramoLengthM) % TRAMO_ORDER.length;
   return TRAMO_ORDER[i];
@@ -101,11 +133,44 @@ function bendPatch(shader: { uniforms: Record<string, unknown>; vertexShader: st
     shader.vertexShader.replace('#include <project_vertex>', BEND_CHUNK);
 }
 
+// Golden-hour rim light: every toon surface catches a sliver of the low sun
+// on its silhouette, which is most of what separates "colored boxes" from
+// "low-poly at sunset". One uniform color, so the tramo mood can tint it.
+const RIM_U = { value: new THREE.Color(PALETTE.skyHorizon).multiplyScalar(CONFIG.rimStrength) };
+
+const RIM_CHUNK = `
+vec3 eccViewDir = normalize( vViewPosition );
+float eccRim = pow( 1.0 - saturate( dot( normal, eccViewDir ) ), 3.0 );
+eccRim *= smoothstep( 0.0, 0.35, 1.0 - abs( normal.y ) );
+vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance + uEccRim * eccRim;
+`;
+
+function rimBendPatch(shader: {
+  uniforms: Record<string, unknown>;
+  vertexShader: string;
+  fragmentShader: string;
+}): void {
+  bendPatch(shader);
+  shader.uniforms.uEccRim = RIM_U;
+  shader.fragmentShader =
+    'uniform vec3 uEccRim;\n' +
+    shader.fragmentShader.replace(
+      'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;',
+      RIM_CHUNK,
+    );
+}
+
 // Every world-space material goes through this so the whole Malecon bends as
-// one. Celestial things (sun, halo, sky) must NOT be wrapped.
+// one. Toon materials additionally get the rim light; unlit materials (glint,
+// kites, banners) just bend. Celestial things (sun, halo, sky) are NOT wrapped.
 export function worldMaterial<T extends THREE.Material>(m: T): T {
-  m.onBeforeCompile = bendPatch as unknown as (shader: unknown) => void;
-  m.customProgramCacheKey = () => 'eccbend';
+  if ((m as unknown as THREE.MeshToonMaterial).isMeshToonMaterial) {
+    m.onBeforeCompile = rimBendPatch as unknown as (shader: unknown) => void;
+    m.customProgramCacheKey = () => 'eccbendrim';
+  } else {
+    m.onBeforeCompile = bendPatch as unknown as (shader: unknown) => void;
+    m.customProgramCacheKey = () => 'eccbend';
+  }
   return m;
 }
 
@@ -1364,6 +1429,10 @@ export class World {
   private seaMats: Array<{ mat: THREE.MeshToonMaterial; sea: THREE.Color }> = [];
   private waterFx: Array<{ mat: THREE.Material & { opacity: number }; base: number }> = [];
   private landBlend = 0; // 0 = open water, 1 = fields all the way out
+  private fogRef!: THREE.Fog;
+  private hemi!: THREE.HemisphereLight;
+  private sunLight!: THREE.DirectionalLight;
+  private clouds: Array<{ mesh: THREE.Mesh; speed: number }> = [];
   private tramoNow: Tramo = 'malecon';
   onTramoChange: ((t: Tramo) => void) | null = null;
   private gallinas: Gallina[] = [];
@@ -1420,6 +1489,42 @@ export class World {
     scene.background = tex;
 
     scene.fog = new THREE.Fog(PALETTE.skyHorizon, CONFIG.fogNear, CONFIG.fogFar);
+    this.fogRef = scene.fog as THREE.Fog;
+
+    // Clouds: a few cream puffs drifting high and far, one shared texture.
+    // Not bend-patched and not fogged: they belong to the sky, not the road.
+    const cc = document.createElement('canvas');
+    cc.width = 256;
+    cc.height = 128;
+    const cg = cc.getContext('2d')!;
+    const puff = (x: number, y: number, r: number): void => {
+      const rg = cg.createRadialGradient(x, y, 0, x, y, r);
+      rg.addColorStop(0, 'rgba(255,248,236,0.92)');
+      rg.addColorStop(0.62, 'rgba(255,248,236,0.5)');
+      rg.addColorStop(1, 'rgba(255,248,236,0)');
+      cg.fillStyle = rg;
+      cg.fillRect(x - r, y - r, r * 2, r * 2);
+    };
+    puff(70, 74, 50);
+    puff(118, 60, 62);
+    puff(172, 74, 46);
+    puff(104, 86, 38);
+    const cloudTex = new THREE.CanvasTexture(cc);
+    const cloudMat = new THREE.MeshBasicMaterial({
+      map: cloudTex,
+      transparent: true,
+      fog: false,
+      depthWrite: false,
+      opacity: 0.8,
+      side: THREE.DoubleSide, // the plane's +z normal points away from the camera
+    });
+    for (let i = 0; i < 6; i++) {
+      const w = 36 + Math.random() * 30;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.42), cloudMat);
+      m.position.set(-170 + Math.random() * 340, 30 + Math.random() * 30, 238 + i * 13);
+      scene.add(m);
+      this.clouds.push({ mesh: m, speed: 0.35 + Math.random() * 0.5 });
+    }
 
     // Celestial: deliberately NOT bend-patched.
     const sun = new THREE.Mesh(
@@ -1447,9 +1552,11 @@ export class World {
 
   private buildLights(scene: THREE.Scene): void {
     const hemi = new THREE.HemisphereLight(0xbfe3ef, 0xe8c39a, 0.85);
+    this.hemi = hemi;
     scene.add(hemi);
 
     const sun = new THREE.DirectionalLight(0xffe3b3, 1.7);
+    this.sunLight = sun;
     sun.position.set(40, 22, 90);
     sun.target.position.set(0, 0, 10);
     sun.castShadow = true;
@@ -1914,6 +2021,24 @@ export class World {
     if (tHere !== this.tramoNow) {
       this.tramoNow = tHere;
       this.onTramoChange?.(tHere);
+    }
+
+    // The air follows the tramo: fog, sun, ambient and the rim tint all glide
+    // toward the current stretch's mood. Exponential lerp, allocation-free.
+    const a = ATMOS[this.tramoNow];
+    const ak = 1 - Math.exp(-dt * 1.3);
+    this.fogRef.color.lerp(a.fog, ak);
+    this.fogRef.far += (a.fogFar - this.fogRef.far) * ak;
+    this.sunLight.color.lerp(a.sun, ak);
+    this.sunLight.intensity += (a.sunI - this.sunLight.intensity) * ak;
+    this.hemi.color.lerp(a.hemiSky, ak);
+    this.hemi.groundColor.lerp(a.hemiGround, ak);
+    RIM_U.value.lerp(a.rim, ak);
+
+    // Clouds drift on their own time, indifferent to the corre corre below
+    for (const cl of this.clouds) {
+      cl.mesh.position.x += cl.speed * dt;
+      if (cl.mesh.position.x > 200) cl.mesh.position.x = -200;
     }
 
     // El campo is inland: the sea drains to farmland over about a second and

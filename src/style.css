@@ -45,6 +45,15 @@ body {
   touch-action: none;
 }
 
+/* A quiet vignette between the canvas and the UI: depth for free, zero GPU
+   cost, and it sits UNDER the DOM UI because #ui is a later sibling. */
+#vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 95% at 50% 42%, transparent 58%, rgba(24, 14, 38, 0.17) 100%);
+}
+
 #ui {
   position: fixed;
   inset: 0;
