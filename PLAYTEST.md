@@ -5,7 +5,28 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Look pass round 1 (current): Erickson's "love the feel, not the look"
+## Look pass round 2 (current): the professional-polish pass
+
+Round 2 targets the specific amateur tells, Subway Surfers polish as the
+bar:
+
+1. **Soft edges everywhere it matters**: player rigs and all car bodies
+   are beveled now, no more sharp-cornered slabs.
+2. **Deeper toon ramp**: the shadow step is darker, so every object has
+   sculpted form instead of flat fills.
+3. **Baked AO**: buildings darken toward their feet; a contact-shadow
+   strip runs along building fronts and the seawall. Things sit ON the
+   street now instead of floating.
+4. **Lived-in road**: tire-wear tracks in every lane.
+5. **Lit windows**: a third of facade windows glow warm at golden hour.
+6. **Layered sun glow** with a horizon flare.
+
+Feel-test: 1) blind test with Erickson again: does it read "legit
+professional game" now? 2) FPS on both phones, draw calls peaked at 171
+in testing (was ~148). 3) Any surface that looks muddy or too dark in
+the deeper ramp?
+
+## Look pass round 1: Erickson's "love the feel, not the look"
 
 Four changes, all code, zero new assets, same palette:
 

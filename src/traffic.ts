@@ -12,7 +12,8 @@
 // on you together, and vehicles side by side in z often never do.
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG, PALETTE, ROAD } from './config';
 import { toonMaterial, textTexture, worldMaterial, paint, vcToonMaterial } from './world';
 
@@ -104,6 +105,16 @@ function box(w: number, h: number, d: number, x: number, y: number, z: number): 
   return g;
 }
 
+// The big body volumes get soft edges: sharp 90-degree corners are the
+// loudest "programmer art" tell there is. Small parts stay crisp boxes.
+function rbox(w: number, h: number, d: number, x: number, y: number, z: number, r = 0.09): THREE.BufferGeometry {
+  // mergeVertices makes it indexed like BoxGeometry, or mergeGeometries
+  // refuses to mix them; identical verts weld, so bevel normals survive
+  const g = mergeVertices(new RoundedBoxGeometry(w, h, d, 2, Math.min(r, Math.min(w, h, d) * 0.32)));
+  g.translate(x, y, z);
+  return g;
+}
+
 function cylX(r: number, len: number, x: number, y: number, z: number, seg = 10): THREE.BufferGeometry {
   const g = new THREE.CylinderGeometry(r, r, len, seg);
   g.rotateZ(Math.PI / 2);
@@ -133,8 +144,8 @@ function pickWeighted<T>(items: ReadonlyArray<readonly [T, number]>): T {
 
 function sedanAssets(): TypeAssets {
   const painted = mergeGeometries([
-    box(1.9, 0.55, 4.4, 0, 0.58, 0),
-    box(1.65, 0.5, 2.1, 0, 1.05, -0.35),
+    rbox(1.9, 0.55, 4.4, 0, 0.58, 0, 0.12),
+    rbox(1.65, 0.5, 2.1, 0, 1.05, -0.35, 0.14),
   ])!;
   const wheels: THREE.BufferGeometry[] = [];
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) wheels.push(cylX(0.34, 0.24, sx * 0.85, 0.34, sz * 1.4));
@@ -155,7 +166,7 @@ function sedanAssets(): TypeAssets {
 }
 
 function guaguaAssets(banner: THREE.Texture, withBlinkers: boolean): TypeAssets {
-  const painted = box(2.3, 1.7, 7, 0, 1.35, 0);
+  const painted = rbox(2.3, 1.7, 7, 0, 1.35, 0, 0.18);
   const parts: THREE.BufferGeometry[] = [];
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push(cylX(0.42, 0.28, sx * 0.98, 0.42, sz * 2.5));
   parts.push(box(2.34, 0.55, 5.2, 0, 1.8, -0.5)); // window band
@@ -198,7 +209,7 @@ function guaguaAssets(banner: THREE.Texture, withBlinkers: boolean): TypeAssets 
 
 function camionAssets(): TypeAssets {
   const painted = mergeGeometries([
-    box(2.2, 1.5, 1.7, 0, 1.15, 2.5), // cab
+    rbox(2.2, 1.5, 1.7, 0, 1.15, 2.5, 0.14), // cab
     box(2.4, 0.25, 4.3, 0, 0.75, -0.75), // bed
     box(0.08, 0.5, 4.3, -1.16, 1.05, -0.75),
     box(0.08, 0.5, 4.3, 1.16, 1.05, -0.75),
@@ -230,8 +241,8 @@ function camionAssets(): TypeAssets {
 
 function civicAssets(): TypeAssets {
   const painted = mergeGeometries([
-    box(1.85, 0.42, 4.2, 0, 0.46, 0),
-    box(1.55, 0.36, 1.9, 0, 0.83, -0.15),
+    rbox(1.85, 0.42, 4.2, 0, 0.46, 0, 0.11),
+    rbox(1.55, 0.36, 1.9, 0, 0.83, -0.15, 0.12),
     box(1.7, 0.07, 0.4, 0, 1.02, -2.0), // el alerón
     box(0.08, 0.26, 0.08, -0.6, 0.85, -1.98),
     box(0.08, 0.26, 0.08, 0.6, 0.85, -1.98),

@@ -13,11 +13,18 @@
 // Input is handled in screen space and flipped once here.
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG, PALETTE, ROAD, VEHICLES, type VehicleId } from './config';
 import { toonMaterial, worldMaterial, paint, vcToonMaterial } from './world';
 
 const DEG = Math.PI / 180;
+
+// Soft-edged box, welded back to an indexed geometry so it merges with the
+// plain boxes in the same rig.
+function rgeo(w: number, h: number, d: number, r: number): THREE.BufferGeometry {
+  return mergeVertices(new RoundedBoxGeometry(w, h, d, 2, r));
+}
 const START_X = -3.4; // middle of your half of the road
 
 export interface PlayerCallbacks {
@@ -315,7 +322,7 @@ export class Player {
     const jeans = 0x2f4a6f;
     const blue = PALETTE.flagBlue;
     const tilt = upright ? 0.08 : 0.3;
-    this.addStatic(new THREE.BoxGeometry(0.36, 0.5, 0.26), shirt, 0, 1.24, -0.14, tilt);
+    this.addStatic(rgeo(0.36, 0.5, 0.26, 0.07), shirt, 0, 1.24, -0.14, tilt);
     this.addStatic(new THREE.SphereGeometry(0.17, 12, 10), PALETTE.skin, 0, 1.62, 0);
     // la gorra: a squashed dome that actually covers the crown of the head
     // (the old thin cylinder let the scalp poke out above it, which read as
@@ -342,9 +349,9 @@ export class Player {
     this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.32, -0.62));
     this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.32, 0.72));
 
-    this.addStatic(new THREE.BoxGeometry(0.42, 0.34, 1.3), red, 0, 0.62, 0.02);
-    this.addStatic(new THREE.BoxGeometry(0.3, 0.2, 0.52), red, 0, 0.84, 0.3);
-    this.addStatic(new THREE.BoxGeometry(0.34, 0.12, 0.56), PALETTE.darkParts, 0, 0.8, -0.34);
+    this.addStatic(rgeo(0.42, 0.34, 1.3, 0.09), red, 0, 0.62, 0.02);
+    this.addStatic(rgeo(0.3, 0.2, 0.52, 0.07), red, 0, 0.84, 0.3);
+    this.addStatic(rgeo(0.34, 0.12, 0.56, 0.05), PALETTE.darkParts, 0, 0.8, -0.34);
     this.addStatic(new THREE.BoxGeometry(0.07, 0.52, 0.07), chrome, 0.1, 0.55, 0.66, -0.25);
     this.addStatic(new THREE.BoxGeometry(0.07, 0.52, 0.07), chrome, -0.1, 0.55, 0.66, -0.25);
     const barGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.6, 8);
@@ -370,9 +377,9 @@ export class Player {
     this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.26, -0.55));
     this.wheels.push(this.addMesh(wheelGeo, dark, 0, 0.26, 0.62));
 
-    this.addStatic(new THREE.BoxGeometry(0.34, 0.09, 0.85), mint, 0, 0.36, 0.02); // step-through floor
-    this.addStatic(new THREE.BoxGeometry(0.38, 0.4, 0.5), mint, 0, 0.55, -0.42); // tail
-    this.addStatic(new THREE.BoxGeometry(0.34, 0.12, 0.5), PALETTE.darkParts, 0, 0.82, -0.42); // seat
+    this.addStatic(rgeo(0.34, 0.09, 0.85, 0.035), mint, 0, 0.36, 0.02); // step-through floor
+    this.addStatic(rgeo(0.38, 0.4, 0.5, 0.1), mint, 0, 0.55, -0.42); // tail
+    this.addStatic(rgeo(0.34, 0.12, 0.5, 0.05), PALETTE.darkParts, 0, 0.82, -0.42); // seat
     const shield = new THREE.BoxGeometry(0.38, 0.62, 0.1);
     shield.rotateX(-0.18);
     this.addStatic(shield, mint, 0, 0.72, 0.52);
@@ -400,8 +407,8 @@ export class Player {
       }
     }
 
-    this.addStatic(new THREE.BoxGeometry(1.7, 0.42, 3.9), red, 0, 0.45, 0);
-    this.addStatic(new THREE.BoxGeometry(1.42, 0.36, 1.8), red, 0, 0.82, -0.15);
+    this.addStatic(rgeo(1.7, 0.42, 3.9, 0.11), red, 0, 0.45, 0);
+    this.addStatic(rgeo(1.42, 0.36, 1.8, 0.12), red, 0, 0.82, -0.15);
     this.addStatic(new THREE.BoxGeometry(0.3, 0.03, 3.92), PALETTE.flagWhite, 0, 0.67, 0); // racing stripe
     const wind = new THREE.BoxGeometry(1.25, 0.32, 0.07);
     wind.rotateX(-0.22);

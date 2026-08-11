@@ -183,7 +183,9 @@ const toonCache = new Map<number, THREE.MeshToonMaterial>();
 
 export function getGradientMap(): THREE.DataTexture {
   if (!gradientMap) {
-    const data = new Uint8Array([110, 190, 255]);
+    // FEEL: the shading ramp for the whole world. A deeper first step is
+    // most of the difference between flat color and sculpted form.
+    const data = new Uint8Array([88, 182, 255]);
     gradientMap = new THREE.DataTexture(data, 3, 1, THREE.RedFormat);
     gradientMap.minFilter = THREE.NearestFilter;
     gradientMap.magFilter = THREE.NearestFilter;
@@ -249,6 +251,19 @@ export function paint(g: THREE.BufferGeometry, color: number): THREE.BufferGeome
   }
   g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   return g;
+}
+
+// Bake a soft vertical gradient into merged vertex colors: darker at the
+// feet, full color up top. Fake ambient occlusion, and it survives instance
+// tinting because tints multiply vertex colors.
+function gradeAO(geo: THREE.BufferGeometry, h: number, floor = 0.78): THREE.BufferGeometry {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const col = geo.getAttribute('color') as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const k = floor + (1 - floor) * Math.min(1, Math.max(0, pos.getY(i) / h));
+    col.setXYZ(i, col.getX(i) * k, col.getY(i) * k, col.getZ(i) * k);
+  }
+  return geo;
 }
 
 function cbox(
@@ -428,7 +443,8 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
         cbox(parts, 0.14, 2.3, 1.15, fx, 1.15, wz, 0x53616b); // la puerta
         cbox(parts, 0.2, 0.16, 1.45, fx, 2.4, wz, TRIM);
       } else {
-        cbox(parts, 0.12, 1.5, 0.95, fx, wy, wz, WINDOW);
+        // Golden hour: a third of the windows are lit warm from inside
+        cbox(parts, 0.12, 1.5, 0.95, fx, wy, wz, Math.random() < 0.33 ? 0xffc46b : WINDOW);
         cbox(parts, 0.18, 0.12, 1.15, fx, wy + 0.85, wz, TRIM);
       }
     }
@@ -440,7 +456,7 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
       }
     }
   }
-  return { geo: mergeGeometries(parts)!, width };
+  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
 }
 
 function makeColmadoBody(width: number): Sized {
@@ -456,7 +472,7 @@ function makeColmadoBody(width: number): Sized {
   cbox(parts, 0.3, 0.4, 0.5, fx - 0.3, 2.2, -openW * 0.24, 0xffd3b6); // goods on the shelf
   cbox(parts, 0.3, 0.35, 0.45, fx - 0.3, 2.2, openW * 0.2, 0x7cb342);
   cbox(parts, 0.14, 1.6, 0.6, fx + 0.02, 0.9, -(openW / 2 + 0.55), WINDOW);
-  return { geo: mergeGeometries(parts)!, width };
+  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
 }
 
 // La Zona Colonial: taller openings, wooden shutters, a wrought-iron balcony
@@ -491,7 +507,7 @@ function makeZonaFacade(width: number, cols: number): Sized {
   // farolito: a little iron lantern beside the center door
   cbox(parts, 0.3, 0.05, 0.05, fx + 0.15, 3.2, 0.85, IRON);
   cbox(parts, 0.16, 0.24, 0.16, fx + 0.32, 3.05, 0.85, 0xffe9a8);
-  return { geo: mergeGeometries(parts)!, width };
+  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
 }
 
 // Wrought-iron street lamp: the Zona swaps its power poles for these.
@@ -532,7 +548,7 @@ function makeCampoHouse(width: number, body: number, trim: number): Sized {
   roof.rotateZ(0.16);
   roof.translate(0, H + 0.55, 0);
   parts.push(paint(roof, 0xb8b2a8));
-  return { geo: mergeGeometries(parts)!, width };
+  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.7), width };
 }
 
 // One platano plant; instanced by the dozen into field rows.
@@ -802,6 +818,28 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
   };
 }
 
+// The dark gradient at the foot of a wall is what glues it to the street.
+// One shared texture; each belt owns two strips and shows them per tramo.
+let _stripMat: THREE.MeshBasicMaterial | null = null;
+function stripMaterial(): THREE.MeshBasicMaterial {
+  if (!_stripMat) {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 8;
+    const g = c.getContext('2d')!;
+    const grad = g.createLinearGradient(0, 0, 64, 0);
+    grad.addColorStop(0, 'rgba(30,20,14,0.34)');
+    grad.addColorStop(1, 'rgba(30,20,14,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 8);
+    const tex = new THREE.CanvasTexture(c);
+    _stripMat = worldMaterial(
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }),
+    );
+  }
+  return _stripMat;
+}
+
 const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0xffffff, 0xa8c6a1, 0xf2d0a4];
 
 const PASTELS = PALETTE.buildingPastels;
@@ -829,6 +867,8 @@ class Belt {
   private campoHouseIMs: THREE.InstancedMesh[] = [];
   private platanoIM: THREE.InstancedMesh;
   private frituraIM: THREE.InstancedMesh;
+  private stripFar: THREE.Mesh;
+  private stripSea: THREE.Mesh;
   private assets: BeltAssets;
   private signCursor: number;
 
@@ -865,11 +905,31 @@ class Belt {
     for (const ch of assets.campoHouses) this.campoHouseIMs.push(im(ch.geo, assets.vcMat, 12));
     this.platanoIM = im(assets.platanoPlant, assets.vcMat, 200);
     this.frituraIM = im(assets.fritura, assets.vcMat, 2);
+    // Ground-contact shading at the foot of each side's wall: the texture is
+    // dark at u=0, so the dark edge lands on whichever x the wall stands at.
+    const mkStrip = (xWall: number, xRoad: number): THREE.Mesh => {
+      const w = Math.abs(xRoad - xWall);
+      const g = new THREE.PlaneGeometry(w, CONFIG.beltLen, 1, 1);
+      g.rotateX(-Math.PI / 2);
+      if (xWall > xRoad) {
+        // mirror U so the dark edge sits at the wall on the sea side too
+        const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+        for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+      }
+      g.translate((xWall + xRoad) / 2, 0.035, CONFIG.beltLen / 2);
+      const m = new THREE.Mesh(g, stripMaterial());
+      this.group.add(m);
+      return m;
+    };
+    this.stripFar = mkStrip(-12.3, -10.8);
+    this.stripSea = mkStrip(11.85, 10.35);
     scene.add(this.group);
   }
 
   fill(tramo: Tramo): void {
     this.tramo = tramo;
+    this.stripFar.visible = tramo !== 'campo';
+    this.stripSea.visible = tramo !== 'campo';
     const L = CONFIG.beltLen;
     const counts = new Map<THREE.InstancedMesh, number>();
     const place = (
@@ -1055,6 +1115,7 @@ class Belt {
 
     for (const m of this.group.children) {
       const imMesh = m as THREE.InstancedMesh;
+      if (!imMesh.isInstancedMesh) continue; // the ground strips are plain meshes
       imMesh.count = counts.get(imMesh) ?? 0;
       imMesh.instanceMatrix.needsUpdate = true;
       if (imMesh.instanceColor) imMesh.instanceColor.needsUpdate = true;
@@ -1548,6 +1609,35 @@ export class World {
     );
     halo.position.set(58, 11, 157);
     scene.add(halo);
+    // The soft outer bloom and a wide flare hugging the horizon: the closest
+    // a mobile toon game gets to bloom for the price of two quads.
+    const glow2 = new THREE.Mesh(
+      new THREE.CircleGeometry(44, 32),
+      new THREE.MeshBasicMaterial({
+        color: PALETTE.sunGlow,
+        fog: false,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+        transparent: true,
+        opacity: 0.16,
+      }),
+    );
+    glow2.position.set(58, 11, 159);
+    scene.add(glow2);
+    const flare = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xffefc8,
+        fog: false,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+        transparent: true,
+        opacity: 0.12,
+      }),
+    );
+    flare.scale.set(120, 7, 1);
+    flare.position.set(45, 6, 161);
+    scene.add(flare);
   }
 
   private buildLights(scene: THREE.Scene): void {
@@ -1761,6 +1851,18 @@ export class World {
       g.fillStyle = 'rgba(217,199,167,0.22)';
       g.fillRect(0, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
       g.fillRect(c.width - CONFIG.shoulderWidth * pmx * 1.25, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
+    }
+
+    // Tire wear: two soft dark tracks in every lane. Reads as a road that
+    // gets driven, which is most of what "professional" road texture means.
+    for (let lane = 0; lane < 4; lane++) {
+      const cxM = CONFIG.shoulderWidth + CONFIG.laneWidth * (lane + 0.5);
+      for (const off of [-0.62, 0.62]) {
+        for (let w = 0.5; w > 0.15; w -= 0.11) {
+          g.fillStyle = 'rgba(0,0,0,0.045)';
+          g.fillRect((cxM + off - w / 2) * pmx, 0, Math.max(2, w * pmx), c.height);
+        }
+      }
     }
 
     const vline = (xM: number, wM: number, color: string): void => {
