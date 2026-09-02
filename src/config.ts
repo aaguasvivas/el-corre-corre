@@ -305,6 +305,18 @@ export const CONFIG = {
   powerupUnlockSec: 20,
   cafecitoSec: 5,
   cafecitoBoost: 1.35, // FEEL: cafecito speed multiplier
+
+  // El acelerador. Speed is the risk dial: gas raises the ramp speed and pays
+  // a multiplier, the brake lowers it to a floor, never to a stop (el corre
+  // corre never stops). Gas does not stack with the cafecito, so the telegraph
+  // invariant is bounded by whichever of the two is larger (tested).
+  gasSpeedMult: 1.3, // FEEL: top speed multiplier at full throttle
+  brakeSpeedMult: 0.7, // FEEL: speed floor at full brake
+  throttleResponse: 3.5, // FEEL: how fast speed follows the throttle, per second
+  gasScoreMult: 1.25, // FEEL: ALL points x this while a fondo
+  gasEngageAt: 0.5, // throttle above this is "a fondo": the pill and the multiplier
+  touchThrottleDeadPx: 30, // FEEL: vertical drag before the throttle wakes up
+  touchThrottleRangePx: 150, // FEEL: pixels past the dead zone to full gas / full brake
   imanSec: 8,
   imanRadius: 6,
   imanPullSpeed: 15,

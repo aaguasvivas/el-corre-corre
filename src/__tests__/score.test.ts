@@ -36,6 +36,18 @@ describe('Score: the multiplier stack', () => {
     expect(c.points).toBe(Math.floor(expected));
   });
 
+  it('a fondo pays gasScoreMult on top of everything else', () => {
+    const s = new Score();
+    s.setVehicle('motor');
+    s.setGas(true);
+    s.step(100, 1, { airborne: false, wheelie: false });
+    expect(s.points).toBe(Math.floor(100 * CONFIG.gasScoreMult));
+    s.reset();
+    expect(s.points).toBe(0);
+    s.step(100, 1, { airborne: false, wheelie: false });
+    expect(s.points).toBe(100); // reset drops the gas flag
+  });
+
   it('near-miss points scale with the combo, and the combo decays after comboDecaySec', () => {
     const s = new Score();
     s.setVehicle('motor');

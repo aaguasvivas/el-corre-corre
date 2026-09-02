@@ -19,8 +19,10 @@ npm run build      # typecheck + production bundle in dist/
 npm run preview    # serve dist/ on http://localhost:4173
 ```
 
-Desktop: A/D or arrows steer, hold W or Space for the caballito (derrape in
-the Civic), M mutes. Phone: drag to steer, swipe up and hold for the trick.
+Desktop: A/D or left/right steer, up/down is gas and brake, hold W or Space
+for the caballito (derrape in the Civic), M mutes. Phone: drag to steer, hold
+the finger above where it landed for gas and below it for brake, flick up and
+hold for the trick.
 
 ## Verify it
 

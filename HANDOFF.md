@@ -138,6 +138,7 @@ testable deterministically anyway:
 - State probes: `state() score() record() x() y() speed() cars() combo()
   platanos() cv() wheelie() airborne() powerups() worldDist() vehicle()
   distMult() radius() fov() audio() info()` (info = draw calls + triangles).
+- Throttle probes: `effSpeed()` (what the rider actually does, gas/brake/cafecito applied) and `throttle()` (-1..1).
 - Tour probes: `tramo()` (current stretch), `runDist()` (meters into THIS
   run; the tour is run-relative), `belts()` (each scenery belt's world span
   and dressing), `obelisco()` (visible + z), `overlaps()` (interpenetrating
@@ -149,8 +150,16 @@ testable deterministically anyway:
 - Test cheats: `setRecordDist(m)` (place La Cinta), `setDistance(m)` (jump the
   distance-multiplier tiers).
 - Input in tests: dispatch real `KeyboardEvent`/`PointerEvent` on window
-  between ticks (steering keys KeyA/KeyD/Arrows, trick hold Space/KeyW,
-  Space/Enter menus, KeyM mute, title ArrowLeft/Right vehicle select).
+  between ticks (steering KeyA/KeyD/ArrowLeft/ArrowRight, throttle
+  ArrowUp/ArrowDown, trick hold Space/KeyW, Space/Enter menus, KeyM mute,
+  title ArrowLeft/Right vehicle select).
+- HARNESS GOTCHA: a synthetic `pointerdown` dispatched on OTRA VEZ bubbles to
+  window AFTER the restart flips the state to playing, so the player adopts
+  that phantom pointer (pointerId 0) as the steering finger and keyboard
+  steering/throttle are ignored until a `blur` or a matching pointerup. Use
+  `__ecc.start()` to restart in tests, or dispatch a pointerup for
+  pointerId 0 afterwards. On a real phone this same order is the feature:
+  the thumb that tapped OTRA VEZ steers.
 
 **Recipes that already exist and work:**
 - Steer to a lane: tap KeyA/KeyD in 0.06 s ticks until `|x - target| < 0.3`.
@@ -177,7 +186,7 @@ Updated at the end of Phase 6; the older numbers below it are kept for history.
   bot survival was measured with a different bot, so do not compare directly.
 
 **Testing gotcha:** `__ecc.speed()` returns the BASE ramp speed, not the
-effective speed. Pothole, scrape and cafecito modifiers apply to `effSpeed`.
+effective speed (use `effSpeed()` for that). Pothole, scrape and cafecito modifiers apply to `effSpeed`.
 To measure what the player actually feels, differentiate `worldDist()` over a
 window of at least 0.5 s (it is integer-quantised, so single-tick deltas
 alternate between 0 and full).

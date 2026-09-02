@@ -102,6 +102,7 @@ let shakeAmp = 0;
 let baseFov: number = CONFIG.fovDesktop;
 let lastRun: RunResult | null = null;
 let shownMult = 1;
+let throttleMult = 1; // eased speed factor from the throttle, 0.7 .. 1.3
 
 function addShake(amp: number): void {
   shakeAmp = Math.max(shakeAmp, amp);
@@ -369,6 +370,7 @@ function resetRunState(): void {
   shakeT = 0;
   shakeAmp = 0;
   shownMult = 1;
+  throttleMult = 1;
   acc = 0;
 }
 
@@ -471,7 +473,12 @@ function stepSim(h: number): void {
   const raw = CONFIG.baseSpeed + CONFIG.speedRampPerSec * elapsed;
   speed = Math.min(veh.speedCap, raw) * veh.speedMult;
   const topSpeed = veh.speedCap * veh.speedMult;
-  currentNorm = Math.max(0, Math.min(1, (speed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
+
+  // El acelerador: speed chases the throttle. The cafecito overrides it
+  // (already the fastest you get), so the two never stack.
+  const th = state === 'playing' ? player.throttle : 0;
+  const thTarget = th >= 0 ? 1 + th * (CONFIG.gasSpeedMult - 1) : 1 - -th * (1 - CONFIG.brakeSpeedMult);
+  throttleMult += (thTarget - throttleMult) * Math.min(1, CONFIG.throttleResponse * h);
   if (scrapeTimer > 0) scrapeTimer = Math.max(0, scrapeTimer - h);
   if (hoyoTimer > 0) hoyoTimer = Math.max(0, hoyoTimer - h);
   if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - h);
@@ -485,8 +492,10 @@ function stepSim(h: number): void {
     scrapeTimer > 0 ? CONFIG.scrapeSpeedLoss * (scrapeTimer / CONFIG.scrapeSlowSec) : 0,
     hoyoTimer > 0 ? CONFIG.potholeSpeedLoss * (hoyoTimer / CONFIG.hoyoRecoverSec) : 0,
   );
-  const effSpeed = speed * (1 - slow) * (cafecitoT > 0 ? CONFIG.cafecitoBoost : 1);
+  const effSpeed = speed * (1 - slow) * (cafecitoT > 0 ? CONFIG.cafecitoBoost : throttleMult);
   currentEff = effSpeed;
+  // Felt speed drives the FOV kick and the engine: a fondo pushes past 1.
+  currentNorm = Math.max(0, Math.min(1.25, (effSpeed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
   const ds = effSpeed * h;
 
   world.step(ds, h);
@@ -497,6 +506,9 @@ function stepSim(h: number): void {
   ui.setContraVia(cv);
   score.setWheelie(live && player.isWheelie);
   ui.setCaballito(live && player.isWheelie);
+  const gasOn = live && cafecitoT <= 0 && player.throttle >= CONFIG.gasEngageAt;
+  score.setGas(gasOn);
+  ui.setGas(gasOn);
 
   // Mutated in place: this runs at 120 Hz, and the brief's rule is zero
   // allocations in hot loops.
@@ -600,6 +612,7 @@ function syncHud(): void {
   ui.setScore(score.points);
   ui.setCombo(score.combo, ui.ladderTierText(score.combo));
   ui.setComboFraction(score.comboFraction);
+  ui.setSpeedLines(state === 'playing' ? currentNorm : 0);
 }
 
 let last = performance.now();
@@ -631,7 +644,7 @@ function advance(dt: number, now: number): void {
 function audioCtxNow(): { running: boolean; speedNorm: number; combo: number; contraVia: boolean; wheelie: boolean } {
   return {
     running: state === 'playing',
-    speedNorm: currentNorm,
+    speedNorm: Math.min(1, currentNorm),
     combo: score.combo,
     contraVia: score.isContraVia,
     wheelie: player.isWheelie,
@@ -672,6 +685,8 @@ requestAnimationFrame(frame);
   x: () => player.x,
   y: () => player.y,
   speed: () => speed,
+  effSpeed: () => +currentEff.toFixed(2),
+  throttle: () => player.throttle,
   cars: () => traffic.activeCars,
   combo: () => score.combo,
   platanos: () => score.platanos,

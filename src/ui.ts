@@ -44,6 +44,9 @@ const STRINGS = {
     cvPill: '¡EN CONTRA VÍA! ×2',
     trickPillBike: '¡CABALLITO! ×1.5',
     trickPillCar: '¡DERRAPE! ×1.5',
+    gasPill: '¡A FONDO! ×1.25',
+    ctrlThrottleTouch: 'Dedo arriba: gas · dedo abajo: freno',
+    ctrlThrottleKey: '↑ acelera · ↓ frena',
     trickBike: '¡CABALLITO!',
     trickCar: '¡DERRAPE!',
     air: '¡AIRE!',
@@ -88,6 +91,9 @@ const STRINGS = {
     cvPill: 'WRONG WAY! ×2',
     trickPillBike: 'WHEELIE! ×1.5',
     trickPillCar: 'DRIFT! ×1.5',
+    gasPill: 'FLOORED! ×1.25',
+    ctrlThrottleTouch: 'Finger up: gas · finger down: brake',
+    ctrlThrottleKey: '↑ gas · ↓ brake',
     trickBike: 'WHEELIE!',
     trickCar: 'DRIFT!',
     air: 'AIR!',
@@ -227,6 +233,10 @@ export class UI {
   private comboEl: HTMLElement;
   private cvEl: HTMLElement;
   private cabEl: HTMLElement;
+  private gasEl: HTMLElement;
+  private gasShown = false;
+  private speedLinesShown = -1;
+  private ctrlThrottleEl: HTMLElement;
   private platEl: HTMLElement;
   private multEl: HTMLElement;
   private hudRecordEl: HTMLElement;
@@ -271,10 +281,12 @@ export class UI {
     root.innerHTML = `
       <div id="vignette"></div>
       <div id="hud" class="hidden">
+        <div id="speedlines"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <div id="hud-score">0</div>
         <div id="hud-combo" class="hidden"><span id="combo-text"></span><i id="combo-bar"></i></div>
         <div id="hud-cv" class="hidden">¡EN CONTRA VÍA! ×2</div>
         <div id="hud-cab" class="hidden">¡CABALLITO! ×1.5</div>
+        <div id="hud-gas" class="hidden"></div>
         <div id="hud-record"></div>
         <div id="hud-left">
           <button id="hud-pause" type="button" aria-label="Pausa"><i></i><i></i></button>
@@ -302,6 +314,7 @@ export class UI {
         <div id="controls" class="controls">
           <span id="ctrl-steer"></span>
           <span id="ctrl-trick"></span>
+          <span id="ctrl-throttle"></span>
         </div>
         <div id="title-record" class="title-record"></div>
         <div id="title-bank" class="title-bank">${BANANA_SVG}<span id="bank-n">0</span></div>
@@ -348,6 +361,8 @@ export class UI {
     this.comboEl = q('#hud-combo');
     this.cvEl = q('#hud-cv');
     this.cabEl = q('#hud-cab');
+    this.gasEl = q('#hud-gas');
+    this.ctrlThrottleEl = q('#ctrl-throttle');
     this.platEl = q('#plat-n');
     this.multEl = q('#hud-mult');
     this.hudRecordEl = q('#hud-record');
@@ -483,8 +498,10 @@ export class UI {
     this.cvEl.textContent = t.cvPill;
     this.cabEl.textContent =
       this.selectedVehicle === 'civic' ? t.trickPillCar : t.trickPillBike;
+    this.gasEl.textContent = t.gasPill;
     this.subtitleEl.textContent = t.subtitle;
     const touch = this.inputMode === 'touch';
+    this.ctrlThrottleEl.textContent = touch ? t.ctrlThrottleTouch : t.ctrlThrottleKey;
     this.promptEl.textContent = touch ? t.startTouch : t.startKey;
     const trick = this.selectedVehicle === 'civic' ? t.trickCar : t.trickBike;
     this.ctrlSteerEl.textContent = touch ? t.ctrlSteerTouch : t.ctrlSteerKey;
@@ -584,6 +601,7 @@ export class UI {
     this.pause.classList.add('hidden');
     this.setContraVia(false);
     this.setCaballito(false);
+    this.setGas(false);
   }
 
   showPlaying(record: number): void {
@@ -597,6 +615,7 @@ export class UI {
     this.setPlatanos(0);
     this.setContraVia(false);
     this.setCaballito(false);
+    this.setGas(false);
     this.multShown = 1;
     this.multEl.classList.add('hidden');
     for (const p of this.popups) p.classList.remove('go');
@@ -632,6 +651,7 @@ export class UI {
     this.hud.classList.add('hidden');
     this.setContraVia(false);
     this.setCaballito(false);
+    this.setGas(false);
   }
 
   showPause(): void {
@@ -693,6 +713,23 @@ export class UI {
     if (on === this.cabShown) return;
     this.cabShown = on;
     this.cabEl.classList.toggle('hidden', !on);
+  }
+
+  // Wind streaks at the edges of the frame, fading in past ~60% of top
+  // speed and saturating a fondo. Pure CSS animation; only the container's
+  // opacity is written, and only when it moves a step.
+  setSpeedLines(norm: number): void {
+    const q = Math.round(Math.max(0, Math.min(1, (norm - 0.6) / 0.6)) * 20);
+    if (q === this.speedLinesShown) return;
+    this.speedLinesShown = q;
+    const el = document.getElementById('speedlines');
+    if (el) el.style.opacity = String(q / 20);
+  }
+
+  setGas(on: boolean): void {
+    if (on === this.gasShown) return;
+    this.gasShown = on;
+    this.gasEl.classList.toggle('hidden', !on);
   }
 
   setMuted(m: boolean): void {

@@ -9,7 +9,8 @@ describe('CONFIG invariants from the brief', () => {
     const fastestRide = Math.max(...Object.values(VEHICLES).map((v) => v.speedCap * v.speedMult));
     const speeds = Object.values(CONFIG.vehicleSpeeds) as ReadonlyArray<readonly [number, number]>;
     const fastestOncoming = Math.max(...speeds.map((r) => r[1]));
-    const closing = fastestRide * CONFIG.cafecitoBoost + fastestOncoming;
+    // gas and cafecito never stack, so the bound is the larger of the two
+    const closing = fastestRide * Math.max(CONFIG.cafecitoBoost, CONFIG.gasSpeedMult) + fastestOncoming;
     expect(CONFIG.spawnAhead / closing).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
   });
 
@@ -37,6 +38,13 @@ describe('CONFIG invariants from the brief', () => {
     for (const [type, range] of Object.entries(CONFIG.vehicleSpeeds)) {
       expect(range[1], `${type} top speed vs rider at unlock`).toBeLessThan(speedAt(unlock[type] ?? 0));
     }
+  });
+
+  it('the throttle never stops the run and the brake floor keeps the gentle start survivable', () => {
+    expect(CONFIG.brakeSpeedMult).toBeGreaterThan(0.5);
+    expect(CONFIG.brakeSpeedMult).toBeLessThan(1);
+    expect(CONFIG.gasSpeedMult).toBeGreaterThan(1);
+    expect(CONFIG.gasSpeedMult).toBeLessThanOrEqual(CONFIG.cafecitoBoost);
   });
 
   it('the tour is coherent: the Obelisco offset lands inside a Malecon stretch', () => {

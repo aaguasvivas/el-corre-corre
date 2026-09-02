@@ -79,6 +79,7 @@ export class Score {
   private comboTimer = 0;
   private contraVia = false;
   private wheelieOn = false;
+  private gasOn = false;
   private airAccum = 0;
   private wheelieAccum = 0;
   private platanosLifetime = readInt(PLATANOS_KEY);
@@ -121,6 +122,7 @@ export class Score {
     return (
       (this.contraVia ? CONFIG.contraViaMultiplier : 1) *
       (this.wheelieOn ? CONFIG.wheelieMultiplier : 1) *
+      (this.gasOn ? CONFIG.gasScoreMult : 1) *
       this.vehicleScoreMult *
       this.distTier
     );
@@ -132,6 +134,11 @@ export class Score {
 
   setWheelie(on: boolean): void {
     this.wheelieOn = on;
+  }
+
+  // A fondo: the throttle's reward side. Stacks with everything else.
+  setGas(on: boolean): void {
+    this.gasOn = on;
   }
 
   step(ds: number, dt: number, opts: { airborne: boolean; wheelie: boolean }): void {
@@ -259,6 +266,7 @@ export class Score {
     this.comboTimer = 0;
     this.contraVia = false;
     this.wheelieOn = false;
+    this.gasOn = false;
     this.airAccum = 0;
     this.wheelieAccum = 0;
   }

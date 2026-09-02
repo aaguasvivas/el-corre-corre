@@ -451,6 +451,20 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
       }
     }
   }
+  // La azotea: every Santo Domingo roof has a tinaco, and half have an
+  // antenna leaning at the sky. Small, cheap, and the most Dominican thing a
+  // skyline can wear.
+  const roofY = H + 0.35;
+  const tz = (Math.random() - 0.5) * (width - 2.4);
+  cgeo(parts, new THREE.CylinderGeometry(0.42, 0.42, 0.8, 10), 0x1e3a66, -1.2, roofY + 0.4, tz);
+  cgeo(parts, new THREE.CylinderGeometry(0.46, 0.46, 0.08, 10), 0x2a2624, -1.2, roofY + 0.82, tz);
+  if (Math.random() < 0.55) {
+    const az = -(width / 2) + 1 + Math.random() * (width - 2);
+    cbox(parts, 0.05, 2.2, 0.05, 1.4, roofY + 1.1, az, 0x2a2624); // mast
+    cbox(parts, 1.1, 0.04, 0.04, 1.4, roofY + 2.05, az, 0x2a2624); // boom
+    cbox(parts, 0.04, 0.04, 0.7, 1.4, roofY + 2.05, az, 0x2a2624);
+    cbox(parts, 0.04, 0.04, 0.5, 1.75, roofY + 1.7, az, 0x2a2624);
+  }
   return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
 }
 
@@ -1493,6 +1507,7 @@ export class World {
   private hemi!: THREE.HemisphereLight;
   private sunLight!: THREE.DirectionalLight;
   private clouds: Array<{ mesh: THREE.Mesh; speed: number }> = [];
+  private boats: Array<{ mesh: THREE.Mesh; phase: number; drift: number }> = [];
   private tramoNow: Tramo = 'malecon';
   onTramoChange: ((t: Tramo) => void) | null = null;
   private gallinas: Gallina[] = [];
@@ -1801,6 +1816,23 @@ export class World {
     glint.position.set(56, -0.38, 100);
     scene.add(glint);
     this.waterFx.push({ mat: this.glintMat, base: 0.42 });
+
+    // Veleros: three small sails far out, bobbing, drifting along the coast.
+    // They vanish with the water when el campo takes over.
+    for (let i = 0; i < 3; i++) {
+      const parts: THREE.BufferGeometry[] = [];
+      cbox(parts, 2.2, 0.5, 0.8, 0, 0.25, 0, i === 1 ? 0xce1126 : 0xf2e9dc); // hull
+      cgeo(parts, new THREE.CylinderGeometry(0.05, 0.05, 3.2, 6), 0x6b5645, 0.2, 1.85, 0);
+      const sail = new THREE.BoxGeometry(1.6, 2.6, 0.06);
+      sail.translate(0.9, 1.9, 0); // hangs off the mast
+      parts.push(paint(sail, i === 2 ? 0xffd3b6 : 0xffffff));
+      const m = new THREE.Mesh(mergeGeometries(parts)!, vcToonMaterial());
+      m.position.set(52 + i * 17, -0.3, 110 + i * 55);
+      m.rotation.y = 0.5 + i * 0.4;
+      m.scale.setScalar(1.6);
+      scene.add(m);
+      this.boats.push({ mesh: m, phase: i * 2.1, drift: 0.35 + i * 0.12 });
+    }
   }
 
   private buildMountains(scene: THREE.Scene): void {
@@ -2163,6 +2195,14 @@ export class World {
     for (const cl of this.clouds) {
       cl.mesh.position.x += cl.speed * dt;
       if (cl.mesh.position.x > 200) cl.mesh.position.x = -200;
+    }
+    // Sailboats bob and slide along the coast; gone once the sea is fields
+    for (const b of this.boats) {
+      b.mesh.visible = this.landBlend < 0.35;
+      b.mesh.position.y = -0.3 + Math.sin(this.t * 0.9 + b.phase) * 0.18;
+      b.mesh.rotation.z = Math.sin(this.t * 0.7 + b.phase) * 0.05;
+      b.mesh.position.z -= b.drift * dt;
+      if (b.mesh.position.z < 60) b.mesh.position.z = 260;
     }
 
     // El campo is inland: the sea drains to farmland over about a second and

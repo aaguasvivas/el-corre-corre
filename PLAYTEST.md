@@ -5,7 +5,24 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Deep audit pass (current)
+## El acelerador + art round 3 (current)
+
+1. **Gas and brake.** Phone: hold your thumb above where it landed for gas,
+   below it for brake; the dead zone is 30 px so a dodge is still a dodge.
+   A flick up is still the caballito, and flick-up-and-hold is gas AND
+   caballito. Desktop: up/down arrows. Gas is 1.3x speed and pays
+   "¡A FONDO! x1.25" on everything; brake is 0.7x speed with no score
+   penalty beyond the meters you are not covering. The cafecito overrides
+   the throttle. Feel-test: does the trade read in the hands (gas in gaps,
+   brake into walls)? Does the dead zone feel right, or does gas kick in
+   while you are just dodging? Is x1.25 worth the risk?
+2. **Speed lines** past ~60% of top speed, full a fondo. Too much?
+3. **Art round 3**: veleros far out on the sea, tinacos and antennas on the
+   rooftops. Charm check: do you notice them without being told?
+4. **Robustness**: steering math is NaN-proof now (a zero-width viewport
+   during a rotation could previously blank the world until relaunch).
+
+## Deep audit pass
 
 Four things you will notice, all verified live:
 

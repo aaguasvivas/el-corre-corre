@@ -71,6 +71,9 @@ export class Player {
   x = START_X;
   velX = 0;
   vehicle: VehicleId = 'motor';
+  // El acelerador: -1 full brake .. 0 cruise .. +1 a fondo. Keys or the
+  // finger's height above where it landed; main eases speed toward it.
+  throttle = 0;
 
   private root = new THREE.Group();
   private leanGroup = new THREE.Group();
@@ -94,6 +97,8 @@ export class Player {
 
   private keys = new Set<string>();
   private wheelieKeys = new Set<string>();
+  private throttleKeys = new Set<string>();
+  private touchOriginY = 0;
   private touchActive = false;
   private touchWheelieHold = false;
   private touchTargetX = START_X;
@@ -464,7 +469,8 @@ export class Player {
 
   private bindInput(): void {
     const STEER_KEYS = ['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight'];
-    const WHEELIE_KEYS = ['KeyW', 'Space', 'ArrowUp'];
+    const WHEELIE_KEYS = ['KeyW', 'Space'];
+    const THROTTLE_KEYS = ['ArrowUp', 'ArrowDown'];
     window.addEventListener('keydown', (e) => {
       if (STEER_KEYS.includes(e.code)) {
         this.keys.add(e.code);
@@ -472,15 +478,20 @@ export class Player {
       } else if (WHEELIE_KEYS.includes(e.code) && this.cb.isSteeringActive()) {
         this.wheelieKeys.add(e.code);
         e.preventDefault();
+      } else if (THROTTLE_KEYS.includes(e.code)) {
+        this.throttleKeys.add(e.code);
+        e.preventDefault();
       }
     });
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       this.wheelieKeys.delete(e.code);
+      this.throttleKeys.delete(e.code);
     });
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.wheelieKeys.clear();
+      this.throttleKeys.clear();
       this.endTouch();
     });
 
@@ -502,9 +513,20 @@ export class Player {
       if (!this.touchActive || e.pointerId !== this.pointerId) return;
       const dx = e.clientX - this.lastPointerX;
       this.lastPointerX = e.clientX;
+      // Throttle by height: hold the finger above where it landed for gas,
+      // below it for brake, with a dead zone so a dodge stays a dodge. A
+      // fast flick is still the caballito (handled below); a slow slide is
+      // the throttle, and the two coexist: a flick up and hold is gas AND
+      // caballito, which is exactly how a tiguere would ride it.
+      const up = this.touchOriginY - e.clientY;
+      const mag = Math.max(0, Math.abs(up) - CONFIG.touchThrottleDeadPx) / CONFIG.touchThrottleRangePx;
+      this.throttle = clamp(mag, 0, 1) * Math.sign(up);
       // Screen right is world -x, so the drag flips sign here.
+      // innerWidth can read 0 for a frame during a rotation or a viewport
+      // switch; 0/0 would poison the target with NaN and blank the world.
+      const w = window.innerWidth > 0 ? window.innerWidth : 1;
       this.touchTargetX = clamp(
-        this.touchTargetX - (dx / window.innerWidth) * ROAD.fullWidth * CONFIG.touchSteerScale,
+        this.touchTargetX - (dx / w) * ROAD.fullWidth * CONFIG.touchSteerScale,
         -this.edgeMax,
         this.edgeMax,
       );
@@ -537,6 +559,7 @@ export class Player {
   private adoptPointer(e: PointerEvent): void {
     this.pointerId = e.pointerId;
     this.lastPointerX = e.clientX;
+    this.touchOriginY = e.clientY;
     this.touchActive = true;
     this.touchTargetX = this.x;
     this.swipeRefX = e.clientX;
@@ -548,6 +571,7 @@ export class Player {
     this.touchActive = false;
     this.touchWheelieHold = false;
     this.pointerId = null;
+    this.throttle = 0;
   }
 
   launch(vy: number): void {
@@ -610,6 +634,11 @@ export class Player {
       }
     }
 
+    if (!this.touchActive) {
+      this.throttle =
+        (this.throttleKeys.has('ArrowUp') ? 1 : 0) - (this.throttleKeys.has('ArrowDown') ? 1 : 0);
+    }
+
     // El caballito: hold to keep it up, authority decays while you do
     const held = this.wheelieKeys.size > 0 || this.touchWheelieHold;
     if (!held) this.wheelieLatch = false;
@@ -652,6 +681,14 @@ export class Player {
       this.velX *= Math.exp(-CONFIG.lateralDamping * veh.dampMult * dt);
     }
     this.x += this.velX * dt;
+    // Invariant: the rider's position is always a finite number. The camera
+    // follows x, so a single NaN here would blank the whole game until a
+    // relaunch. Whatever fed it, recover on the spot and keep riding.
+    if (!Number.isFinite(this.x) || !Number.isFinite(this.velX)) {
+      this.x = Number.isFinite(this.x) ? clamp(this.x, -this.edgeMax, this.edgeMax) : START_X;
+      this.velX = 0;
+      this.touchTargetX = this.x;
+    }
 
     if (this.scrapeCooldown > 0) this.scrapeCooldown -= dt;
     const over = this.x > this.edgeMax ? 1 : this.x < -this.edgeMax ? -1 : 0;
