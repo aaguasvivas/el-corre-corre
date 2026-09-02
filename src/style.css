@@ -7,6 +7,7 @@
   --sun: #fff3c4;
   --sky: #6ec6e6;
   --teal: #17a2b8;
+  --gold: #f4c430;
 }
 
 * {
@@ -488,6 +489,31 @@ body {
 
 #hud-combo.bump {
   animation: bump-center 0.28s ease;
+}
+
+/* the combo's remaining life: a gold bar that drains under the pill */
+#combo-bar {
+  display: block;
+  height: 3px;
+  margin: 3px auto 0;
+  width: 72%;
+  border-radius: 2px;
+  background: var(--gold);
+  transform-origin: 50% 50%;
+  transform: scaleX(1);
+  box-shadow: 0 0 6px rgba(244, 196, 48, 0.55);
+}
+
+/* game over: how far into the country the run got */
+.go-tour {
+  font-size: clamp(12px, 3.2vw, 14px);
+  letter-spacing: 0.6px;
+  color: var(--sea-deep, #0e7490);
+  margin: 2px 0 4px;
+  min-height: 16px;
+}
+.go-tour:empty {
+  display: none;
 }
 
 #hud-cv {

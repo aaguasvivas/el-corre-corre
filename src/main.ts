@@ -10,6 +10,7 @@ import { World } from './world';
 import { Player } from './player';
 import { Traffic, type ObstacleKind, type PickupKind, type StepCtx, type VehicleType } from './traffic';
 import { Score, type RunResult } from './score';
+import { tramoFor } from './tour';
 import { UI } from './ui';
 import { AudioEngine } from './audio';
 import { haptics } from './haptics';
@@ -378,6 +379,10 @@ function startRun(): void {
   player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
   score.reset();
   resetRunState();
+  // The tour restarts from the Malecon; traffic's mix follows it explicitly
+  // because the world does not announce the start line.
+  world.startRun();
+  traffic.setTramo('malecon');
   state = 'playing';
   ui.showPlaying(score.record);
   audio.startRun();
@@ -455,7 +460,7 @@ resize();
 
 function stepSim(h: number): void {
   if (state === 'title') {
-    world.step(CONFIG.baseSpeed * 0.45 * h, h); // attract mode: the Malecon keeps moving
+    world.step(CONFIG.baseSpeed * 0.45 * h, h, true); // attract mode: scenery moves, the tour holds still
     world.updateTape(null);
     return;
   }
@@ -587,6 +592,16 @@ function updateCamera(dt: number): void {
   camera.lookAt(lookTarget);
 }
 
+// Everything the HUD derives from live state, once per rendered frame. The
+// combo pill used to be pushed only on events, so a chain that simply timed
+// out stayed on screen until the next near-miss; syncing from the score
+// every frame (setCombo dedups on the count) makes the decay bar honest.
+function syncHud(): void {
+  ui.setScore(score.points);
+  ui.setCombo(score.combo, ui.ladderTierText(score.combo));
+  ui.setComboFraction(score.comboFraction);
+}
+
 let last = performance.now();
 let acc = 0;
 let fpsAvg = 60;
@@ -598,7 +613,7 @@ function advance(dt: number, now: number): void {
     if (crashRealT >= CONFIG.crashSlowmoSec) {
       state = 'gameover';
       gameOverAt = now;
-      lastRun = score.finishRun();
+      lastRun = score.finishRun(tramoFor(score.distance));
       submitScore(lastRun.points, selectedVehicle);
       ui.showGameOver(lastRun);
     }
@@ -633,7 +648,7 @@ function frame(now: number): void {
   advance(dt, now);
   updateCamera(dt);
   audio.update(dt, audioCtxNow());
-  if (state === 'playing' || state === 'crashing') ui.setScore(score.points);
+  if (state === 'playing' || state === 'crashing') syncHud();
   renderer.render(scene, camera);
 }
 
@@ -665,6 +680,7 @@ requestAnimationFrame(frame);
   airborne: () => player.isAirborne,
   powerups: () => ({ cafecitoT, imanT, shielded: player.hasShield, invincibleT }),
   worldDist: () => Math.round(world.distance),
+  runDist: () => Math.round(world.runDistance),
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   dog: () => world.debugViralata(),
   confetti: () => world.confettiState,
@@ -718,7 +734,7 @@ requestAnimationFrame(frame);
     }
     updateCamera(1 / 60);
     audio.update(1 / 60, audioCtxNow());
-    if (state === 'playing' || state === 'crashing') ui.setScore(score.points);
+    if (state === 'playing' || state === 'crashing') syncHud();
     renderer.render(scene, camera);
   },
 };

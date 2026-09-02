@@ -54,6 +54,7 @@ interface Vehicle {
   z: number;
   dir: 1 | -1;
   speed: number;
+  cruise: number; // the speed it wants; following can hold it below, never above
   halfW: number;
   halfL: number;
   passed: boolean;
@@ -422,7 +423,7 @@ export class Traffic {
         this.vehicles.push({
           type, group, active: false, lane: 0, baseX: 0, x: 0, z: 0, dir: 1,
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
-          driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, blinkers,
+          driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
         });
       }
     }
@@ -701,6 +702,7 @@ export class Traffic {
         v.group.rotation.y = (Math.random() - 0.5) * 0.14;
       } else {
         v.speed = speedOverride ?? rand(range[0], range[1]);
+        v.cruise = v.speed;
         v.driftAmp = exactX === undefined ? Math.random() * 0.3 : 0; // Dominican lane discipline
         v.baseX = exactX ?? ROAD.laneCenters[lane] + rand(-0.4, 0.4);
         v.group.rotation.y = dir === 1 ? 0 : Math.PI;
@@ -906,6 +908,10 @@ export class Traffic {
       }
       if (leaderSpeed >= 0 && bestGap < 2 + v.speed * 0.12 && leaderSpeed < v.speed) {
         v.speed = leaderSpeed;
+      } else if (v.speed < v.cruise) {
+        // the road opened up: ease back to the speed it wanted, so traffic
+        // keeps overtaking itself instead of settling into one slow parade
+        v.speed = Math.min(v.cruise, v.speed + 2.5 * dt);
       }
     }
 

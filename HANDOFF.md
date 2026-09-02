@@ -12,32 +12,34 @@
 
 ---
 
-## 1. Current state (commit `a26eee8`)
+## 1. Current state (2026-08-08)
 
-Everything through **Phase 5 is built, verified, committed, and pushed** to
-`github.com/aaguasvivas/el-corre-corre` (private). The game is fully playable:
-continuous steering, all six traffic archetypes, wave spawner with anti-wall
-validation, near-miss combos with the slang ladder, contra vía ×2 with
-CV-targeted hostile spawns, held caballito (bikes) and derrape (Civic) at
-×1.5, obstacles, power-ups, La Cinta del Récord, the full Malecón world with
-bend-field S-curves, the 120 BPM dembow with phrase variation, complete SFX,
-three vehicles with per-vehicle récords, distance multiplier tiers, share
-card, close-call line, haptics wrapper, ES/EN toggle.
+**Everything through Phase 7 is built, verified, committed, and pushed**, and
+the game is on TestFlight with a second player (Adelson's brother Erickson,
+external group; build 4 approved, builds 5-8 carry the look passes and the
+tour fixes). Fully playable: continuous steering, all traffic archetypes with
+anti-wall validation, car-following and el rebase (the center-seam overtake),
+near-miss combos with the slang ladder and a visible combo-decay bar, contra
+vía ×2 with hostile spawns, held caballito / derrape, obstacles, power-ups,
+La Cinta del Récord, Los Tramos (Malecón / Zona Colonial / Campo, 1 km each,
+run-relative), per-tramo weather and scenery on BOTH sides of the road, the
+dembow with intensity layers and self-healing after iOS audio interruptions,
+three rides with per-vehicle récords, Las Pinturas (the plátano wallet buys
+paint jobs), share card, haptics, ES/EN, and two look passes (rim light,
+baked AO, bevels, clouds, sun flare, vignette).
 
-**Signed off by Adelson:** Phase 1 steering ("smooth and precise"), Phase 3
-world ("looks amazing"), Phase 4/5 direction ("much improved, trending
-upwards").
+**Signed off by Adelson:** steering, world, feel rounds 1-2 ("this game is
+fun now"), TestFlight flow. Erickson: "love the feel", look pass in review.
 
-**Open verdicts (do not re-litigate, just await/collect):**
-- Feel round 2: does contra vía now feel like a constant gamble; does dying
-  deep (multiplier zone) trigger instant restart; does the derrape feel right;
-  does the varied dembow survive 3-minute runs.
-- Difficulty is a standing iteration thread across the whole project. Adelson
-  gives verdicts in plain words; map them to CONFIG knobs (section 7).
+**Tests:** `npm test` (vitest) covers the scoring model, the tour math and
+the brief's invariants (telegraph window, same-direction speeds vs the ramp,
+tour/Obelisco cadence, pintura catalog, tramo weight parity). Live checks go
+through `window.__ecc` (section 4).
 
-**What remains:** Phase 6 (ship prep, section 5), the Capacitor iOS wrap
-(section 5.4), optionally Phase 7 Los Tramos (section 6), then App Store prep
-from the post-launch roadmap in CLAUDE.md.
+**What remains:** collect Erickson's verdict on the look; App Store
+submission (STORE.md kit + screenshots) when the feel is declared stable;
+post-launch roadmap in CLAUDE.md (Game Center behind leaderboard.ts,
+misiones, more pinturas).
 
 ---
 
@@ -136,6 +138,10 @@ testable deterministically anyway:
 - State probes: `state() score() record() x() y() speed() cars() combo()
   platanos() cv() wheelie() airborne() powerups() worldDist() vehicle()
   distMult() radius() fov() audio() info()` (info = draw calls + triangles).
+- Tour probes: `tramo()` (current stretch), `runDist()` (meters into THIS
+  run; the tour is run-relative), `belts()` (each scenery belt's world span
+  and dressing), `obelisco()` (visible + z), `overlaps()` (interpenetrating
+  vehicle pairs, should read 0), `bank()` (platano wallet).
 - Actions: `start() crash() selectVehicle(id) share() dog()` (viralata now).
 - Deterministic spawns: `spawnVehicle(type, lane, z, dir, exactX?)`,
   `spawnObstacle(kind, x, z)`, `spawnPickup(kind, x, z, y?)`. Pass `exactX` to

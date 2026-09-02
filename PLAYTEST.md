@@ -5,7 +5,35 @@ Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
 for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
 drag to steer, swipe up and hold, swipe down to drop.
 
-## Look pass round 2 (current): the professional-polish pass
+## Deep audit pass (current)
+
+Four things you will notice, all verified live:
+
+1. **Every run starts at home.** The tour is measured from the start of
+   THIS run: die in el campo, tap OTRA VEZ, and you ride out of the
+   countryside into the Malecón within a few hundred meters, then La Zona
+   arrives at 1 km like it should. The title screen no longer drifts the
+   tour while you sit on it. Before, the country was on a lifetime
+   odometer, so runs began wherever the last one ended.
+2. **The game-over card knows the tour.** "Llegaste hasta EL CAMPO" when
+   you got somewhere, or "LA ZONA COLONIAL a 340 m" when you didn't, the
+   tour's own close-call line. The share card says "hasta El Campo" too.
+3. **The combo has a visible fuse.** A gold bar drains under the combo
+   pill over the 4 s decay, and the pill now hides when the chain times
+   out (it used to linger until the next near-miss).
+4. **Traffic breathes.** A follower that got held behind a slower car now
+   eases back to its own speed once the road opens, so the pack keeps
+   overtaking itself instead of settling into one slow parade.
+
+Under the hood: `npm test` now encodes the brief's invariants (telegraph
+window, speeds vs the ramp, tour cadence, pinturas), and it already caught
+one: the Civic's top speed had outrun the base speed after the feel round
+(harmless thanks to the unlock timing, now tested against the ramp).
+
+Feel-test: does OTRA VEZ still feel instant with the tour reset? Does the
+combo bar read at a glance without pulling your eyes down?
+
+## Look pass round 2: the professional-polish pass
 
 Round 2 targets the specific amateur tells, Subway Surfers polish as the
 bar:

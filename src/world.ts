@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD } from './config';
+import { tramoFor, nextObeliscoAfter, type Tramo } from './tour';
 import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 
 const CHUNK_LEN = 30;
@@ -39,12 +40,11 @@ const BELT_PHASE = 20;
 
 // ---------------------------------------------------------------------------
 // Los Tramos (Phase 7): the run tours the country. Theme is a pure function
-// of distance, so belts and road chunks can each ask "what will the world be
-// when the player reaches me" and recycle into the right dress.
+// of THIS RUN's distance (tour.ts), so belts and road chunks can each ask
+// "what will the world be when the player reaches me" and dress to match.
 // ---------------------------------------------------------------------------
 
-export type Tramo = 'malecon' | 'zona' | 'campo';
-const TRAMO_ORDER: Tramo[] = ['malecon', 'zona', 'campo'];
+export type { Tramo } from './tour';
 // What the sea becomes out in el campo: sun-dried pasture, not sea green.
 const FIELD_COLOR = new THREE.Color(0x9cae54);
 
@@ -79,11 +79,6 @@ const ATMOS: Record<Tramo, Atmo> = {
   zona: atmo(0xf7c6ab, 140, 0xffd7a8, 1.62, 0xb7d0e6, 0xe0b691, 0xffc79f),
   campo: atmo(0xeed7a4, 156, 0xffeabf, 1.78, 0xc9e2da, 0xdcc18c, 0xffe3ae),
 };
-
-export function tramoFor(d: number): Tramo {
-  const i = Math.floor(Math.max(0, d) / CONFIG.tramoLengthM) % TRAMO_ORDER.length;
-  return TRAMO_ORDER[i];
-}
 
 // ---------------------------------------------------------------------------
 // The bend field
@@ -1478,6 +1473,10 @@ export class World {
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
   private nextObeliscoAt: number = CONFIG.obeliscoOffsetM;
+  // Where the current run started on the lifetime odometer. Everything the
+  // tour does is measured from here, so every run begins at home on the
+  // Malecon and a crossing is an achievement of THIS run.
+  private runOrigin = 0;
   private obeliscoPassed = false;
   onObeliscoPass: (() => void) | null = null;
   private shimmerA!: THREE.CanvasTexture;
@@ -1508,6 +1507,27 @@ export class World {
     return this.tramoNow;
   }
 
+  get runDistance(): number {
+    return this.D - this.runOrigin;
+  }
+
+  // A new run: the tour restarts from the Malecon without the world popping.
+  // Belts still inside the fog keep whatever they wore (they scroll out in a
+  // few seconds); belts beyond it are re-dressed for the fresh tour, so the
+  // player rides out of wherever they died and into home. The announcement
+  // is deliberately not fired: you did not "arrive" at the start line.
+  startRun(): void {
+    this.runOrigin = this.D;
+    this.tramoNow = 'malecon';
+    for (const belt of this.belts) {
+      if (belt.group.position.z > CONFIG.fogFar) {
+        belt.fill(tramoFor(this.runDistance + belt.group.position.z + CONFIG.beltLen / 2));
+      }
+    }
+    this.obelisco.visible = false;
+    this.scheduleObelisco();
+  }
+
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.buildSky(scene);
     this.buildLights(scene);
@@ -1523,7 +1543,7 @@ export class World {
     for (let i = 0; i < BELT_COUNT; i++) {
       const belt = new Belt(scene, assets, i);
       belt.group.position.z = -BELT_PHASE + i * CONFIG.beltLen;
-      belt.fill(tramoFor(this.D + belt.group.position.z + CONFIG.beltLen / 2));
+      belt.fill(tramoFor(this.runDistance + belt.group.position.z + CONFIG.beltLen / 2));
       this.belts.push(belt);
     }
 
@@ -2089,9 +2109,7 @@ export class World {
   // cannot drift, double up inside one Malecon, or be left behind when the
   // world has already run past it.
   private scheduleObelisco(): void {
-    const lap = CONFIG.tramoLengthM * TRAMO_ORDER.length;
-    const at = Math.floor(this.D / lap) * lap + CONFIG.obeliscoOffsetM;
-    this.nextObeliscoAt = at > this.D ? at : at + lap;
+    this.nextObeliscoAt = nextObeliscoAfter(this.runDistance);
   }
 
   // Test probe: which stretch of world each scenery belt covers and what it
@@ -2111,15 +2129,19 @@ export class World {
     return { visible: this.obelisco.visible, z: +this.obelisco.position.z.toFixed(1) };
   }
 
-  step(ds: number, dt: number): void {
+  // attract: the title screen keeps the Malecon scrolling for ambience, but
+  // the tour must not drift while nobody is riding, so the run origin moves
+  // with the odometer and runDistance holds still.
+  step(ds: number, dt: number, attract = false): void {
     this.D += ds;
+    if (attract) this.runOrigin += ds;
     this.t += dt;
     CURVE_U.dist.value = this.D;
     CURVE_U.off.value = curveOffset(this.D);
     CURVE_U.slope.value = curveSlope(this.D);
 
     // Which tramo is under the wheels; announce the border crossings
-    const tHere = tramoFor(this.D);
+    const tHere = tramoFor(this.runDistance);
     if (tHere !== this.tramoNow) {
       this.tramoNow = tHere;
       this.onTramoChange?.(tHere);
@@ -2167,7 +2189,7 @@ export class World {
       if (chunk.position.z < RECYCLE_Z) {
         chunk.position.z += CHUNK_COUNT * CHUNK_LEN;
         // dress the recycled chunk for the tramo it will sit in
-        chunk.material = this.roadMats[tramoFor(this.D + chunk.position.z)];
+        chunk.material = this.roadMats[tramoFor(this.runDistance + chunk.position.z)];
       }
     }
 
@@ -2175,7 +2197,7 @@ export class World {
       belt.group.position.z -= ds;
       if (belt.group.position.z < -(CONFIG.beltLen + 20)) {
         belt.group.position.z += CONFIG.beltLen * BELT_COUNT;
-        belt.fill(tramoFor(this.D + belt.group.position.z + CONFIG.beltLen / 2));
+        belt.fill(tramoFor(this.runDistance + belt.group.position.z + CONFIG.beltLen / 2));
       }
       // The belts keep frustumCulled off, because a manual bounding sphere
       // would have to be inflated for the bend field. One cheap z test still
@@ -2186,10 +2208,10 @@ export class World {
 
     // El Obelisco, every ~800 m, but it is a Malecon landmark: skip the
     // milestones that would land it in the Zona or out in el campo
-    if (!this.obelisco.visible && this.nextObeliscoAt - this.D < 190) {
+    if (!this.obelisco.visible && this.nextObeliscoAt - this.runDistance < 190) {
       this.obelisco.visible = true;
       this.obeliscoPassed = false;
-      this.obelisco.position.z = this.nextObeliscoAt - this.D;
+      this.obelisco.position.z = this.nextObeliscoAt - this.runDistance;
     }
     if (this.obelisco.visible) {
       this.obelisco.position.z -= ds;

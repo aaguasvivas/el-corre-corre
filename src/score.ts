@@ -4,6 +4,7 @@
 // (they stack), and the Civic adds its own +15%. Records persist per vehicle.
 
 import { CONFIG, VEHICLES, type VehicleId } from './config';
+import type { Tramo } from './tour';
 
 const LEGACY_RECORD = 'ecc.v1.record';
 const LEGACY_DIST = 'ecc.v1.recordDist';
@@ -19,6 +20,7 @@ export interface RunResult {
   record: number;
   isNewRecord: boolean;
   closeCall: number | null; // points short of the record, when tantalizingly close
+  tramo: Tramo; // how far into the country the run got
 }
 
 export interface NearMissResult {
@@ -91,6 +93,13 @@ export class Score {
 
   get isContraVia(): boolean {
     return this.contraVia;
+  }
+
+  // 1 right after a near-miss, 0 as the combo is about to drop. The HUD
+  // draws it so a vanishing combo never feels like a mystery.
+  get comboFraction(): number {
+    if (this.combo <= 0) return 0;
+    return Math.max(0, Math.min(1, this.comboTimer / CONFIG.comboDecaySec));
   }
 
   recordFor(v: VehicleId): number {
@@ -184,7 +193,7 @@ export class Score {
     return r;
   }
 
-  finishRun(): RunResult {
+  finishRun(tramo: Tramo): RunResult {
     const points = this.points;
     const isNewRecord = points > this.record;
     let closeCall: number | null = null;
@@ -209,6 +218,7 @@ export class Score {
       record: this.record,
       isNewRecord,
       closeCall,
+      tramo,
     };
   }
 

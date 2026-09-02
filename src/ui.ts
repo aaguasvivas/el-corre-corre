@@ -4,6 +4,7 @@
 
 import { VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type RunResult } from './score';
+import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
 
 type Lang = 'es' | 'en';
@@ -32,6 +33,9 @@ const STRINGS = {
     resume: 'Toca pa’ seguir',
     closeCall: (n: number) => `¡Te quedaste a ${n}!`,
     inVehicle: (v: string) => `en ${v} por el Malecón`,
+    inVehicleReached: (v: string, place: string) => `en ${v} hasta ${place}`,
+    reachedTramo: (place: string) => `Llegaste hasta ${place}`,
+    nextTramoIn: (place: string, m: number) => `${place} a ${m} m`,
     shareText: (n: number) => `${n} puntos por el Malecón.`,
     shareAsk: '¿Me puedes ganar?',
     ariaSound: 'Sonido',
@@ -73,6 +77,9 @@ const STRINGS = {
     resume: 'Tap to resume',
     closeCall: (n: number) => `Only ${n} short!`,
     inVehicle: (v: string) => `on ${v} down the Malecón`,
+    inVehicleReached: (v: string, place: string) => `on ${v} all the way to ${place}`,
+    reachedTramo: (place: string) => `You reached ${place}`,
+    nextTramoIn: (place: string, m: number) => `${place} ${m} m away`,
     shareText: (n: number) => `${n} points down the Malecón.`,
     shareAsk: 'Can you beat me?',
     ariaSound: 'Sound',
@@ -198,6 +205,7 @@ export class UI {
   private lastRecord = 0;
   private lastResult: RunResult | null = null;
   private comboShown = 0;
+  private comboBarShown = -1;
   private platShown = -1;
   private cvShown = false;
   private cabShown = false;
@@ -264,7 +272,7 @@ export class UI {
       <div id="vignette"></div>
       <div id="hud" class="hidden">
         <div id="hud-score">0</div>
-        <div id="hud-combo" class="hidden"></div>
+        <div id="hud-combo" class="hidden"><span id="combo-text"></span><i id="combo-bar"></i></div>
         <div id="hud-cv" class="hidden">¡EN CONTRA VÍA! ×2</div>
         <div id="hud-cab" class="hidden">¡CABALLITO! ×1.5</div>
         <div id="hud-record"></div>
@@ -303,6 +311,7 @@ export class UI {
           <div id="go-title" class="go-title"></div>
           <div id="go-new" class="badge hidden"></div>
           <div id="go-close" class="close-call hidden"></div>
+          <div id="go-tour" class="go-tour"></div>
           <div id="go-points-label" class="go-points-label"></div>
           <div id="go-points" class="go-points">0</div>
           <div class="go-rows">
@@ -610,6 +619,15 @@ export class UI {
     this.goBadge.classList.toggle('hidden', !r.isNewRecord);
     this.goClose.classList.toggle('hidden', r.closeCall === null);
     if (r.closeCall !== null) this.goClose.textContent = t.closeCall(r.closeCall);
+    // The tour's own close-call: how far you got, or how close the next
+    // stretch was. Runs that stayed home get a target, not a shrug.
+    const tour = document.getElementById('go-tour');
+    if (tour) {
+      tour.textContent =
+        r.tramo !== 'malecon'
+          ? t.reachedTramo(t.tramoNames[r.tramo])
+          : t.nextTramoIn(t.tramoNames[nextTramoAfter(r.distanceM)], Math.round(nextBorderIn(r.distanceM)));
+    }
     this.gameover.classList.remove('hidden');
     this.hud.classList.add('hidden');
     this.setContraVia(false);
@@ -637,10 +655,21 @@ export class UI {
       this.comboEl.classList.add('hidden');
       return;
     }
-    this.comboEl.textContent = tier ? `×${n} ${tier}` : `×${n}`;
+    const txt = this.comboEl.querySelector<HTMLElement>('#combo-text');
+    if (txt) txt.textContent = tier ? `×${n} ${tier}` : `×${n}`;
     this.comboEl.classList.remove('hidden', 'bump');
     void this.comboEl.offsetWidth;
     this.comboEl.classList.add('bump');
+  }
+
+  // The combo's remaining life as a shrinking bar under the pill. Written
+  // only when it moves a visible amount, so it costs nothing at 60 fps.
+  setComboFraction(f: number): void {
+    const q = Math.round(f * 40); // 2.5% steps
+    if (q === this.comboBarShown) return;
+    this.comboBarShown = q;
+    const bar = this.comboEl.querySelector<HTMLElement>('#combo-bar');
+    if (bar) bar.style.transform = `scaleX(${q / 40})`;
   }
 
   setPlatanos(n: number): void {
@@ -898,7 +927,8 @@ export class UI {
       '#002d62',
       8,
     );
-    stroked(t.inVehicle(veh.name), 540, 985, 52, '#fff3c4', '#002d62', 10);
+    const where = r.tramo !== 'malecon' ? t.inVehicleReached(veh.name, t.tramoNames[r.tramo]) : t.inVehicle(veh.name);
+    stroked(where, 540, 985, 52, '#fff3c4', '#002d62', 10);
     stroked(t.shareAsk, 540, 1160, 74, '#ffffff', '#ce1126', 12);
     stroked('EL CORRE CORRE', 540, 1300, 34, 'rgba(255,255,255,0.85)', '#0e7490', 6);
 

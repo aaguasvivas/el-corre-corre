@@ -224,7 +224,7 @@ export const CONFIG = {
     sedan: [9, 14],
     guagua: [8, 11],
     camion: [8, 10],
-    civic: [15, 17], // fast enough to be a rolling chicane, still slower than you
+    civic: [15, 17], // a rolling chicane; slower than you by civicUnlockSec (the ramp covers it, tested)
     motoconcho: [10, 14],
   },
   // FEEL: relative spawn weights for filler traffic
