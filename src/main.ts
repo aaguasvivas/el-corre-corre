@@ -87,6 +87,7 @@ let elapsed = 0;
 const stepCtx: StepCtx = {
   ds: 0, dt: 0, elapsed: 0, speed: 0, playerX: 0, playerY: 0, playerR: 0,
   playerCv: false, live: false, airborne: false, wheelie: false, magnet: false,
+  runDist: 0, shielded: false, cafecito: false,
 };
 const scoreOpts = { airborne: false, wheelie: false };
 let scrapeTimer = 0;
@@ -94,6 +95,8 @@ let hoyoTimer = 0;
 let crashRealT = 0;
 let gameOverAt = 0;
 let cafecitoT = 0;
+let cafGraceT = 0; // ghosted, blinking second after the cafecito ends
+let cafMult = 1; // eased cafecito speed factor: entry and exit glide instead of snapping
 let imanT = 0;
 let invincibleT = 0;
 let tapeBurst = false;
@@ -297,13 +300,22 @@ const traffic = new Traffic(scene, {
     haptics.medium();
   },
   onPolicia: () => {
-    player.launch(Math.max(3.2, currentEff * CONFIG.policiaLaunchVy));
+    const vy = Math.max(3.2, currentEff * CONFIG.policiaLaunchVy);
+    player.launch(vy);
+    // the plátano arc follows the jump the rider is actually taking
+    traffic.spawnJumpArc(player.x, currentEff, vy);
     audio.launch();
   },
   onCharco: () => {
     player.applyCharco();
     audio.splash();
   },
+  // El rebase telegraphs itself: the driver leans on the horn as it swings out.
+  onRebase: (x) => audio.horn(panOf(x), 1.0),
+  // A car stuck behind a slower rider honks instead of rear-ending them.
+  onHornBehind: (x) => audio.horn(panOf(x), 0.9),
+  onSetPiece: (kind) => ui.popupSetPiece(kind),
+  onEscalate: () => ui.popupEscalation(),
 });
 
 const player = new Player(scene, {
@@ -364,6 +376,8 @@ function resetRunState(): void {
   scrapeTimer = 0;
   hoyoTimer = 0;
   cafecitoT = 0;
+  cafGraceT = 0;
+  cafMult = 1;
   imanT = 0;
   invincibleT = 0;
   tapeBurst = false;
@@ -385,6 +399,7 @@ function startRun(): void {
   // because the world does not announce the start line.
   world.startRun();
   traffic.setTramo('malecon');
+  traffic.startRun(); // the opening: slow cars to pass and a plátano weave
   state = 'playing';
   ui.showPlaying(score.record);
   audio.startRun();
@@ -484,15 +499,26 @@ function stepSim(h: number): void {
   if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - h);
   if (cafecitoT > 0) {
     cafecitoT = Math.max(0, cafecitoT - h);
-    if (cafecitoT === 0) player.setGlow(false);
+    if (cafecitoT === 0) {
+      // The cafecito ends ghosted: a blinking grace second to get out of
+      // whatever you were plowing through, never a death on the last tick.
+      player.setGlow(false);
+      cafGraceT = CONFIG.cafecitoGraceSec;
+      player.setGraceBlink(true);
+    }
   }
+  if (cafGraceT > 0) {
+    cafGraceT = Math.max(0, cafGraceT - h);
+    if (cafGraceT === 0) player.setGraceBlink(false);
+  }
+  cafMult += ((cafecitoT > 0 ? CONFIG.cafecitoBoost : 1) - cafMult) * Math.min(1, (3 / CONFIG.cafecitoEaseSec) * h);
   if (imanT > 0) imanT = Math.max(0, imanT - h);
 
   const slow = Math.max(
     scrapeTimer > 0 ? CONFIG.scrapeSpeedLoss * (scrapeTimer / CONFIG.scrapeSlowSec) : 0,
     hoyoTimer > 0 ? CONFIG.potholeSpeedLoss * (hoyoTimer / CONFIG.hoyoRecoverSec) : 0,
   );
-  const effSpeed = speed * (1 - slow) * (cafecitoT > 0 ? CONFIG.cafecitoBoost : throttleMult);
+  const effSpeed = speed * (1 - slow) * Math.max(cafMult, throttleMult);
   currentEff = effSpeed;
   // Felt speed drives the FOV kick and the engine: a fondo pushes past 1.
   currentNorm = Math.max(0, Math.min(1.25, (effSpeed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
@@ -524,6 +550,9 @@ function stepSim(h: number): void {
   stepCtx.airborne = player.isAirborne;
   stepCtx.wheelie = player.clearsGroundHazards;
   stepCtx.magnet = imanT > 0;
+  stepCtx.runDist = score.distance + ds; // this tick's distance, so escalation lands with the multiplier
+  stepCtx.shielded = player.hasShield;
+  stepCtx.cafecito = cafecitoT > 0;
   traffic.step(stepCtx);
 
   if (live) {
@@ -544,7 +573,7 @@ function stepSim(h: number): void {
     }
 
     if (!testGod && traffic.checkCollision(player.x, 0, player.radius)) {
-      if (cafecitoT > 0 || invincibleT > 0) {
+      if (cafecitoT > 0 || cafGraceT > 0 || invincibleT > 0) {
         // el cafecito: plow right through
       } else if (player.hasShield) {
         player.useShield();
@@ -697,7 +726,7 @@ let testGod = false;
   cv: () => score.isContraVia,
   wheelie: () => player.isWheelie,
   airborne: () => player.isAirborne,
-  powerups: () => ({ cafecitoT, imanT, shielded: player.hasShield, invincibleT }),
+  powerups: () => ({ cafecitoT, cafGraceT, imanT, shielded: player.hasShield, invincibleT }),
   worldDist: () => Math.round(world.distance),
   runDist: () => Math.round(world.runDistance),
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
@@ -748,6 +777,20 @@ let testGod = false;
     traffic.debugSpawnObstacle(kind, x, z),
   spawnVehicle: (type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number) =>
     traffic.debugSpawnVehicle(type, lane, z, dir, exactX),
+  // Empty the road mid-run, so a scene can stage its own traffic.
+  clearTraffic: () => traffic.reset(),
+  // The next vehicle the rider will meet: its x and seconds until it arrives.
+  ahead: () => {
+    let best: { x: number; t: number } | null = null;
+    for (const v of traffic.vehicleViews) {
+      if (!v.active || v.z <= 0) continue;
+      const closing = currentEff - v.dir * v.speed;
+      if (closing <= 0.5) continue;
+      const t = v.z / closing;
+      if (!best || t < best.t) best = { x: v.x, t };
+    }
+    return best;
+  },
   // Advances the sim deterministically (used by automated checks when the
   // pane is hidden and requestAnimationFrame is frozen). The camera chases
   // every 1/60 s step like frame() does, so a long tick frames the rider the

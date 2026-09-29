@@ -129,6 +129,7 @@ export class Player {
   // power-ups
   private shielded = false;
   private glowOn = false;
+  private graceBlink = false;
   private trailAcc = 0;
   private dustAcc = 0;
 
@@ -607,6 +608,12 @@ export class Player {
     this.emit('trail', 14, this.x, 0.9, 0, 4);
   }
 
+  // The grace second after the cafecito: the glow shell blinks.
+  setGraceBlink(on: boolean): void {
+    this.graceBlink = on;
+    if (!on) this.glowShell.visible = this.glowOn;
+  }
+
   setGlow(on: boolean): void {
     this.glowOn = on;
     this.glowShell.visible = on;
@@ -732,6 +739,9 @@ export class Player {
       }
       this.glowMat.opacity = 0.16 + 0.08 * (1 + Math.sin(this.time * 12)) * 0.5;
     }
+    if (this.graceBlink) {
+      this.glowShell.visible = Math.floor(this.time * CONFIG.cafecitoBlinkHz * 2) % 2 === 0;
+    }
     if (this.aura.visible) {
       this.aura.rotation.z += dt * 1.5;
       this.aura.position.y = 0.5 + Math.sin(this.time * 4) * 0.08;
@@ -818,6 +828,7 @@ export class Player {
     this.spinZ = (Math.random() - 0.5) * 6;
     this.wheelieActive = false;
     this.airborne = false;
+    this.setGraceBlink(false);
     this.setGlow(false);
     this.stars.visible = true;
   }
@@ -878,6 +889,7 @@ export class Player {
     this.charcoT = 0;
     this.dustAcc = 0;
     this.setShield(false);
+    this.setGraceBlink(false);
     this.setGlow(false);
     this.stars.visible = false;
     this.root.position.set(START_X, 0, 0);

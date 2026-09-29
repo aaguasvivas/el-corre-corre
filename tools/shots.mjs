@@ -28,7 +28,7 @@
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
 import { inflateSync } from 'node:zlib';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -214,6 +214,46 @@ function helpers(page, vp) {
         step,
       ),
 
+    // Ride a real dodge chain at real-time pace: sit on the next car's line,
+    // then step out of it at the last moment (a near-miss must be a dodge).
+    // onLine and dodge map the next car's x to the rider's two targets.
+    // Steers with the keyboard, so no finger is left on the screen.
+    dodgeChain: async (onLine, dodge, maxSec, until) => {
+      const t0 = Date.now();
+      const step = 1 / 30;
+      let done = false;
+      for (let t = 0; t < maxSec - 1e-9 && !done; t += step) {
+        done = await page.evaluate(
+          (onSrc, dodgeSrc, untilSrc, st) => {
+            const e = window.__ecc;
+            const a = e.ahead();
+            const x = e.x();
+            let target = x;
+            if (a) target = new Function('ax', `return (${a.t < 0.42 ? dodgeSrc : onSrc});`)(a.x);
+            const want = target > x + 0.08 ? 'KeyA' : target < x - 0.08 ? 'KeyD' : null;
+            if (want !== window.__shotKey) {
+              if (window.__shotKey) window.dispatchEvent(new KeyboardEvent('keyup', { code: window.__shotKey }));
+              if (want) window.dispatchEvent(new KeyboardEvent('keydown', { code: want }));
+              window.__shotKey = want;
+            }
+            e.tick(st);
+            return new Function('e', `return (${untilSrc});`)(e);
+          },
+          onLine,
+          dodge,
+          until,
+          step,
+        );
+        const wait = t0 + (t + step) * 1000 - Date.now();
+        if (wait > 0) await sleep(wait);
+      }
+      await page.evaluate(() => {
+        if (window.__shotKey) window.dispatchEvent(new KeyboardEvent('keyup', { code: window.__shotKey }));
+        window.__shotKey = null;
+      });
+      return done;
+    },
+
     // Drag a finger sideways until the rider sits at world x (a feedback
     // loop, so the pixel-to-metre guess only has to be close).
     steerTo: async (targetX) => {
@@ -265,8 +305,9 @@ const SCENES = [
     run: async (s) => {
       await s.start();
       await s.tick(3);
-      // The spawner holds big vehicles and oncoming traffic back for the
-      // first seconds of a run, so the street is placed by hand here.
+      // The street is placed by hand on an emptied road, so the shot keeps
+      // the same composition whatever the opening seeds.
+      await s.ecc('clearTraffic');
       await s.spawn('guagua', 0, 36, 1);
       await s.spawn('sedan', 1, 62, 1);
       await s.spawn('sedan', 2, 80, -1);
@@ -289,27 +330,22 @@ const SCENES = [
   },
   {
     id: 'nearmiss',
-    what: 'Near-miss chain hugging the center line, up to the combo 5 ladder popup',
+    what: 'Near-miss chain: dodging a string of oncoming cars, up to the combo 5 ladder popup',
     settle: 120,
     run: async (s) => {
       await s.start();
       await s.tick(1.5);
-      // your side, just short of contra via; oncoming traffic whips past on
-      // the near oncoming lane (same-direction traffic closes too slowly and
-      // the spawner spaces a lane 20 m+ apart, so it cannot chain 5). Each x
-      // puts its vehicle inside nearMissRadius of a rider at -0.4 +- 0.15:
-      // the motoconcho is so narrow that at the lane center it would pass
-      // just outside the radius and break the chain.
-      await s.steerTo(-0.4);
-      const cars = [
-        ['sedan', 1.7],
-        ['guagua', 1.8],
-        ['motoconcho', 1.4],
-        ['sedan', 1.7],
-        ['camion', 1.8],
-      ];
-      for (let i = 0; i < cars.length; i++) await s.spawn(cars[i][0], 2, 20 + i * 24, -1, cars[i][1]);
-      if (!(await s.play(7, 'e.combo() >= 5'))) throw new Error('combo 5 never reached');
+      await s.ecc('clearTraffic');
+      await s.steerTo(2.3);
+      // Oncoming cars alternating the two contra via lanes, 24 m apart. A
+      // near-miss has to be a dodge: sit on each car's line, step out late.
+      for (let i = 0; i < 6; i++) {
+        const lane = i % 2 ? 3 : 2;
+        await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, 30 + i * 24, -1, lane === 2 ? 1.7 : 5.1);
+      }
+      const onLine = 'ax < 3.4 ? ax + 0.6 : ax - 0.6';
+      const dodge = 'ax < 3.4 ? ax + 1.8 : ax - 1.8';
+      if (!(await s.dodgeChain(onLine, dodge, 8, 'e.combo() >= 5'))) throw new Error('combo 5 never reached');
     },
   },
   {
@@ -393,6 +429,7 @@ const SCENES = [
     run: async (s) => {
       await s.start(false);
       await s.tick(2);
+      await s.ecc('clearTraffic');
       // Clip the rear corner of a slower car: a dead-center rear-end buries
       // the bike in the trunk, a corner hit leaves the tumble in the open.
       await s.spawn('sedan', 1, 7, 1, (await s.ecc('x')) + 1.2);
@@ -410,8 +447,15 @@ const SCENES = [
       await s.rideTo(400);
       await s.unghost();
       await s.ecc('god', false);
-      await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
-      if (!(await s.play(5, "e.state() === 'crashing'"))) throw new Error('no crash');
+      await s.ecc('clearTraffic');
+      // Every run hands out a Bendición around 14 s, so the first car may
+      // only take the shield: keep sending one until the rider goes down.
+      let crashed = false;
+      for (let i = 0; i < 3 && !crashed; i++) {
+        await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+        crashed = await s.play(2.5, "e.state() === 'crashing'");
+      }
+      if (!crashed) throw new Error('no crash');
       if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
     },
   },
@@ -436,13 +480,16 @@ const SCENES = [
     run: async (s) => {
       await s.start();
       await s.tick(2);
-      await s.steerTo(3.4);
-      const zs = [18, 30, 42, 54, 66];
+      await s.ecc('clearTraffic');
+      await s.steerTo(2.3);
+      const zs = [30, 54, 78, 102, 126, 150];
       for (let i = 0; i < zs.length; i++) {
         const lane = i % 2 ? 3 : 2;
         await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, zs[i], -1, lane === 2 ? 1.7 : 5.1);
       }
-      if (!(await s.play(5, 'e.combo() >= 5'))) throw new Error('combo 5 never reached');
+      const onLine = 'ax < 3.4 ? ax + 0.6 : ax - 0.6';
+      const dodge = 'ax < 3.4 ? ax + 1.8 : ax - 1.8';
+      if (!(await s.dodgeChain(onLine, dodge, 8, 'e.combo() >= 5'))) throw new Error('combo 5 never reached');
     },
   },
   {
@@ -656,7 +703,14 @@ async function main() {
     root: ROOT,
     logLevel: 'warn',
     clearScreen: false,
-    server: { port: 5199, strictPort: false, hmr: false },
+    // node_modules may be a symlink (a worktree sharing the main
+    // checkout's install); its real path must be servable for the font.
+    server: {
+      port: 5199,
+      strictPort: false,
+      hmr: false,
+      fs: { allow: [ROOT, realpathSync(resolve(ROOT, 'node_modules'))] },
+    },
   });
   let browser;
   let failures = 0;
