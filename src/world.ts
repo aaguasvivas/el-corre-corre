@@ -32,7 +32,7 @@ const TAPE_POST_X = 8.7; // the arch stands on the curbs, clear of every lane
 // every canvas sign in the world. Canvas text drawn before the face has
 // loaded silently falls back to a system font, so anything that draws text
 // draws once now and again when the font is in.
-const SIGN_FONT = "'Lilita One', 'Arial Black', sans-serif";
+export const SIGN_FONT = "'Lilita One', 'Arial Black', sans-serif";
 const fontRedraws: Array<() => void> = [];
 let signFontReady = false;
 function whenSignFontReady(redraw: () => void): void {
@@ -290,6 +290,8 @@ export function toonMaterial(color: number): THREE.MeshToonMaterial {
   return m;
 }
 
+// A one-line text texture. Pass a font built on SIGN_FONT to letter it in the
+// game's display face; it redraws itself once that face has loaded.
 export function textTexture(
   text: string,
   w: number,
@@ -302,15 +304,20 @@ export function textTexture(
   c.width = w;
   c.height = h;
   const g = c.getContext('2d')!;
-  g.fillStyle = bg;
-  g.fillRect(0, 0, w, h);
-  g.fillStyle = fg;
-  g.font = font;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, w / 2, h / 2 + 1);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  const draw = (): void => {
+    g.fillStyle = bg;
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = fg;
+    g.font = font;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, w / 2, h / 2 + 1);
+    tex.needsUpdate = true;
+  };
+  draw();
+  whenSignFontReady(draw);
   return tex;
 }
 
@@ -428,79 +435,159 @@ interface Atlas {
   rects: Record<string, AtlasRect>;
 }
 
+// In-world signage is hand-painted Dominican street lettering: it stays
+// Spanish in EN mode, like the colmado names. Every business is fictional.
+const COLMADO_NAMES = ['LA FE', 'EL PROGRESO', 'DOÑA TATICA'];
+const STOREFRONTS: Array<{ top: string; name: string; bg: string; ink: string; big: string; edge: string; cross?: boolean }> = [
+  { top: 'BANCA DE LOTERÍA', name: 'LA SUERTE', bg: '#f4c430', ink: '#002d62', big: '#ce1126', edge: '#002d62' },
+  { top: 'SE VENDE', name: 'EMPANADA', bg: '#fffaf0', ink: '#ce1126', big: '#002d62', edge: '#e63946' },
+  { top: 'FARMACIA', name: 'SAN JOSÉ', bg: '#ffffff', ink: '#1b7a3a', big: '#1b7a3a', edge: '#1b7a3a', cross: true },
+  { top: 'REPUESTOS', name: 'EL PRIMO', bg: '#1e3a66', ink: '#ffffff', big: '#f4c430', edge: '#f4c430' },
+];
+// Awnings in the colmado and shop colors; blue, white and red never touch.
+const AWNINGS = ['#0f7a3d', hex(PALETTE.colmadoRed), '#2b7bb9', '#f4c430'];
+// Flat swatches for anything painted from the atlas without its own art:
+// poles, pennants, laundry.
+const SWATCHES: Record<string, string> = {
+  white: '#ffffff',
+  gray: '#8d8d8d',
+  red: '#e63946',
+  yellow: '#f4c430',
+  teal: '#2a9d8f',
+  lilac: '#cdb4db',
+  peach: '#ffd3b6',
+  sky: '#b3d9ff',
+  wood: '#6e5d4e',
+  wire: '#1f1b19',
+};
+// Pasacalles: the cloth banners strung across Dominican streets. Fictional,
+// no brands, no politicians.
+const PASACALLES = [
+  '¡FELICIDADES, PROMOCIÓN 2026!',
+  'SE VENDE ESTE SOLAR',
+  'FIESTAS PATRONALES: ¡TODOS INVITADOS!',
+  '¡DALE, QUE VAMO’ TARDE!',
+];
+
 function buildAtlas(): Atlas {
-  const S = 512;
+  const W = 1024;
+  const H = 512;
   const c = document.createElement('canvas');
-  c.width = S;
-  c.height = S;
+  c.width = W;
+  c.height = H;
   const g = c.getContext('2d')!;
-  g.clearRect(0, 0, S, S);
   const rects: Record<string, AtlasRect> = {};
   const put = (name: string, x: number, y: number, w: number, h: number): void => {
-    rects[name] = { u0: x / S, v0: 1 - (y + h) / S, u1: (x + w) / S, v1: 1 - y / S };
+    rects[name] = { u0: x / W, v0: 1 - (y + h) / H, u1: (x + w) / W, v1: 1 - y / H };
   };
-
-  const signNames = ['LA FE', 'EL PROGRESO', 'DOÑA TATICA'];
-  signNames.forEach((name, i) => {
-    const x = 8;
-    const y = 8 + i * 60;
-    g.fillStyle = hex(PALETTE.sunGlow);
-    g.fillRect(x, y, 300, 52);
-    g.strokeStyle = hex(PALETTE.colmadoRed);
-    g.lineWidth = 5;
-    g.strokeRect(x + 3, y + 3, 294, 46);
-    g.fillStyle = hex(PALETTE.flagBlue);
-    g.font = 'bold 15px sans-serif';
+  const two = (x: number, y: number, top: string, name: string, ink: string, big: string): void => {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('COLMADO', x + 150, y + 14);
-    g.fillStyle = hex(PALETTE.colmadoRed);
-    g.font = 'bold 25px sans-serif';
+    g.fillStyle = ink;
+    g.font = `15px ${SIGN_FONT}`;
+    g.fillText(top, x + 150, y + 14);
+    g.fillStyle = big;
+    g.font = `26px ${SIGN_FONT}`;
     g.fillText(name, x + 150, y + 35);
-    put(`sign${i}`, x, y, 300, 52);
-  });
-
-  const stripes = (x: number, y: number, color: string): void => {
-    g.fillStyle = '#ffffff';
-    g.fillRect(x, y, 300, 48);
-    g.fillStyle = color;
-    for (let i = 0; i < 10; i += 2) g.fillRect(x + i * 30, y, 30, 48);
   };
-  stripes(8, 196, '#0f7a3d'); // presidente-green, no branding
-  put('awningA', 8, 196, 300, 48);
-  stripes(8, 252, hex(PALETTE.colmadoRed));
-  put('awningB', 8, 252, 300, 48);
 
-  g.fillStyle = '#2e7d32';
-  g.fillRect(8, 310, 300, 44);
-  g.strokeStyle = '#ffffff';
-  g.lineWidth = 3;
-  g.strokeRect(11, 313, 294, 38);
-  g.fillStyle = '#ffffff';
-  g.font = 'bold 21px sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('Av. George Washington', 158, 333);
-  put('street', 8, 310, 300, 44);
+  const draw = (): void => {
+    g.clearRect(0, 0, W, H);
+    COLMADO_NAMES.forEach((name, i) => {
+      const x = 8;
+      const y = 8 + i * 60;
+      g.fillStyle = hex(PALETTE.sunGlow);
+      g.fillRect(x, y, 300, 52);
+      g.strokeStyle = hex(PALETTE.colmadoRed);
+      g.lineWidth = 5;
+      g.strokeRect(x + 3, y + 3, 294, 46);
+      two(x, y, 'COLMADO', name, hex(PALETTE.flagBlue), hex(PALETTE.colmadoRed));
+      put(`sign${i}`, x, y, 300, 52);
+    });
+    STOREFRONTS.forEach((s, i) => {
+      const x = 320;
+      const y = 8 + i * 60;
+      g.fillStyle = s.bg;
+      g.fillRect(x, y, 300, 52);
+      g.strokeStyle = s.edge;
+      g.lineWidth = 4;
+      g.strokeRect(x + 3, y + 3, 294, 46);
+      if (s.cross) {
+        g.fillStyle = s.big;
+        g.fillRect(x + 22, y + 14, 8, 24);
+        g.fillRect(x + 14, y + 22, 24, 8);
+        g.fillRect(x + 262, y + 14, 8, 24);
+        g.fillRect(x + 254, y + 22, 24, 8);
+      }
+      two(x, y, s.top, s.name, s.ink, s.big);
+      put(`sign${COLMADO_NAMES.length + i}`, x, y, 300, 52);
+    });
 
-  // La bandera, escudo and all (see flag.ts for why the escudo is not optional)
-  const fx = 340;
-  const fy = 8;
-  const fw = 160;
-  const fh = fw / FLAG_ASPECT;
-  drawDominicanFlag(g, fx, fy, fw);
-  put('flag', fx, fy, fw, fh);
+    AWNINGS.forEach((color, i) => {
+      const x = i < 2 ? 8 : 320;
+      const y = i < 2 ? 196 + i * 56 : 256 + (i - 2) * 56;
+      g.fillStyle = '#ffffff';
+      g.fillRect(x, y, 300, 48);
+      g.fillStyle = color;
+      for (let k = 0; k < 10; k += 2) g.fillRect(x + k * 30, y, 30, 48);
+      put(`awning${i}`, x, y, 300, 48);
+    });
 
-  g.fillStyle = '#ffffff';
-  g.fillRect(430, 130, 24, 24);
-  put('white', 434, 134, 16, 16);
-  g.fillStyle = '#8d8d8d';
-  g.fillRect(430, 170, 24, 24);
-  put('gray', 434, 174, 16, 16);
+    g.fillStyle = '#2e7d32';
+    g.fillRect(8, 310, 300, 44);
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 3;
+    g.strokeRect(11, 313, 294, 38);
+    g.fillStyle = '#ffffff';
+    g.font = `22px ${SIGN_FONT}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('Av. George Washington', 158, 333);
+    put('street', 8, 310, 300, 44);
 
+    // La bandera, escudo and all (see flag.ts for why the escudo is not optional)
+    const fw = 160;
+    drawDominicanFlag(g, 640, 8, fw);
+    put('flag', 640, 8, fw, fw / FLAG_ASPECT);
+
+    Object.entries(SWATCHES).forEach(([name, color], i) => {
+      const x = 820 + (i % 8) * 24;
+      const y = 8 + Math.floor(i / 8) * 24;
+      g.fillStyle = color;
+      g.fillRect(x, y, 24, 24);
+      put(name, x + 4, y + 4, 16, 16);
+    });
+
+    PASACALLES.forEach((text, i) => {
+      const x = 640;
+      const y = 120 + i * 54;
+      g.fillStyle = i % 2 ? '#fffaf0' : '#f4c430';
+      g.fillRect(x, y, 376, 48);
+      g.fillStyle = i % 2 ? '#e63946' : '#2a9d8f';
+      g.fillRect(x, y, 376, 5);
+      g.fillRect(x, y + 43, 376, 5);
+      g.fillStyle = i % 2 ? '#002d62' : '#ce1126';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      let size = 28;
+      g.font = `${size}px ${SIGN_FONT}`;
+      const tw = g.measureText(text).width;
+      if (tw > 350) {
+        size = Math.floor((size * 350) / tw);
+        g.font = `${size}px ${SIGN_FONT}`;
+      }
+      g.fillText(text, x + 188, y + 25);
+      put(`pasacalle${i}`, x, y, 376, 48);
+    });
+  };
+  draw();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  whenSignFontReady(() => {
+    draw();
+    tex.needsUpdate = true;
+  });
   return { tex, rects };
 }
 
@@ -532,6 +619,7 @@ const WINDOW = 0x22333d;
 interface Sized {
   geo: THREE.BufferGeometry;
   width: number;
+  shopZ?: number; // one-storey fronts: where the door is, for a shop sign above it
 }
 
 function makeFacade(width: number, floors: number, cols: number, balcony: boolean): Sized {
@@ -542,11 +630,13 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
   cbox(parts, depth + 0.35, 0.4, width + 0.35, 0, H + 0.15, 0, TRIM);
   const fx = depth / 2 + 0.05;
   const span = width - 2.2;
+  let doorZ = 0;
   for (let f = 0; f < floors; f++) {
     const wy = f === 0 ? 1.9 : 5.6;
     for (let i = 0; i < cols; i++) {
       const wz = -span / 2 + (span / (cols - 1)) * i;
       if (f === 0 && i === Math.floor(cols / 2)) {
+        doorZ = wz;
         cbox(parts, 0.14, 2.3, 1.15, fx, 1.15, wz, 0x53616b); // la puerta
         cbox(parts, 0.2, 0.16, 1.45, fx, 2.4, wz, TRIM);
       } else {
@@ -577,7 +667,7 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
     cbox(parts, 0.04, 0.04, 0.7, 1.4, roofY + 2.05, az, 0x2a2624);
     cbox(parts, 0.04, 0.04, 0.5, 1.75, roofY + 1.7, az, 0x2a2624);
   }
-  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
+  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width, shopZ: floors === 1 ? doorZ : undefined };
 }
 
 function makeColmadoBody(width: number): Sized {
@@ -705,16 +795,52 @@ function makeFritura(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-function makeSignSet(rects: Record<string, AtlasRect>, nameIdx: number): THREE.BufferGeometry {
+// Every shop front in a belt (colmados and storefronts alike) is one
+// instanced sign + awning. The geometry is mapped to the first sign and
+// awning in the atlas; each instance carries its own offsets to the sign and
+// awning it shows (aSignOff, aAwnOff), and aSel says which part a vertex
+// belongs to. One draw per belt for every sign on the street.
+function makeSignSet(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
   const depth = 6.5;
-  const sign = quadUV(3.5, 0.75, rects[`sign${nameIdx}`]);
+  const sign = quadUV(3.5, 0.75, rects.sign0);
   sign.rotateY(Math.PI / 2);
   sign.translate(depth / 2 + 0.08, 3.82, 0);
-  const awning = quadUV(4.6, 1.25, rects[nameIdx % 2 === 0 ? 'awningA' : 'awningB']);
+  const awning = quadUV(4.6, 1.25, rects.awning0);
   awning.rotateY(Math.PI / 2);
   awning.rotateZ(0.55);
   awning.translate(depth / 2 + 0.6, 2.62, 0);
-  return mergeGeometries([sign, awning])!;
+  const sel = (g: THREE.BufferGeometry, s: number, a: number): THREE.BufferGeometry => {
+    const n = g.getAttribute('position').count;
+    const arr = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      arr[i * 2] = s;
+      arr[i * 2 + 1] = a;
+    }
+    g.setAttribute('aSel', new THREE.BufferAttribute(arr, 2));
+    return g;
+  };
+  return mergeGeometries([sel(sign, 1, 0), sel(awning, 0, 1)])!;
+}
+
+const SIGN_VERT_PARS = /* glsl */ `
+attribute vec2 aSel;
+attribute vec2 aSignOff;
+attribute vec2 aAwnOff;
+`;
+
+function signMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+  return extendPatch(
+    worldMaterial(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })),
+    'signs',
+    (shader) => {
+      shader.vertexShader =
+        SIGN_VERT_PARS +
+        shader.vertexShader.replace(
+          '#include <uv_vertex>',
+          '#include <uv_vertex>\nvMapUv += aSel.x * aSignOff + aSel.y * aAwnOff;',
+        );
+    },
+  );
 }
 
 // A real palm reads as one smooth lean, not a staircase: the trunk is a chain
@@ -883,7 +1009,9 @@ interface BeltAssets {
   atlasMat: THREE.MeshBasicMaterial;
   facades: Sized[];
   colmados: Sized[];
-  signSets: THREE.BufferGeometry[];
+  signSet: THREE.BufferGeometry;
+  signMat: THREE.MeshBasicMaterial;
+  rects: Record<string, AtlasRect>;
   palms: THREE.BufferGeometry[];
   post: THREE.BufferGeometry;
   pole: THREE.BufferGeometry;
@@ -918,7 +1046,9 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
       makeFacade(11, 2, 3, true),
     ],
     colmados: [makeColmadoBody(8), makeColmadoBody(10)],
-    signSets: [0, 1, 2].map((i) => makeSignSet(atlas.rects, i)),
+    signSet: makeSignSet(atlas.rects),
+    signMat: signMaterial(atlas.tex),
+    rects: atlas.rects,
     palms: [makePalm(0.55), makePalm(-0.3)],
     post: makeSeawallPost(),
     pole: makePowerPole(),
@@ -965,6 +1095,9 @@ const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0xffffff, 0xa8c6a1, 0xf2d0a4];
 
 const PASTELS = PALETTE.buildingPastels;
 const COLMADO_TINTS = [PALETTE.colmadoTeal, PALETTE.colmadoRed, 0xf4c430, 0xffffff];
+const SIGN_CAP = 8; // shop fronts per belt: two colmados and the storefronts
+// banca: yellow, empanadas: red, farmacia: blue, repuestos: green
+const STOREFRONT_AWNING = [3, 1, 2, 0];
 
 const _dummy = new THREE.Object3D();
 const _color = new THREE.Color();
@@ -974,7 +1107,9 @@ class Belt {
   tramo: Tramo = 'malecon'; // what this belt was last dressed as (test probe)
   private facadeIMs: THREE.InstancedMesh[] = [];
   private colmadoIMs: THREE.InstancedMesh[] = [];
-  private signIMs: THREE.InstancedMesh[] = [];
+  private signIM: THREE.InstancedMesh;
+  private signOff: THREE.InstancedBufferAttribute;
+  private awnOff: THREE.InstancedBufferAttribute;
   private palmIMs: THREE.InstancedMesh[] = [];
   private postIM: THREE.InstancedMesh;
   private poleIM: THREE.InstancedMesh;
@@ -1012,7 +1147,14 @@ class Belt {
     };
     for (const f of assets.facades) this.facadeIMs.push(im(f.geo, assets.vcMat, 4));
     for (const cB of assets.colmados) this.colmadoIMs.push(im(cB.geo, assets.vcMat, 2));
-    for (const s of assets.signSets) this.signIMs.push(im(s, assets.atlasMat, 2));
+    const signGeo = assets.signSet.clone();
+    this.signOff = new THREE.InstancedBufferAttribute(new Float32Array(SIGN_CAP * 2), 2);
+    this.awnOff = new THREE.InstancedBufferAttribute(new Float32Array(SIGN_CAP * 2), 2);
+    this.signOff.setUsage(THREE.DynamicDrawUsage);
+    this.awnOff.setUsage(THREE.DynamicDrawUsage);
+    signGeo.setAttribute('aSignOff', this.signOff);
+    signGeo.setAttribute('aAwnOff', this.awnOff);
+    this.signIM = im(signGeo, assets.signMat, SIGN_CAP);
     for (const p of assets.palms) this.palmIMs.push(im(p, assets.vcMat, 8, true));
     this.postIM = im(assets.post, assets.vcMat, 21);
     this.poleIM = im(assets.pole, assets.vcMat, 5);
@@ -1061,9 +1203,9 @@ class Belt {
       ry = 0,
       scale = 1,
       tint?: number,
-    ): void => {
+    ): number => {
       const i = counts.get(mesh) ?? 0;
-      if (i >= (mesh.instanceMatrix.count as number)) return;
+      if (i >= (mesh.instanceMatrix.count as number)) return -1;
       _dummy.position.set(x, y, z);
       _dummy.rotation.set(0, ry, 0);
       _dummy.scale.setScalar(scale);
@@ -1072,6 +1214,17 @@ class Belt {
       if (tint !== undefined) mesh.setColorAt(i, _color.set(tint));
       else if (mesh.instanceColor) mesh.setColorAt(i, _color.set(0xffffff));
       counts.set(mesh, i + 1);
+      return i;
+    };
+    // A shop front: which sign and which awning this instance shows
+    const rects = this.assets.rects;
+    const shopSign = (z: number, sign: number, awning: number): void => {
+      const i = place(this.signIM, -12.3 - 3.25, 0, z);
+      if (i < 0) return;
+      const r = rects[`sign${sign}`];
+      const a = rects[`awning${awning}`];
+      this.signOff.setXY(i, r.u0 - rects.sign0.u0, r.v0 - rects.sign0.v0);
+      this.awnOff.setXY(i, a.u0 - rects.awning0.u0, a.v0 - rects.awning0.v0);
     };
 
     // Buildings along the far side, fronts flush at x = -12.3. Which buildings
@@ -1089,7 +1242,8 @@ class Belt {
           const z = cursor + v.width / 2;
           const tint = COLMADO_TINTS[Math.floor(Math.random() * COLMADO_TINTS.length)];
           place(this.colmadoIMs[vi], -12.3 - 3.25, 0, z, 0, 1, tint);
-          place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, z);
+          const name = this.signCursor % 3;
+          shopSign(z, name, name % 2);
           this.signCursor++;
           colmadosUsed++;
           cursor += v.width + rand(0.4, 2.4);
@@ -1100,6 +1254,12 @@ class Belt {
           const z = cursor + v.width / 2;
           place(this.facadeIMs[vi], -12.3 - 3.5, 0, z, 0, 1, PASTELS[pastelIdx % PASTELS.length]);
           pastelIdx++;
+          // most one-storey fronts are a business: la banca, the empanada
+          // window, the farmacia, the repuestos
+          if (v.shopZ !== undefined && Math.random() < 0.6) {
+            const shop = Math.floor(Math.random() * STOREFRONTS.length);
+            shopSign(z + v.shopZ, COLMADO_NAMES.length + shop, STOREFRONT_AWNING[shop]);
+          }
           cursor += v.width + rand(0, 2.2);
         }
       }
@@ -1113,7 +1273,8 @@ class Belt {
           const v = this.assets.colmados[vi];
           if (cursor + v.width > L - 2) break;
           place(this.colmadoIMs[vi], -12.3 - 3.25, 0, cursor + v.width / 2, 0, 1, 0xffffff);
-          place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, cursor + v.width / 2);
+          const name = this.signCursor % 3;
+          shopSign(cursor + v.width / 2, name, name % 2);
           this.signCursor++;
           colmadosUsed++;
           cursor += v.width + rand(0.2, 0.9);
@@ -1241,6 +1402,8 @@ class Belt {
       imMesh.instanceMatrix.needsUpdate = true;
       if (imMesh.instanceColor) imMesh.instanceColor.needsUpdate = true;
     }
+    this.signOff.needsUpdate = true;
+    this.awnOff.needsUpdate = true;
   }
 }
 
