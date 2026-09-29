@@ -1952,6 +1952,246 @@ function backdropCanvas(): HTMLCanvasElement {
 }
 
 // ---------------------------------------------------------------------------
+// Overhead spans: what crosses above a Dominican street. Pasacalles (cloth
+// banners on two poles), strings of fiesta banderitas, and in the Zona
+// laundry hung between the balconies. They fill the empty sky band and give
+// the fastest parallax on screen as they sweep over the rider. A handful of
+// spans leapfrog ahead of the rider as one InstancedMesh; each instance picks
+// its variant (the others' vertices collapse to a point) and, for a
+// pasacalle, which banner it flies. Everything sits above 6 m, clear of the
+// tallest guagua cargo, and none of it is collidable.
+// ---------------------------------------------------------------------------
+
+const OVERHEAD_COUNT = 6;
+const OV_PASACALLE = 0;
+const OV_BANDERITAS = 1;
+const OV_LAUNDRY = 2;
+const OV_NONE = -9;
+const OV_FAR_X = -11.7; // the far-side pole line
+const OV_SEA_X = 11.3; // between the flags and the sea rail
+const WORLD_TIME = { value: 0 };
+
+// Box segments along a sagging line between two points in the x-y plane.
+function sagLine(x0: number, y0: number, x1: number, y1: number, sag: number, segs: number, thick: number): THREE.BufferGeometry[] {
+  const out: THREE.BufferGeometry[] = [];
+  const at = (t: number): [number, number] => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - sag * 4 * t * (1 - t)];
+  for (let k = 0; k < segs; k++) {
+    const [ax, ay] = at(k / segs);
+    const [bx, by] = at((k + 1) / segs);
+    const len = Math.hypot(bx - ax, by - ay) + thick;
+    const b = new THREE.BoxGeometry(len, thick, thick);
+    b.rotateZ(Math.atan2(by - ay, bx - ax));
+    b.translate((ax + bx) / 2, (ay + by) / 2, 0);
+    out.push(b);
+  }
+  return out;
+}
+
+function overheadGeometry(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  // tag a part with its variant, whether it flies a banner, and how much of
+  // it the wind may move (by height: attachment points stay put)
+  const add = (g: THREE.BufferGeometry, variant: number, rect: AtlasRect, sway: 'none' | 'hang', ban = 0): void => {
+    if (rect !== rects.pasacalle0) uvFill(g, rect);
+    const pos = g.getAttribute('position') as THREE.BufferAttribute;
+    const n = pos.count;
+    let top = -Infinity;
+    let bottom = Infinity;
+    for (let i = 0; i < n; i++) {
+      top = Math.max(top, pos.getY(i));
+      bottom = Math.min(bottom, pos.getY(i));
+    }
+    const aVar = new Float32Array(n).fill(variant);
+    const aBan = new Float32Array(n).fill(ban);
+    const aSway = new Float32Array(n);
+    if (sway === 'hang') {
+      for (let i = 0; i < n; i++) aSway[i] = top > bottom ? (top - pos.getY(i)) / (top - bottom) : 0;
+    }
+    g.setAttribute('aVar', new THREE.BufferAttribute(aVar, 1));
+    g.setAttribute('aBan', new THREE.BufferAttribute(aBan, 1));
+    g.setAttribute('aSway', new THREE.BufferAttribute(aSway, 1));
+    parts.push(g);
+  };
+  const pole = (x: number, variant: number): void => {
+    const p = new THREE.BoxGeometry(0.16, 7.5, 0.16);
+    p.translate(x, 3.75, 0);
+    add(p, variant, rects.wood, 'none');
+  };
+
+  // Pasacalle: two poles, ropes to the banner's corners, the banner itself
+  pole(OV_FAR_X, OV_PASACALLE);
+  pole(OV_SEA_X, OV_PASACALLE);
+  for (const s of sagLine(OV_FAR_X, 7.3, -4.45, 7.1, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
+  for (const s of sagLine(4.05, 7.1, OV_SEA_X, 7.3, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
+  const banner = quadUV(8.5, 1.1, rects.pasacalle0);
+  banner.rotateY(Math.PI); // face the rider; the canvas's left stays screen left
+  banner.translate(-0.2, 6.55, 0);
+  add(banner, OV_PASACALLE, rects.pasacalle0, 'none', 1);
+
+  // Banderitas: two sagging strings of pennants. Blue, white and red never
+  // sit side by side, so a string can never read as a French tricolor.
+  pole(OV_FAR_X, OV_BANDERITAS);
+  pole(OV_SEA_X, OV_BANDERITAS);
+  const pennantColors = [rects.red, rects.yellow, rects.teal, rects.white, rects.lilac];
+  const strings: Array<[number, number, number, number]> = [
+    [7.2, 7.0, 0.8, 0],
+    [6.7, 6.6, 0.65, 1.4],
+  ];
+  let ci = 0;
+  for (const [y0, y1, sag, z] of strings) {
+    for (const s of sagLine(OV_FAR_X, y0, OV_SEA_X, y1, sag, 8, 0.035)) {
+      s.translate(0, 0, z);
+      add(s, OV_BANDERITAS, rects.wire, 'none');
+    }
+    const N = 18;
+    for (let k = 0; k < N; k++) {
+      const t = (k + 0.5) / N;
+      const x = OV_FAR_X + (OV_SEA_X - OV_FAR_X) * t;
+      const y = y0 + (y1 - y0) * t - sag * 4 * t * (1 - t);
+      const tri = sailGeometry([x - 0.19, y], [x + 0.19, y], [x, y - 0.44]);
+      tri.translate(0, 0, z);
+      add(tri, OV_BANDERITAS, pennantColors[ci++ % pennantColors.length], 'hang');
+    }
+  }
+
+  // Laundry across the Zona: tied to the balconies, no poles
+  const clothes = [rects.white, rects.sky, rects.peach, rects.yellow, rects.lilac, rects.red, rects.teal, rects.white];
+  for (const [y0, y1, sag, z] of [
+    [5.9, 5.7, 0.55, 0],
+    [6.5, 6.4, 0.45, 2.2],
+  ] as Array<[number, number, number, number]>) {
+    for (const s of sagLine(-12.3, y0, 12.3, y1, sag, 8, 0.045)) {
+      s.translate(0, 0, z);
+      add(s, OV_LAUNDRY, rects.wire, 'none');
+    }
+    // a sheet, a shirt with its sleeves out, a pair of pants: shapes that
+    // read as la ropa tendida and not as colored squares
+    const garment = (x: number, y: number, kind: number): THREE.BufferGeometry => {
+      const pieces: THREE.BufferGeometry[] = [];
+      const quad = (w: number, h: number, cx: number, cy: number): void => {
+        const q = new THREE.PlaneGeometry(w, h);
+        q.rotateY(Math.PI);
+        q.translate(cx, cy, 0);
+        pieces.push(q);
+      };
+      if (kind === 0) quad(0.95, 0.8, x, y - 0.42);
+      else if (kind === 1) {
+        quad(0.82, 0.18, x, y - 0.11); // shoulders and sleeves
+        quad(0.48, 0.5, x, y - 0.44);
+      } else {
+        quad(0.46, 0.14, x, y - 0.09); // waistband
+        quad(0.19, 0.62, x - 0.13, y - 0.46);
+        quad(0.19, 0.62, x + 0.13, y - 0.46);
+      }
+      return mergeGeometries(pieces)!;
+    };
+    for (let k = 0; k < 8; k++) {
+      const t = 0.12 + k * 0.105 + (z > 0 ? 0.04 : 0);
+      const x = -12.3 + 24.6 * t;
+      const y = y0 + (y1 - y0) * t - sag * 4 * t * (1 - t);
+      const g = garment(x, y - 0.02, (k + (z > 0 ? 1 : 0)) % 3);
+      g.translate(0, 0, z);
+      add(g, OV_LAUNDRY, clothes[(k + (z > 0 ? 3 : 0)) % clothes.length], 'hang');
+    }
+  }
+  return mergeGeometries(parts)!;
+}
+
+const OVERHEAD_PARS = /* glsl */ `
+uniform float uWorldTime;
+attribute float aVar;
+attribute float aBan;
+attribute float aSway;
+attribute float iVar;
+attribute vec2 iBan;
+`;
+
+class Overhead {
+  private im: THREE.InstancedMesh;
+  private iVar: THREE.InstancedBufferAttribute;
+  private iBan: THREE.InstancedBufferAttribute;
+  private z = new Float32Array(OVERHEAD_COUNT);
+  private rects: Record<string, AtlasRect>;
+
+  constructor(scene: THREE.Scene, atlas: Atlas) {
+    this.rects = atlas.rects;
+    const geo = overheadGeometry(atlas.rects);
+    this.iVar = new THREE.InstancedBufferAttribute(new Float32Array(OVERHEAD_COUNT), 1);
+    this.iBan = new THREE.InstancedBufferAttribute(new Float32Array(OVERHEAD_COUNT * 2), 2);
+    geo.setAttribute('iVar', this.iVar);
+    geo.setAttribute('iBan', this.iBan);
+    const mat = extendPatch(
+      worldMaterial(new THREE.MeshToonMaterial({ map: atlas.tex, gradientMap: getGradientMap() })),
+      'overhead',
+      (shader) => {
+        shader.uniforms.uWorldTime = WORLD_TIME;
+        shader.vertexShader =
+          OVERHEAD_PARS +
+          shader.vertexShader
+            .replace(
+              '#include <begin_vertex>',
+              `#include <begin_vertex>
+              transformed.z += sin( uWorldTime * 2.6 + position.x * 0.8 ) * 0.1 * aSway;
+              if ( abs( aVar - iVar ) > 0.5 ) transformed = vec3( 0.0 );`,
+            )
+            .replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv += aBan * iBan;');
+      },
+    );
+    this.im = new THREE.InstancedMesh(geo, mat, OVERHEAD_COUNT);
+    this.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    scene.add(this.im);
+    for (let i = 0; i < OVERHEAD_COUNT; i++) {
+      this.z[i] = 30 + i * 38;
+      this.dress(i, 'malecon');
+    }
+  }
+
+  private dress(i: number, tramo: Tramo): void {
+    const r = Math.random();
+    const v =
+      tramo === 'malecon'
+        ? r < 0.4 ? OV_PASACALLE : r < 0.75 ? OV_BANDERITAS : OV_NONE
+        : tramo === 'zona'
+          ? r < 0.65 ? OV_LAUNDRY : r < 0.9 ? OV_PASACALLE : OV_NONE
+          : r < 0.35 ? OV_BANDERITAS : OV_NONE; // el campo: the odd fiesta string
+    this.iVar.setX(i, v);
+    const b = this.rects[`pasacalle${Math.floor(Math.random() * PASACALLES.length)}`];
+    this.iBan.setXY(i, b.u0 - this.rects.pasacalle0.u0, b.v0 - this.rects.pasacalle0.v0);
+    this.iVar.needsUpdate = true;
+    this.iBan.needsUpdate = true;
+  }
+
+  // A new run starts at home: spans out in the fog re-dress with the belts.
+  redressBeyond(zMin: number, runDistance: number): void {
+    for (let i = 0; i < OVERHEAD_COUNT; i++) {
+      if (this.z[i] > zMin) this.dress(i, tramoFor(runDistance + this.z[i]));
+    }
+  }
+
+  // runDistance: where the run is, so a recycled span dresses for the tramo
+  // it will stand in. Leapfrogs ahead once it is behind the camera.
+  update(ds: number, runDistance: number): void {
+    let far = -Infinity;
+    for (let i = 0; i < OVERHEAD_COUNT; i++) far = Math.max(far, this.z[i]);
+    for (let i = 0; i < OVERHEAD_COUNT; i++) {
+      this.z[i] -= ds;
+      if (this.z[i] < -25) {
+        far += 34 + Math.random() * 18;
+        this.z[i] = far;
+        this.dress(i, tramoFor(runDistance + far));
+      }
+      _dummy.position.set(0, 0, this.z[i]);
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.set(1, 1, 1);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Wind motes: thin warm streaks in a tube around the rider that only show at
 // real speed and stretch with it, so a fondo reads as fast in the part of
 // the frame the road texture cannot fill. One instanced draw, only when on.
@@ -2041,6 +2281,7 @@ export class World {
   private belts: Belt[] = [];
   private viralata!: Viralata;
   private motes!: WindMotes;
+  private overhead!: Overhead;
   private chichiguas: Chichigua[] = [];
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
@@ -2111,6 +2352,7 @@ export class World {
     }
     this.obelisco.visible = false;
     this.scheduleObelisco();
+    this.overhead.redressBeyond(CONFIG.fogFar, this.runDistance);
   }
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
@@ -2138,6 +2380,7 @@ export class World {
     for (let i = 0; i < 3; i++) this.pelicans.push(new Pelican(scene));
     for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
     this.buildObelisco(scene, atlas);
+    this.overhead = new Overhead(scene, atlas);
   }
 
   private buildSky(scene: THREE.Scene): void {
@@ -2529,24 +2772,30 @@ export class World {
         g.stroke();
       });
     };
+    // A manhole is a flush iron plate: LIGHTER than the road with a dark
+    // seam, the reverse of a hoyo (a dark hole with a pale lip), so decor
+    // can never be mistaken for the hazard.
     const manhole = (xM: number, zM: number): void => {
       const cx = xM * pmx;
       const cy = zM * pmy;
       wrapped(cy, 0.5 * pmy, (dy) => {
         g.beginPath();
-        g.ellipse(cx, cy + dy, 0.47 * pmx, 0.47 * pmy, 0, 0, Math.PI * 2);
-        g.fillStyle = '#55504c';
-        g.fill();
-        g.beginPath();
         g.ellipse(cx, cy + dy, 0.4 * pmx, 0.4 * pmy, 0, 0, Math.PI * 2);
-        g.fillStyle = '#2a2624';
+        g.fillStyle = '#7d766f';
         g.fill();
-        g.strokeStyle = 'rgba(120,112,104,0.55)';
-        g.lineWidth = 1.5;
-        for (const k of [-0.2, 0, 0.2]) {
+        g.strokeStyle = '#241f1d';
+        g.lineWidth = 2;
+        g.stroke();
+        g.strokeStyle = 'rgba(36,31,29,0.45)';
+        g.lineWidth = 1.2;
+        for (const k of [-0.18, 0, 0.18]) {
           g.beginPath();
           g.moveTo(cx - 0.3 * pmx, cy + dy + k * pmy);
           g.lineTo(cx + 0.3 * pmx, cy + dy + k * pmy);
+          g.stroke();
+          g.beginPath();
+          g.moveTo(cx + k * pmx, cy + dy - 0.3 * pmy);
+          g.lineTo(cx + k * pmx, cy + dy + 0.3 * pmy);
           g.stroke();
         }
       });
@@ -3005,6 +3254,7 @@ export class World {
     this.D += ds;
     if (attract) this.runOrigin += ds;
     this.t += dt;
+    WORLD_TIME.value = this.t;
     if (dt > 0) this.lastSpeed = ds / dt;
     CURVE_U.dist.value = this.D;
     CURVE_U.off.value = curveOffset(this.D);
@@ -3115,6 +3365,7 @@ export class World {
 
     this.viralata.update(ds, dt);
     this.motes.update(ds, this.lastSpeed, !attract);
+    this.overhead.update(ds, this.runDistance);
     for (const k of this.chichiguas) k.update(ds, dt);
     for (const p of this.pelicans) p.update(ds, dt);
     const campoNow = this.tramoNow === 'campo';
