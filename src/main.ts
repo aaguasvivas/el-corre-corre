@@ -543,7 +543,7 @@ function stepSim(h: number): void {
       }
     }
 
-    if (traffic.checkCollision(player.x, 0, player.radius)) {
+    if (!testGod && traffic.checkCollision(player.x, 0, player.radius)) {
       if (cafecitoT > 0 || invincibleT > 0) {
         // el cafecito: plow right through
       } else if (player.hasShield) {
@@ -676,6 +676,10 @@ refreshPinturaUI();
 renderer.compile(scene, camera);
 requestAnimationFrame(frame);
 
+// Test rig only: lets a screenshot run ride for minutes (to reach La Zona and
+// El Campo) straight through traffic. Only __ecc.god() sets it.
+let testGod = false;
+
 // Test hook for automated checks; the game itself never reads this.
 (window as unknown as Record<string, unknown>).__ecc = {
   fps: () => Math.round(fpsAvg),
@@ -723,6 +727,12 @@ requestAnimationFrame(frame);
   crash: () => {
     if (state === 'playing') doCrash();
   },
+  god: (on: boolean) => {
+    testGod = on;
+  },
+  // Is any vehicle's hitbox within `margin` m of the rider's circle? Lets a
+  // god-mode screenshot wait out a car it is currently riding through.
+  touching: (margin: number) => traffic.checkCollision(player.x, 0, player.radius + margin),
   wheelieNow: () => {
     // hold-based now; tests should dispatch keydown Space instead
   },
@@ -739,15 +749,17 @@ requestAnimationFrame(frame);
   spawnVehicle: (type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number) =>
     traffic.debugSpawnVehicle(type, lane, z, dir, exactX),
   // Advances the sim deterministically (used by automated checks when the
-  // pane is hidden and requestAnimationFrame is frozen).
+  // pane is hidden and requestAnimationFrame is frozen). The camera chases
+  // every 1/60 s step like frame() does, so a long tick frames the rider the
+  // way a real run would instead of leaving the chase camera behind.
   tick: (sec: number) => {
     let remaining = sec;
     while (remaining > 0) {
       const step = Math.min(1 / 60, remaining);
       remaining -= step;
       advance(step, performance.now());
+      updateCamera(step);
     }
-    updateCamera(1 / 60);
     audio.update(1 / 60, audioCtxNow());
     if (state === 'playing' || state === 'crashing') syncHud();
     renderer.render(scene, camera);
