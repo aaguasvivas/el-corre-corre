@@ -23,6 +23,7 @@ import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 
 const CHUNK_LEN = 30;
 const CHUNK_COUNT = 7;
+const ROAD_SLICES = 5; // 30 m chunk / 6 m lane-dash period
 const RECYCLE_Z = -35;
 const CONFETTI_COUNT = 150;
 const TAPE_POST_X = 8.7; // the arch stands on the curbs, clear of every lane
@@ -1788,6 +1789,63 @@ function backdropCanvas(): HTMLCanvasElement {
 }
 
 // ---------------------------------------------------------------------------
+// Wind motes: thin warm streaks in a tube around the rider that only show at
+// real speed and stretch with it, so a fondo reads as fast in the part of
+// the frame the road texture cannot fill. One instanced draw, only when on.
+// ---------------------------------------------------------------------------
+
+const MOTE_COUNT = 40;
+const MOTE_FROM_MPS = 28; // start showing above this speed...
+const MOTE_FULL_MPS = 44; // ...fully visible here
+
+class WindMotes {
+  private im: THREE.InstancedMesh;
+  private mat: THREE.MeshBasicMaterial;
+  private px = new Float32Array(MOTE_COUNT);
+  private py = new Float32Array(MOTE_COUNT);
+  private pz = new Float32Array(MOTE_COUNT);
+
+  constructor(scene: THREE.Scene) {
+    this.mat = worldMaterial(
+      new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow, transparent: true, opacity: 0, depthWrite: false }),
+    );
+    this.im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.03, 1.2), this.mat, MOTE_COUNT);
+    this.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    this.im.visible = false;
+    for (let i = 0; i < MOTE_COUNT; i++) this.respawn(i, Math.random() * 42 - 1.5);
+    scene.add(this.im);
+  }
+
+  // A ring around the camera's line of sight, never in the rider's face
+  private respawn(i: number, z: number): void {
+    const a = Math.random() * Math.PI * 2;
+    const r = 1.8 + Math.random() * 4.5;
+    this.px[i] = Math.cos(a) * r;
+    this.py[i] = Math.max(0.25, 2.6 + Math.sin(a) * r * 0.6);
+    this.pz[i] = z;
+  }
+
+  update(ds: number, speed: number, live: boolean): void {
+    const k = live ? Math.min(1, Math.max(0, (speed - MOTE_FROM_MPS) / (MOTE_FULL_MPS - MOTE_FROM_MPS))) : 0;
+    this.mat.opacity += (k * 0.55 - this.mat.opacity) * 0.08;
+    this.im.visible = this.mat.opacity > 0.01;
+    if (!this.im.visible) return;
+    const stretch = 1 + speed * 0.05;
+    for (let i = 0; i < MOTE_COUNT; i++) {
+      this.pz[i] -= ds;
+      if (this.pz[i] < -1.5) this.respawn(i, 34 + Math.random() * 10); // gone before it fills the lens
+      _dummy.position.set(this.px[i], this.py[i], this.pz[i]);
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.set(1, 1, stretch);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 interface Confetto {
   im: THREE.InstancedMesh;
@@ -1819,6 +1877,7 @@ export class World {
   private confettiMeshes: THREE.InstancedMesh[] = [];
   private belts: Belt[] = [];
   private viralata!: Viralata;
+  private motes!: WindMotes;
   private chichiguas: Chichigua[] = [];
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
@@ -1832,7 +1891,8 @@ export class World {
   private shimmerA!: THREE.CanvasTexture;
   private shimmerB!: THREE.CanvasTexture;
   private glintMat!: THREE.MeshBasicMaterial;
-  private roadMats!: Record<Tramo, THREE.MeshToonMaterial>;
+  private roadMats!: Record<Tramo, THREE.MeshToonMaterial[]>;
+  private crosswalkMat!: THREE.MeshToonMaterial;
   // The water, and everything that sparkles on it, so el campo can turn it
   // into farmland instead of leaving the Caribbean parked next to a
   // plantain field.
@@ -1910,6 +1970,7 @@ export class World {
     }
 
     this.viralata = new Viralata(scene);
+    this.motes = new WindMotes(scene);
     this.chichiguas.push(new Chichigua(scene, PALETTE.flagRed), new Chichigua(scene, 0xf4c430));
     for (let i = 0; i < 3; i++) this.pelicans.push(new Pelican(scene));
     for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
@@ -2239,32 +2300,105 @@ export class World {
   }
 
   // One road texture per tramo, all built at boot: warm asphalt on the
-  // Malecon, cobble-toned stone in the Zona, faded patchy blacktop with dirt
-  // shoulders out in el campo. Chunks swap materials as they recycle, and all
-  // three share one shader program, so the swap costs nothing.
+  // Malecon, cobble-toned stone in the Zona, faded patchy blacktop with red
+  // dirt shoulders out in el campo, plus one Malecon variant with a zebra
+  // crossing. The textures tile along the road, so every chunk can show its
+  // own slice of one (see buildRoad) and the features never march past in
+  // lockstep. The features are sized to read at phone scale: manholes, patch
+  // outlines, cracks and tar seams streaming under the rider are most of
+  // what makes 40 m/s look like 40 m/s.
   private roadTexture(
     renderer: THREE.WebGLRenderer,
     base: number,
     shoulder: number,
     tramo: Tramo,
+    crosswalk = false,
   ): THREE.CanvasTexture {
     const c = document.createElement('canvas');
     c.width = 512;
     c.height = 1024;
+    const H = c.height;
     const g = c.getContext('2d')!;
     const pmx = c.width / ROAD.fullWidth;
-    const pmy = c.height / CHUNK_LEN;
+    const pmy = H / CHUNK_LEN;
+    const laneX = (lane: number): number => CONFIG.shoulderWidth + CONFIG.laneWidth * (lane + 0.5);
+    // Anything that may cross the top or bottom edge is drawn again one tile
+    // over, so the texture wraps without a seam.
+    const wrapped = (yPx: number, reachPx: number, draw: (dy: number) => void): void => {
+      draw(0);
+      if (yPx - reachPx < 0) draw(H);
+      if (yPx + reachPx > H) draw(-H);
+    };
+    // An irregular patch: a jittered hexagon with a darker hairline outline,
+    // so it reads as a repair in the road rather than a tiling glitch.
+    const patch = (xM: number, zM: number, wM: number, hM: number, fill: string, edge: string): void => {
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2 + Math.random() * 0.5;
+        const rx = (wM / 2) * (0.75 + Math.random() * 0.25);
+        const ry = (hM / 2) * (0.75 + Math.random() * 0.25);
+        pts.push([(xM + Math.cos(a) * rx) * pmx, (zM + Math.sin(a) * ry) * pmy]);
+      }
+      wrapped(zM * pmy, (hM / 2) * pmy, (dy) => {
+        g.beginPath();
+        for (const [px, py] of pts) g.lineTo(px, py + dy);
+        g.closePath();
+        g.fillStyle = fill;
+        g.fill();
+        g.strokeStyle = edge;
+        g.lineWidth = 1.2;
+        g.stroke();
+      });
+    };
+    const crack = (xM: number, zM: number, alpha: number): void => {
+      const pts: Array<[number, number]> = [[xM * pmx, zM * pmy]];
+      let a = Math.random() * Math.PI * 2;
+      for (let k = 0; k < 7; k++) {
+        a += (Math.random() - 0.5) * 1.3;
+        const [px, py] = pts[pts.length - 1];
+        pts.push([px + Math.cos(a) * 0.35 * pmx, py + Math.sin(a) * 0.35 * pmy]);
+      }
+      wrapped(zM * pmy, 3 * pmy, (dy) => {
+        g.beginPath();
+        for (const [px, py] of pts) g.lineTo(px, py + dy);
+        g.strokeStyle = `rgba(0,0,0,${alpha})`;
+        g.lineWidth = 1.5;
+        g.stroke();
+      });
+    };
+    const manhole = (xM: number, zM: number): void => {
+      const cx = xM * pmx;
+      const cy = zM * pmy;
+      wrapped(cy, 0.5 * pmy, (dy) => {
+        g.beginPath();
+        g.ellipse(cx, cy + dy, 0.47 * pmx, 0.47 * pmy, 0, 0, Math.PI * 2);
+        g.fillStyle = '#55504c';
+        g.fill();
+        g.beginPath();
+        g.ellipse(cx, cy + dy, 0.4 * pmx, 0.4 * pmy, 0, 0, Math.PI * 2);
+        g.fillStyle = '#2a2624';
+        g.fill();
+        g.strokeStyle = 'rgba(120,112,104,0.55)';
+        g.lineWidth = 1.5;
+        for (const k of [-0.2, 0, 0.2]) {
+          g.beginPath();
+          g.moveTo(cx - 0.3 * pmx, cy + dy + k * pmy);
+          g.lineTo(cx + 0.3 * pmx, cy + dy + k * pmy);
+          g.stroke();
+        }
+      });
+    };
 
     g.fillStyle = hex(base);
-    g.fillRect(0, 0, c.width, c.height);
+    g.fillRect(0, 0, c.width, H);
     g.fillStyle = hex(shoulder);
-    g.fillRect(0, 0, CONFIG.shoulderWidth * pmx, c.height);
-    g.fillRect(c.width - CONFIG.shoulderWidth * pmx, 0, CONFIG.shoulderWidth * pmx, c.height);
+    g.fillRect(0, 0, CONFIG.shoulderWidth * pmx, H);
+    g.fillRect(c.width - CONFIG.shoulderWidth * pmx, 0, CONFIG.shoulderWidth * pmx, H);
 
     for (let i = 0; i < 900; i++) {
       g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.06)';
       const s = 1 + Math.random() * 2.2;
-      g.fillRect(Math.random() * c.width, Math.random() * c.height, s, s);
+      g.fillRect(Math.random() * c.width, Math.random() * H, s, s);
     }
 
     if (tramo === 'zona') {
@@ -2278,17 +2412,43 @@ export class World {
           g.fillRect(col * cw + off + 1, row * ch + 1, cw - 2, ch - 2);
         }
       }
+      manhole(laneX(Math.floor(Math.random() * 4)), 4 + Math.random() * 22);
     } else if (tramo === 'campo') {
-      // patched blacktop: big faded blotches and a dusting near the shoulders
-      for (let i = 0; i < 26; i++) {
-        g.fillStyle = Math.random() < 0.5 ? 'rgba(217,199,167,0.08)' : 'rgba(0,0,0,0.1)';
-        const w = (1 + Math.random() * 3) * pmx;
-        const h = (1.5 + Math.random() * 4) * pmy;
-        g.fillRect(Math.random() * c.width, Math.random() * c.height, w, h);
+      // red dirt creeping onto the shoulders
+      g.fillStyle = 'rgba(215,122,97,0.35)';
+      g.fillRect(0, 0, CONFIG.shoulderWidth * pmx * 1.15, H);
+      g.fillRect(c.width - CONFIG.shoulderWidth * pmx * 1.15, 0, CONFIG.shoulderWidth * pmx * 1.15, H);
+      // patched blacktop: faded repairs with ragged edges, hairline cracks
+      for (let i = 0; i < 10; i++) {
+        const lighter = Math.random() < 0.5;
+        patch(
+          CONFIG.shoulderWidth + Math.random() * (ROAD.fullWidth - 2 * CONFIG.shoulderWidth),
+          Math.random() * CHUNK_LEN,
+          1.2 + Math.random() * 2.4,
+          1.6 + Math.random() * 3.6,
+          lighter ? 'rgba(217,199,167,0.1)' : 'rgba(0,0,0,0.13)',
+          'rgba(0,0,0,0.22)',
+        );
       }
-      g.fillStyle = 'rgba(217,199,167,0.22)';
-      g.fillRect(0, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
-      g.fillRect(c.width - CONFIG.shoulderWidth * pmx * 1.25, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
+      for (let i = 0; i < 7; i++) crack(2 + Math.random() * 12.8, Math.random() * CHUNK_LEN, 0.3);
+    } else {
+      // El Malecon: utility patches, cracks, one manhole, and transverse tar
+      // seams every 7.5 m, the small things that stream past the rider.
+      for (let i = 0; i < 4; i++) {
+        patch(laneX(Math.floor(Math.random() * 4)) + (Math.random() - 0.5) * 1.2, Math.random() * CHUNK_LEN,
+          1.4 + Math.random() * 1.6, 1.5 + Math.random() * 1.5, 'rgba(44,40,38,0.95)', 'rgba(0,0,0,0.38)');
+      }
+      for (let i = 0; i < 5; i++) crack(2 + Math.random() * 12.8, Math.random() * CHUNK_LEN, 0.25);
+      manhole(laneX(Math.floor(Math.random() * 4)), 4 + Math.random() * 22);
+      g.strokeStyle = 'rgba(0,0,0,0.25)';
+      g.lineWidth = 1.2;
+      for (let zM = 3.75; zM < CHUNK_LEN; zM += 7.5) {
+        const skew = (Math.random() - 0.5) * 6;
+        g.beginPath();
+        g.moveTo(CONFIG.shoulderWidth * pmx, zM * pmy - skew);
+        g.lineTo(c.width - CONFIG.shoulderWidth * pmx, zM * pmy + skew);
+        g.stroke();
+      }
     }
 
     // Tire wear: two soft dark tracks in every lane. Reads as a road that
@@ -2319,37 +2479,68 @@ export class World {
       }
     }
 
+    if (crosswalk) {
+      // el paso de peatones: six bars per direction, painted over the lines
+      g.fillStyle = hex(PALETTE.laneDash);
+      for (const half of [0, 1]) {
+        const x0 = CONFIG.shoulderWidth + half * ROAD.halfRoad + 0.4;
+        for (let k = 0; k < 6; k++) {
+          g.fillRect((x0 + k * 1.1) * pmx, 13 * pmy, 0.5 * pmx, 4 * pmy);
+        }
+      }
+    }
+
+    if (tramo !== 'campo') {
+      // the painted curb: 1 m red, 1 m white along both edges. At speed it
+      // strobes past, which sells the speed as much as anything on screen.
+      const w = 0.3 * pmx;
+      for (let zM = 0; zM < CHUNK_LEN; zM += 2) {
+        g.fillStyle = hex(PALETTE.colmadoRed);
+        g.fillRect(0, zM * pmy, w, pmy);
+        g.fillRect(c.width - w, zM * pmy, w, pmy);
+        g.fillStyle = '#f6f1e7';
+        g.fillRect(0, (zM + 1) * pmy, w, pmy);
+        g.fillRect(c.width - w, (zM + 1) * pmy, w, pmy);
+      }
+    }
+
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapT = THREE.RepeatWrapping; // chunks show different slices of it
     tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     return tex;
   }
 
+  // Each tramo's texture is shown through ROAD_SLICES materials, each looking
+  // at the tile from a different 6 m step (a lane-dash period, so the dashes
+  // never break). A recycled chunk picks one at random, so the manhole and
+  // the patches do not come round every 30 m like a metronome. The clones
+  // share their image, so this costs materials, not texture memory.
   private buildRoad(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
-    this.roadMats = {
-      malecon: worldMaterial(
-        new THREE.MeshToonMaterial({
-          map: this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon'),
-          gradientMap: getGradientMap(),
-        }),
-      ),
-      zona: worldMaterial(
-        new THREE.MeshToonMaterial({
-          map: this.roadTexture(renderer, 0x45414a, 0x4f4a50, 'zona'),
-          gradientMap: getGradientMap(),
-        }),
-      ),
-      campo: worldMaterial(
-        new THREE.MeshToonMaterial({
-          map: this.roadTexture(renderer, 0x4a443c, 0x5a4f42, 'campo'),
-          gradientMap: getGradientMap(),
-        }),
-      ),
+    const slices = (tex: THREE.CanvasTexture): THREE.MeshToonMaterial[] => {
+      const out: THREE.MeshToonMaterial[] = [];
+      for (let k = 0; k < ROAD_SLICES; k++) {
+        const t = k === 0 ? tex : tex.clone();
+        t.offset.y = k / ROAD_SLICES;
+        out.push(worldMaterial(new THREE.MeshToonMaterial({ map: t, gradientMap: getGradientMap() })));
+      }
+      return out;
     };
+    this.roadMats = {
+      malecon: slices(this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon')),
+      zona: slices(this.roadTexture(renderer, 0x45414a, 0x4f4a50, 'zona')),
+      campo: slices(this.roadTexture(renderer, 0x4a443c, 0x5a4f42, 'campo')),
+    };
+    this.crosswalkMat = worldMaterial(
+      new THREE.MeshToonMaterial({
+        map: this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon', true),
+        gradientMap: getGradientMap(),
+      }),
+    );
     const geo = new THREE.PlaneGeometry(ROAD.fullWidth, CHUNK_LEN, 1, 8);
     geo.rotateX(-Math.PI / 2);
     for (let i = 0; i < CHUNK_COUNT; i++) {
-      const chunk = new THREE.Mesh(geo, this.roadMats.malecon);
+      const chunk = new THREE.Mesh(geo, this.roadMats.malecon[i % ROAD_SLICES]);
       chunk.position.z = -CHUNK_LEN + i * CHUNK_LEN;
       chunk.receiveShadow = true;
       scene.add(chunk);
@@ -2716,8 +2907,14 @@ export class World {
       chunk.position.z -= ds;
       if (chunk.position.z < RECYCLE_Z) {
         chunk.position.z += CHUNK_COUNT * CHUNK_LEN;
-        // dress the recycled chunk for the tramo it will sit in
-        chunk.material = this.roadMats[tramoFor(this.runDistance + chunk.position.z)];
+        // dress the recycled chunk for the tramo it will sit in, with a
+        // random slice of that tramo's road; one Malecon chunk in five gets
+        // the zebra crossing
+        const tr = tramoFor(this.runDistance + chunk.position.z);
+        chunk.material =
+          tr === 'malecon' && Math.random() < 0.2
+            ? this.crosswalkMat
+            : this.roadMats[tr][Math.floor(Math.random() * ROAD_SLICES)];
       }
     }
 
@@ -2754,6 +2951,7 @@ export class World {
     }
 
     this.viralata.update(ds, dt);
+    this.motes.update(ds, this.lastSpeed, !attract);
     for (const k of this.chichiguas) k.update(ds, dt);
     for (const p of this.pelicans) p.update(ds, dt);
     const campoNow = this.tramoNow === 'campo';
