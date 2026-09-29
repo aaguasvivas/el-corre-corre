@@ -265,6 +265,7 @@ const traffic = new Traffic(scene, {
   onPlatano: (x, y, z) => {
     const pts = score.collectPlatano();
     ui.setPlatanos(score.platanos);
+    player.setRackCount(score.platanos);
     const s = w2s(x, y + 0.5, Math.max(z, 1));
     ui.popup(`+${pts}`, s.x, s.y, 'pop-sm pop-gold');
     audio.platano();

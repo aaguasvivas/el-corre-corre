@@ -322,6 +322,7 @@ export const CONFIG = {
   platanoPoints: 10,
   platanoRadius: 0.95, // FEEL: collection reach; generous feels better
   platanoYTolerance: 0.55, // arc platanos need a jump to grab
+  rackTiers: [10, 25, 50], // FEEL: platanos this run that stack each bunch tier on the ride's rack
   powerupEvery: [18, 30],
   powerupUnlockSec: 20,
   cafecitoSec: 5,

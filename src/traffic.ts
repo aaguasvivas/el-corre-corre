@@ -130,7 +130,7 @@ function cyl(rTop: number, rBot: number, h: number, x: number, y: number, z: num
 }
 
 function sph(r: number, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(r, 8, 6);
+  const g = new THREE.SphereGeometry(r, 7, 5);
   g.scale(sx, sy, sz);
   g.translate(x, y, z);
   return g;
@@ -411,7 +411,7 @@ function guaguaAssets(banner: THREE.Texture, parked: boolean): TypeAssets {
 // One plátano finger for the racimos: a torus arc that leaves the stalk
 // heading out and curls up.
 function finger(r: number, tube = 0.042, arc = 1.35): THREE.BufferGeometry {
-  const g = new THREE.TorusGeometry(r, tube, 3, 4, arc);
+  const g = new THREE.TorusGeometry(r, tube, 3, 3, arc);
   g.rotateZ(-Math.PI / 2);
   g.translate(0, r, 0);
   return g;
@@ -423,10 +423,10 @@ function racimo(x: number, y: number, z: number, rotY: number, tilt: number, var
   k.add(cyl(0.035, 0.05, 0.62, 0, 0.31, 0, 5), 0x6b5645);
   for (let ring = 0; ring < 3; ring++) {
     const green = (ring + variant) % 3 === 1 ? 0x8bc34a : PALETTE.platano;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       const f = finger(0.17 - ring * 0.015);
       f.translate(0.045, 0, 0);
-      f.rotateY((i / 5) * Math.PI * 2 + ring * 0.6 + variant);
+      f.rotateY((i / 4) * Math.PI * 2 + ring * 0.6 + variant);
       f.translate(0, 0.1 + ring * 0.16, 0);
       k.add(f, green);
     }
@@ -592,7 +592,7 @@ export function platanoFruit(): THREE.BufferGeometry {
   const R = 0.34;
   const TUBE = 0.1;
   const ARC = 1.85;
-  const fruit = new THREE.TorusGeometry(R, TUBE, 6, 10, ARC);
+  const fruit = new THREE.TorusGeometry(R, TUBE, 5, 9, ARC);
   const pos = fruit.getAttribute('position') as THREE.BufferAttribute;
   const col = new Float32Array(pos.count * 3);
   const green = new THREE.Color(PALETTE.platano);
@@ -842,6 +842,7 @@ export class Traffic {
       this.vehicles.length,
     );
     this.blobs.count = 0;
+    this.blobs.visible = false;
     this.blobs.frustumCulled = false;
     scene.add(this.blobs);
 
@@ -889,6 +890,7 @@ export class Traffic {
     }
     this.ramas = new THREE.InstancedMesh(ramaGeometry(), trafficMaterial(), 8);
     this.ramas.count = 0;
+    this.ramas.visible = false;
     this.ramas.frustumCulled = false;
     this.ramas.castShadow = true;
     scene.add(this.ramas);
@@ -978,6 +980,7 @@ export class Traffic {
     );
     for (const m of [this.platanoMesh, this.platanoRim]) {
       m.count = 0;
+      m.visible = false;
       m.frustumCulled = false;
       scene.add(m);
     }
@@ -1048,6 +1051,7 @@ export class Traffic {
       this.blobs.setMatrixAt(n++, _m4);
     }
     this.blobs.count = n;
+    this.blobs.visible = n > 0; // an empty instanced mesh still costs a draw call
     this.blobs.instanceMatrix.needsUpdate = true;
 
     n = 0;
@@ -1058,6 +1062,7 @@ export class Traffic {
       this.ramas.setMatrixAt(n++, _m4);
     }
     this.ramas.count = n;
+    this.ramas.visible = n > 0;
     this.ramas.instanceMatrix.needsUpdate = true;
 
     n = 0;
@@ -1075,6 +1080,7 @@ export class Traffic {
     }
     this.platanoMesh.count = n;
     this.platanoRim.count = n;
+    this.platanoMesh.visible = this.platanoRim.visible = n > 0;
     this.platanoMesh.instanceMatrix.needsUpdate = true;
     this.platanoRim.instanceMatrix.needsUpdate = true;
   }
