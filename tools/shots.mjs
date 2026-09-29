@@ -387,6 +387,23 @@ const SCENES = [
     },
   },
   {
+    id: 'pickups',
+    what: 'Road art: a platano string, the three power-ups, hoyos with la rama, a charco',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(1.5);
+      for (let i = 0; i < 6; i++) await s.ecc('spawnPickup', 'platano', -3.4, 9 + i * 2.3);
+      await s.ecc('spawnPickup', 'cafecito', -0.6, 20);
+      await s.ecc('spawnPickup', 'bendicion', -5.8, 23);
+      await s.ecc('spawnPickup', 'iman', 1.4, 26);
+      await s.ecc('spawnObstacle', 'hoyo', -1.4, 15);
+      await s.ecc('spawnObstacle', 'hoyo', -5.4, 38);
+      await s.ecc('spawnObstacle', 'charco', 1.9, 13);
+      await s.tick(1 / 60);
+    },
+  },
+  {
     id: 'crash',
     what: 'Crash, mid tumble in the slow-mo',
     settle: 60,
