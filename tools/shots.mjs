@@ -441,7 +441,18 @@ const SCENES = [
       await s.rideTo(400);
       await s.unghost();
       await s.ecc('god', false);
-      await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+      // A slower car can hold the spot for a few seconds (the spawner will not
+      // stack one car on another), so keep offering it until the road clears.
+      // Any change to how many random numbers boot draws (three.js uuids
+      // included) reshuffles the traffic here.
+      for (let tries = 0; ; tries++) {
+        try {
+          await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+          break;
+        } catch (err) {
+          if (tries >= 4 || (await s.ecc('state')) !== 'playing') throw err;
+        }
+      }
       if (!(await s.play(5, "e.state() === 'crashing'"))) throw new Error('no crash');
       if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
     },
