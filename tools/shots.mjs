@@ -471,6 +471,43 @@ const SCENES = [
     },
   },
 
+  {
+    id: 'setpiece',
+    what: 'A set piece calls its name: el camión botando plátanos, the longest one',
+    settle: 200,
+    run: async (s) => {
+      await s.start();
+      await s.tick(3);
+      await s.clearFx();
+      await s.ecc('setPiece', 'camionPlatanos');
+      await s.play(0.05);
+    },
+  },
+  {
+    id: 'camion',
+    what: 'El camión botando plátanos: a trail dropping off its back, in view',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(2);
+      await s.ecc('clearTraffic');
+      await s.ecc('setPiece', 'camionPlatanos');
+      await s.tick(9);
+    },
+  },
+  {
+    id: 'escalate',
+    what: 'Crossing 500 m: the multiplier popup with la calle se puso brava under it',
+    settle: 200,
+    run: async (s) => {
+      await s.start();
+      await s.tick(3);
+      await s.clearFx();
+      await s.ecc('setDistance', 499);
+      if (!(await s.play(1, 'e.distMult() >= 2'))) throw new Error('no tier');
+    },
+  },
+
   // App Store candidates: 440x956 @3 = 1320x2868.
   {
     id: 'store-contravia',

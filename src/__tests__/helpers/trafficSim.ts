@@ -87,8 +87,11 @@ export class Sim {
     runDist: 0, shielded: false, cafecito: false,
   };
 
-  constructor() {
+  // buildSeed: the pools draw each vehicle's drift phase at construction, so
+  // it is seeded too; otherwise a test would depend on the process.
+  constructor(buildSeed = 1) {
     installCanvasStub();
+    seedRandom(buildSeed);
     const t = (): Tally => this.tally;
     const events: TrafficEvents = {
       onNearMiss: (_x, _z, clearance) => {

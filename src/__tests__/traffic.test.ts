@@ -57,7 +57,7 @@ describe('traffic fairness', () => {
     // arrival windows keep more than one gap open. This proves it still does
     // its job when a pattern asks for too much.)
     sim.start(5, false);
-    sim.step(12, -50);
+    sim.step(START_X, -50);
     const t = 90 / sim.eff; // arrival time shared by every spawn
     const same = 10; // m/s, same direction
     const onc = 12; // m/s, oncoming
@@ -155,7 +155,7 @@ describe('traffic pacing', () => {
     let full = 0;
     for (let s = 1; s <= 200; s++) {
       sim.start(5000 + s, false);
-      sim.step(12, -50);
+      sim.step(START_X, -50);
       const before = sim.traffic.activeCars;
       sim.traffic.debugRunPattern('convoy');
       const n = sim.traffic.activeCars - before;
@@ -169,7 +169,7 @@ describe('traffic pacing', () => {
     for (let s = 1; s <= 3; s++) {
       sim.start(2200 + s);
       while (sim.elapsed < 70) {
-        sim.step(12, -50);
+        sim.step(START_X, -50);
         for (const v of sim.traffic.vehicleViews) {
           if (!v.active || v.type !== 'civic') continue;
           // spawned this tick far ahead: the rider already closes fast enough
@@ -185,7 +185,7 @@ describe('traffic pacing', () => {
     expect(tiers.slice(1)).toEqual(mult);
     sim.start(77);
     sim.throttle = CONFIG.gasSpeedMult;
-    while (sim.dist < 2300) sim.step(12, -50);
+    while (sim.dist < 2300) sim.step(START_X, -50);
     sim.throttle = 1;
     expect(sim.tally.escalations).toEqual([1, 2, 3]);
   });
@@ -200,7 +200,7 @@ describe('traffic rewards', () => {
     }
     // on an oncoming car's line until 0.5 s out, then out of it
     sim.start(42, false);
-    sim.step(12, -50);
+    sim.step(START_X, -50);
     const carX = ROAD.laneCenters[2];
     expect(sim.traffic.debugSpawnVehicle('sedan', 2, 70, -1, carX, 12)).toBe(true);
     const dodgeX = carX - (0.95 * CONFIG.vehicleHitboxScale + CONFIG.playerRadius + 0.4);
@@ -252,7 +252,7 @@ describe('traffic rewards', () => {
   it('the policía arc follows the real jump: a straight jump takes every plátano', () => {
     for (const speed of [20, 32, 48]) {
       sim.start(88, false);
-      sim.step(12, -50);
+      sim.step(START_X, -50);
       const vy = Math.max(3.2, speed * CONFIG.policiaLaunchVy);
       const laid = sim.traffic.spawnJumpArc(0, speed, vy);
       expect(laid).toBe(CONFIG.jumpArcCount);
@@ -271,10 +271,17 @@ describe('traffic rewards', () => {
   it('every set piece spawns legally: no wall, no ghosting', () => {
     const kinds: SetPieceKind[] = ['guaguaLenta', 'tapon', 'parada', 'caravana', 'camionPlatanos', 'calleEstrecha', 'horaPico'];
     for (const kind of kinds) {
+      let placedRuns = 0;
       for (let s = 1; s <= 3; s++) {
         sim.start(3100 + s, false);
-        while (sim.elapsed < 30) sim.step(12, -50);
+        while (sim.elapsed < 30) sim.step(START_X, -50);
+        const before = sim.traffic.stats.setPiecesPlaced;
+        sim.tally.setPieces.length = 0; // the director may have run one of its own by now
         sim.traffic.debugRunSetPiece(kind);
+        const placed = sim.traffic.stats.setPiecesPlaced > before;
+        if (placed) placedRuns++;
+        // announced exactly when it was placed (la guagua lenta is the quiet one)
+        expect(sim.tally.setPieces.includes(kind)).toBe(placed && kind !== 'guaguaLenta');
         const scan = new WallScan('motor');
         let maxOverlap = 0;
         for (let i = 0; i < 12 / H; i++) {
@@ -285,6 +292,7 @@ describe('traffic rewards', () => {
         expect(scan.walls, `${kind} seed ${s}`).toBe(0);
         expect(maxOverlap, `${kind} seed ${s}`).toBe(0);
       }
+      expect(placedRuns, `${kind} placed`).toBe(3);
     }
   }, 20000);
 });

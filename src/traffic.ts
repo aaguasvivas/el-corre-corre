@@ -87,7 +87,6 @@ interface Vehicle {
   honked: boolean; // already honked at a slow rider ahead (once per vehicle)
   lineN: number; // plátanos still to lay beside it, placed once it nears the fog line
   lineSide: number; // -1 / +1: which side of it the racing line runs
-  brake: number; // m/s^2 toward a lower cruise (la parada); 0 = none
   dropT: number; // >= 0: el camión botando plátanos, seconds to the next drop
   noRebase: boolean; // set pieces and line motoconchos never swing onto the seam
 }
@@ -119,6 +118,7 @@ export interface TrafficStats {
   corridorRejects: number; // the sacred corridor check said no
   pickupPoolMisses: number; // a pickup could not spawn: the pool was empty
   platanosSpawned: number;
+  setPiecesPlaced: number;
 }
 
 export type ObstacleKind = 'hoyo' | 'policia' | 'charco';
@@ -413,6 +413,9 @@ const HIT = CONFIG.vehicleHitboxScale;
 // where the rider starts, and where lane-splitting motoconchos ride.
 const LINE_X = (ROAD.laneCenters[0] + ROAD.laneCenters[1]) / 2;
 const SWING_M = 1.55; // how far el rebase carries a car from its lane center toward the seam
+// Beyond this the fog hides everything in every tramo, so a set piece may
+// clear filler out of its way there without anything visibly vanishing.
+const FOGGED_Z = 150;
 // Where el río de plátanos steps when its line is blocked, nearest first.
 const RIVER_STEPS = [0.85, -0.85, 1.7, -1.7, 2.55, -2.55] as const;
 
@@ -507,6 +510,7 @@ export class Traffic {
     corridorRejects: 0,
     pickupPoolMisses: 0,
     platanosSpawned: 0,
+    setPiecesPlaced: 0,
   };
 
   get activeCars(): number {
@@ -573,7 +577,7 @@ export class Traffic {
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
           driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
           threat: false, threatX: 0, honked: false, lineN: 0, lineSide: 1,
-          brake: 0, dropT: -1, noRebase: false,
+          dropT: -1, noRebase: false,
         });
       }
     }
@@ -958,7 +962,10 @@ export class Traffic {
     } else {
       const minus = Math.min(CONFIG.laneJitterM, this.laneRoom(lane, halfW, false));
       const plus = Math.min(CONFIG.laneJitterM, this.laneRoom(lane, halfW, true));
-      const j = rand(-minus, plus);
+      // a rider parked between this lane and the next one gets company
+      const toRider = this.lastPlayerX - ROAD.laneCenters[lane];
+      const lean = Math.abs(toRider) > 1 && Math.abs(toRider) < 2.6 && Math.random() < CONFIG.lineCampLean;
+      const j = !lean ? rand(-minus, plus) : toRider > 0 ? rand(0, plus) : rand(-minus, 0);
       drift = Math.min(Math.random() * CONFIG.laneDriftM, Math.max(0, (j < 0 ? minus : plus) - Math.abs(j)));
       x = ROAD.laneCenters[lane] + j;
     }
@@ -975,7 +982,6 @@ export class Traffic {
       v.threat = false;
       v.honked = false;
       v.lineN = 0;
-      v.brake = 0;
       v.dropT = -1;
       v.overtakeT = -1;
       v.noRebase = onLine;
@@ -1222,7 +1228,7 @@ export class Traffic {
         const type: VehicleType =
           this.civicOk() && Math.random() < 0.3 ? 'civic' : Math.random() < 0.7 ? 'sedan' : 'motoconcho';
         const v = this.spawnVehicle(type, lane, z0 + i * spacing, 1, this.sameSpeed(type));
-        if (v) this.attachLine(v, 1, lane === 0 ? 1 : -1); // the gap side: weave to take it
+        if (v) this.attachLine(v, 2, lane === 0 ? 1 : -1); // the gap side: weave to take it
         lane = lane === 0 ? 1 : 0;
       }
     } else if (kind === 'guaguaStop') {
@@ -1238,8 +1244,8 @@ export class Traffic {
       this.vehiclePauseUntil = this.elapsed + 2.8;
       this.sawT = CONFIG.breatherRecoverSec;
       const z0 = this.sameBase();
-      this.layLaneLine(z0, 7, 2.8, 1.2, 0.6); // an S through a clear lane
-      if (Math.random() < CONFIG.breatherPowerupChance) this.schedulePowerupNow(z0 + 7 * 2.8 + 4);
+      this.layLaneLine(z0, 6, 2.8, 1.2, 0.6); // an S through a clear lane
+      if (Math.random() < CONFIG.breatherPowerupChance) this.schedulePowerupNow(z0 + 6 * 2.8 + 4);
     } else if (kind === 'hoyoField') {
       this.vehiclePauseUntil = this.elapsed + 2.2;
       const z0 = this.sameBase();
@@ -1312,17 +1318,44 @@ export class Traffic {
     return CONFIG.setBreatherSec;
   }
 
+  // A set piece built around one vehicle tries a little further out, then
+  // the other lane of your side, when its spot is taken at the spawn line,
+  // instead of silently not happening.
+  private spawnKey(type: VehicleType, lane: number, z0: number, speed: number): Vehicle | null {
+    for (let k = 0; k < 3; k++) {
+      for (let j = 0; j < 2; j++) {
+        const l = j === 0 ? lane : 1 - lane;
+        const v = this.spawnVehicle(type, l, z0 + k * 24, 1, speed, ROAD.laneCenters[l]);
+        if (v) return v;
+      }
+    }
+    return null;
+  }
+
+  // A set piece outranks filler: slow filler piles up just past the fog line
+  // and would refuse it. Clear that band (still invisible) in its lanes.
+  private clearFogged(dir: 1 | -1): void {
+    for (const v of this.vehicles) {
+      if (!v.active || v.dir !== dir || v.speed === 0 || v.z <= FOGGED_Z) continue;
+      if (v.lane < 0 || v.lane > 3) continue;
+      v.active = false;
+      v.group.visible = false;
+      this.activeCount--;
+    }
+  }
+
   private runSetPiece(kind: SetPieceKind): void {
     let placed = 0;
     const z0 = this.sameBase();
+    this.clearFogged(kind === 'caravana' ? -1 : 1);
     if (kind === 'guaguaLenta') {
       // Crawls in lane 1; the plátano line runs past it on the seam side,
       // the way you overtake a guagua in real life.
-      const v = this.spawnVehicle('guagua', 1, z0, 1, CONFIG.guaguaLentaMps, ROAD.laneCenters[1]);
+      const v = this.spawnKey('guagua', 1, z0, CONFIG.guaguaLentaMps);
       if (v) {
         placed++;
         v.noRebase = true;
-        this.attachLine(v, 4, 1);
+        this.attachLine(v, 4, 1); // on its left: toward the seam, or toward lane 1 from lane 0
       }
     } else if (kind === 'tapon') {
       // Both of your lanes jammed and crawling. Three exits: the seam (where
@@ -1344,22 +1377,22 @@ export class Traffic {
       this.spawnVehicle('cart', -1, z0 + 40, 1);
     } else if (kind === 'parada') {
       // The guagua stops on the shoulder with its hazards on, and a carro
-      // público pulls in behind it half onto the shoulder and stops too.
-      const p = this.spawnVehicle('guaguaParada', -1, z0, 1);
+      // público has pulled in behind it, half onto the shoulder. DECISION:
+      // it is placed already stopped (it would brake deep in the fog anyway),
+      // so the corridor check validates it as the parked car it will be; a
+      // car that changes speed after validation could close a gap unseen.
+      let p: Vehicle | null = null;
+      for (let k = 0; k < 3 && !p; k++) p = this.spawnVehicle('guaguaParada', -1, z0 + k * 24, 1);
       if (p) {
         placed++;
-        const c = this.spawnVehicle('sedan', 0, z0 - 16, 1, rand(9, 11), ROAD.shoulderCenters[0] + 1.3, 1);
-        if (c) {
-          c.brake = c.speed / CONFIG.paradaBrakeSec;
-          c.cruise = 0;
-          c.noRebase = true;
-        }
-        if (this.tier >= 1) this.spawnVehicle('guagua', 1, z0 + rand(-4, 6), 1);
+        const c = this.spawnVehicle('sedan', 0, p.z - 9, 1, 0, ROAD.shoulderCenters[0] + 1.3, 1);
+        if (c) c.noRebase = true;
+        if (this.tier >= 1) this.spawnVehicle('guagua', 1, p.z + rand(-4, 6), 1);
       }
     } else if (kind === 'caravana') {
       placed = this.runSwarm(5);
     } else if (kind === 'camionPlatanos') {
-      const v = this.spawnVehicle('camion', 1, z0, 1, CONFIG.camionPlatanosMps, ROAD.laneCenters[1]);
+      const v = this.spawnKey('camion', 1, z0, CONFIG.camionPlatanosMps);
       if (v) {
         placed++;
         v.noRebase = true;
@@ -1380,7 +1413,9 @@ export class Traffic {
       this.horaPicoUntil = this.elapsed + CONFIG.horaPicoSec;
       placed = 1;
     }
-    if (placed > 0 && PIECE_ANNOUNCED[kind]) this.events.onSetPiece(kind);
+    if (placed === 0) return;
+    this.statsData.setPiecesPlaced++;
+    if (PIECE_ANNOUNCED[kind]) this.events.onSetPiece(kind);
   }
 
   // Los Tramos: each stretch has its own traffic personality. World tells us
@@ -1471,7 +1506,7 @@ export class Traffic {
       let riderLeads = false;
       for (const o of this.vehicles) {
         if (o === v || !o.active || o.dir !== v.dir) continue;
-        if (o.lane !== v.lane && Math.abs(o.x - v.x) >= o.halfW + v.halfW + 0.05) continue;
+        if (o.lane !== v.lane && !this.sharesLine(o, v)) continue;
         const gap = (o.z - v.z) * v.dir - o.halfL - v.halfL;
         if (gap >= -0.5 && gap < bestGap) {
           bestGap = gap;
@@ -1492,9 +1527,6 @@ export class Traffic {
           v.honked = true;
           this.events.onHornBehind(v.x);
         }
-      } else if (v.speed > v.cruise) {
-        // la parada: brake smoothly to the lower cruise
-        v.speed = Math.max(v.cruise, v.speed - (v.brake > 0 ? v.brake : 6) * dt);
       } else if (v.speed < v.cruise) {
         // the road opened up: ease back to the speed it wanted, so traffic
         // keeps overtaking itself instead of settling into one slow parade
@@ -1540,8 +1572,10 @@ export class Traffic {
         v.dropT -= dt;
         if (v.dropT <= 0) {
           v.dropT += CONFIG.camionDropEveryM / Math.max(v.speed, 1);
-          if (v.z > CONFIG.camionDropZ[0] && v.z < CONFIG.camionDropZ[1]) {
-            this.spawnPickup('platano', v.x, v.z - v.halfL - 0.8);
+          const pz = v.z - v.halfL - 0.8;
+          // a car tailing the camión would sit on the drop: skip that one
+          if (v.z > CONFIG.camionDropZ[0] && v.z < CONFIG.camionDropZ[1] && this.pickupClear(v.x, pz)) {
+            this.spawnPickup('platano', v.x, pz);
           }
         }
       }
@@ -1776,6 +1810,17 @@ export class Traffic {
     if (this.elapsed - this.lastPlatanoAt < CONFIG.platanoTrailDroughtSec) return;
     this.layLaneLine(this.sameBase(), CONFIG.platanoTrailLen, 3, 0.5, 1.1);
   };
+
+  // Do two vehicles' bodies overlap sideways? A car out on el rebase still
+  // owns its home line: it comes back to it, so it keeps following whatever
+  // is there (and whatever is behind that line keeps following it).
+  private sharesLine(a: Vehicle, b: Vehicle): boolean {
+    const w = a.halfW + b.halfW + 0.05;
+    if (Math.abs(a.x - b.x) < w) return true;
+    if (a.overtakeT >= 0 && Math.abs(a.baseX - b.x) < w) return true;
+    if (b.overtakeT >= 0 && Math.abs(a.x - b.baseX) < w) return true;
+    return false;
+  }
 
   // Rebase candidates: a moving inner-lane car arriving inside
   // rebaseLeadSec, the soonest one whose swing path is clear.

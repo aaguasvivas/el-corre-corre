@@ -214,6 +214,10 @@ export const CONFIG = {
   // FEEL: share of motoconchos that ride the dashed lines instead of a lane.
   // They lane-split in the DR, and it takes away the last safe parking spot.
   motoLineShare: 0.5,
+  // FEEL: chance a car spawning in a lane beside a rider parked between two
+  // lanes (a dashed line or the seam) rides the edge of its lane nearest
+  // the rider. Between the lanes must never be safer than in one.
+  lineCampLean: 0.5,
   fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
   // El rebase: every so often a vehicle swings onto the center seam to
   // overtake, the most Dominican move on the road and the reason parking on
@@ -289,7 +293,6 @@ export const CONFIG = {
   guaguaLentaMps: 6, // FEEL: la guagua lenta crawls; the plátano line runs past it on the seam
   taponMps: 7, // FEEL: el tapón's speed
   taponSpacingM: 11,
-  paradaBrakeSec: 1.5, // FEEL: seconds la parada's carro público takes to stop behind the guagua
   camionPlatanosMps: 8,
   camionDropEveryM: 6, // FEEL: el camión drops a plátano every this many meters it travels
   camionDropZ: [28, 135], // m: it drops only while this far ahead, so no drop lands on your nose
@@ -389,7 +392,7 @@ export const CONFIG = {
   platanoLayZ: 125, // m: lines appear once their car is this close (in the fog), so nothing pops in
   platanoTrailEvery: [4, 6.5], // FEEL: seconds between drought-filling trails...
   platanoTrailUnlockSec: 3,
-  platanoTrailDroughtSec: 5, // ...which only come when no plátano spawned for this long
+  platanoTrailDroughtSec: 6, // ...which only come when no plátano spawned for this long
   platanoTrailLen: 5,
   policiaLeadIn: 3, // ground plátanos leading into a bump; the arc itself follows the real jump
   jumpArcCount: 6, // plátanos laid along the launched rider's own parabola

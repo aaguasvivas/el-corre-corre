@@ -562,6 +562,7 @@ function wallScan(label: string, ghostX: number, mult: number, ride: VehicleId, 
   let next = new Uint8Array(nb);
   const free = new Uint8Array(nb);
   let walls = 0;
+  let overlapTicks = 0;
   const times: number[] = [];
   let rejections = 0;
   let attempts = 0;
@@ -583,6 +584,7 @@ function wallScan(label: string, ghostX: number, mult: number, ride: VehicleId, 
       dist += eff * H;
       fill(eff, el, ghostX, r, dist);
       T.step(ctx);
+      if (T.overlapCount > 0) overlapTicks++;
       free.fill(1);
       for (const v of A.vehicles) {
         if (!v.active) continue;
@@ -615,17 +617,19 @@ function wallScan(label: string, ghostX: number, mult: number, ride: VehicleId, 
     }
   }
   A.widestCorridor = origCorr;
-  log(`  ${label.padEnd(30)} walls ${walls} over ${runs} x ${secs} s ${times.slice(0, 8).join(',')}  corridor rejections ${rejections}/${attempts}`);
+  log(`  ${label.padEnd(30)} walls ${walls} over ${runs} x ${secs} s ${times.slice(0, 8).join(',')}  ghosting ticks ${overlapTicks}  corridor rejections ${rejections}/${attempts}`);
 }
 
 if (want('walls')) {
   resetEvents();
+  const R = Number(process.env.RUNS ?? 6);
   log('\n=== unavoidable walls (omniscient lateral reachability) ===');
-  wallScan('motor own side, cruise', -3.4, 1, 'motor', 6, 240);
-  wallScan('motor own side, a fondo', -3.4, CONFIG.gasSpeedMult, 'motor', 6, 240);
-  wallScan('motor CV, a fondo', 3.4, CONFIG.gasSpeedMult, 'motor', 6, 240);
-  wallScan('civic CV, a fondo', 3.4, CONFIG.gasSpeedMult, 'civic', 6, 240);
-  wallScan('pasola own side, brake', -3.4, CONFIG.brakeSpeedMult, 'pasola', 4, 240);
+  wallScan('motor own side, cruise', -3.4, 1, 'motor', R, 240);
+  wallScan('motor own side, a fondo', -3.4, CONFIG.gasSpeedMult, 'motor', R, 240);
+  wallScan('motor seam, cruise', 0, 1, 'motor', R, 240);
+  wallScan('motor CV, a fondo', 3.4, CONFIG.gasSpeedMult, 'motor', R, 240);
+  wallScan('civic CV, a fondo', 3.4, CONFIG.gasSpeedMult, 'civic', R, 240);
+  wallScan('pasola own side, brake', -3.4, CONFIG.brakeSpeedMult, 'pasola', Math.max(2, R - 2), 240);
 }
 
 // ---------------------------------------------------------------------------
@@ -802,7 +806,7 @@ if (want('pacing')) {
       el += H;
       const eff = rideSpeed('motor', el);
       dist += eff * H;
-      fill(eff, el, 12, 0.5, dist); // off the road: counts arrivals, never collects
+      fill(eff, el, START_X, 0.5, dist); // out of reach below the road: counts arrivals, never collects
       ctx.playerY = -50;
       T.step(ctx);
       const b = Math.min(B - 1, Math.floor(el / 30));

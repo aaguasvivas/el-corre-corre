@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { CONFIG, PINTURAS, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
-import { Traffic, type ObstacleKind, type PickupKind, type StepCtx, type VehicleType } from './traffic';
+import { Traffic, type ObstacleKind, type PickupKind, type SetPieceKind, type StepCtx, type VehicleType } from './traffic';
 import { Score, type RunResult } from './score';
 import { tramoFor } from './tour';
 import { UI } from './ui';
@@ -779,6 +779,8 @@ let testGod = false;
     traffic.debugSpawnVehicle(type, lane, z, dir, exactX),
   // Empty the road mid-run, so a scene can stage its own traffic.
   clearTraffic: () => traffic.reset(),
+  // Run one set piece now (announced ones pop their name).
+  setPiece: (kind: SetPieceKind) => traffic.debugRunSetPiece(kind),
   // The next vehicle the rider will meet: its x and seconds until it arrives.
   ahead: () => {
     let best: { x: number; t: number } | null = null;
