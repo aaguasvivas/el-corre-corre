@@ -934,17 +934,69 @@ function makePowerPole(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
+// Remap a plane's 0..1 uvs into an atlas rect, whatever its segment count.
+function mapUV(g: THREE.BufferGeometry, r: AtlasRect): THREE.BufferGeometry {
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, r.u0 + uv.getX(i) * (r.u1 - r.u0), r.v0 + uv.getY(i) * (r.v1 - r.v0));
+  }
+  return g;
+}
+
+// La bandera on a plane cut into strips, carrying aWave: 0 at the hoist
+// (pinned to the pole) rising to 1 at the fly, so the seaside wind can move
+// it. Used by the roadside flagpoles and the Obelisco's banner.
+function waveFlag(w: number, h: number, rects: Record<string, AtlasRect>): THREE.BufferGeometry {
+  const flag = mapUV(new THREE.PlaneGeometry(w, h, 8, 1), rects.flag);
+  const pos = flag.getAttribute('position') as THREE.BufferAttribute;
+  const wave = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) wave[i] = (pos.getX(i) + w / 2) / w;
+  flag.setAttribute('aWave', new THREE.BufferAttribute(wave, 1));
+  return flag;
+}
+
 function makeFlagpole(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
-  const pole = uvFill(new THREE.CylinderGeometry(0.05, 0.07, 5, 6), rects.white);
+  const still = (g: THREE.BufferGeometry): THREE.BufferGeometry => {
+    g.setAttribute('aWave', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count), 1));
+    return g;
+  };
+  const pole = still(uvFill(new THREE.CylinderGeometry(0.05, 0.07, 5, 6), rects.white));
   pole.translate(0, 2.5, 0);
-  const ball = uvFill(new THREE.SphereGeometry(0.09, 6, 5), rects.white);
+  const ball = still(uvFill(new THREE.SphereGeometry(0.09, 6, 5), rects.white));
   ball.translate(0, 5.05, 0);
-  const flag = quadUV(1.52, 0.95, rects.flag); // 8:5, la bandera's real ratio
+  const flag = waveFlag(1.52, 0.95, rects); // 8:5, la bandera's real ratio
   flag.translate(0.78, 4.45, 0);
   flag.rotateY(0.5);
   return mergeGeometries([pole, ball, flag])!;
 }
 
+// The wave runs from hoist to fly along the cloth's own normal, so the same
+// material works for every flag whatever way it faces.
+function flagMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+  return extendPatch(
+    worldMaterial(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })),
+    'flagwave',
+    (shader) => {
+      shader.uniforms.uWorldTime = WORLD_TIME;
+      shader.vertexShader =
+        'uniform float uWorldTime;\nattribute float aWave;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            float eccPh = instanceMatrix[3][2] * 0.23;
+          #else
+            float eccPh = 0.0;
+          #endif
+          transformed += normal * sin( uWorldTime * 6.0 - aWave * 7.0 + eccPh ) * 0.09 * aWave;`,
+        );
+    },
+  );
+}
+
+// The domino table: four players, and one of them winds up and slams his
+// tile down on a loop (the arm carries aArm, the shader lifts it; see
+// dominoMaterial). Everything else in the set stays still.
 function makeDominoSet(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   cgeo(parts, new THREE.CylinderGeometry(0.8, 0.8, 0.07, 10), 0xfdfdf8, 0, 0.78, 0);
@@ -961,7 +1013,41 @@ function makeDominoSet(): THREE.BufferGeometry {
   for (let d = 0; d < 5; d++) {
     cbox(parts, 0.16, 0.03, 0.09, rand(-0.4, 0.4), 0.83, rand(-0.4, 0.4), 0xffffff, 0, rand(0, 3), 0);
   }
-  return mergeGeometries(parts)!;
+  const still = mergeGeometries(parts)!;
+  still.setAttribute('aArm', new THREE.BufferAttribute(new Float32Array(still.getAttribute('position').count), 1));
+  // the slapping arm of player 0, reaching from his shoulder over the table
+  const a0 = 0.4;
+  const armParts: THREE.BufferGeometry[] = [];
+  cbox(armParts, 0.1, 0.1, 0.55, Math.cos(a0) * 0.72, 1.02, Math.sin(a0) * 0.72, PALETTE.colmadoTeal, 0, -a0 + Math.PI / 2, 0);
+  cbox(armParts, 0.13, 0.05, 0.1, Math.cos(a0) * 0.46, 1.0, Math.sin(a0) * 0.46, 0xffffff, 0, -a0, 0); // the tile
+  const arm = mergeGeometries(armParts)!;
+  arm.setAttribute('aArm', new THREE.BufferAttribute(new Float32Array(arm.getAttribute('position').count).fill(1), 1));
+  return mergeGeometries([still, arm])!;
+}
+
+// Wind up slowly over two seconds, then SLAM in a blink; each table keeps
+// its own rhythm (phase from its position in the belt).
+function dominoMaterial(): THREE.MeshToonMaterial {
+  return extendPatch(
+    worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+    'domino',
+    (shader) => {
+      shader.uniforms.uWorldTime = WORLD_TIME;
+      shader.vertexShader =
+        'uniform float uWorldTime;\nattribute float aArm;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            float eccF = fract( uWorldTime * 0.4 + instanceMatrix[3][2] * 0.37 );
+          #else
+            float eccF = fract( uWorldTime * 0.4 );
+          #endif
+          float eccLift = eccF < 0.85 ? eccF / 0.85 : ( 1.0 - eccF ) / 0.15;
+          transformed.y += aArm * eccLift * eccLift * 0.34;`,
+        );
+    },
+  );
 }
 
 function makeFruitStand(): THREE.BufferGeometry {
@@ -1016,7 +1102,9 @@ interface BeltAssets {
   post: THREE.BufferGeometry;
   pole: THREE.BufferGeometry;
   flag: THREE.BufferGeometry;
+  flagMat: THREE.MeshBasicMaterial;
   domino: THREE.BufferGeometry;
+  dominoMat: THREE.MeshToonMaterial;
   fruit: THREE.BufferGeometry;
   chair: THREE.BufferGeometry;
   street: THREE.BufferGeometry;
@@ -1053,7 +1141,9 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
     post: makeSeawallPost(),
     pole: makePowerPole(),
     flag: makeFlagpole(atlas.rects),
+    flagMat: flagMaterial(atlas.tex),
     domino: makeDominoSet(),
+    dominoMat: dominoMaterial(),
     fruit: makeFruitStand(),
     chair: makeChair(),
     street: makeStreetSign(atlas.rects),
@@ -1158,8 +1248,8 @@ class Belt {
     for (const p of assets.palms) this.palmIMs.push(im(p, assets.vcMat, 8, true));
     this.postIM = im(assets.post, assets.vcMat, 21);
     this.poleIM = im(assets.pole, assets.vcMat, 5);
-    this.flagIM = im(assets.flag, assets.atlasMat, 3, true);
-    this.dominoIM = im(assets.domino, assets.vcMat, 2);
+    this.flagIM = im(assets.flag, assets.flagMat, 3, true);
+    this.dominoIM = im(assets.domino, assets.dominoMat, 2);
     this.fruitIM = im(assets.fruit, assets.vcMat, 2);
     this.chairIM = im(assets.chair, assets.vcMat, 4);
     this.streetIM = im(assets.street, assets.atlasMat, 2);
@@ -1968,7 +2058,7 @@ const OV_BANDERITAS = 1;
 const OV_LAUNDRY = 2;
 const OV_NONE = -9;
 const OV_FAR_X = -11.7; // the far-side pole line
-const OV_SEA_X = 11.3; // between the flags and the sea rail
+const OV_SEA_X = 10.85; // between the flags and the promenade's walking line
 const WORLD_TIME = { value: 0 };
 
 // Box segments along a sagging line between two points in the x-y plane.
@@ -2192,6 +2282,249 @@ class Overhead {
 }
 
 // ---------------------------------------------------------------------------
+// Transeúntes: people walking the sidewalks. Never collidable: they walk the
+// far sidewalk in front of the shops (x -12.0) and the sea-side promenade
+// (x 11.25), both well past where the rider can ever reach (|x| < 8.45),
+// the same law as the viralata. One InstancedMesh for all of them; the
+// shader swings legs and arms, paints each shirt (instance color) and skin
+// tone (iSkin) on the parts flagged by aPart.
+// ---------------------------------------------------------------------------
+
+const WALKER_CAP = 14;
+const WALK_FAR_X = -12.0;
+const WALK_SEA_X = 11.25;
+const WALKERS_PER_TRAMO: Record<Tramo, number> = { malecon: 12, zona: 10, campo: 4 };
+const SHIRTS = [0xe63946, 0x2a9d8f, 0xf4c430, 0xffffff, 0xb3d9ff, 0xff8b94, 0xa8e6cf, 0xcdb4db, 0xffd3b6];
+const SKINS = [0x8d5524, 0xc68642, 0xe0ac69, 0x6b3e1f, 0xa0662f];
+
+function walkerGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  // part: 0 fixed color, 1 shirt, 2 skin; leg: swing weight and side
+  const add = (g: THREE.BufferGeometry, color: number, part: number, leg: number): void => {
+    paint(g, color);
+    const n = g.getAttribute('position').count;
+    g.setAttribute('aPart', new THREE.BufferAttribute(new Float32Array(n).fill(part), 1));
+    g.setAttribute('aLeg', new THREE.BufferAttribute(new Float32Array(n).fill(leg), 1));
+    parts.push(g);
+  };
+  const box = (w: number, h: number, d: number, x: number, y: number, z: number): THREE.BufferGeometry => {
+    const b = new THREE.BoxGeometry(w, h, d);
+    b.translate(x, y, z);
+    return b;
+  };
+  add(box(0.14, 0.8, 0.15, -0.09, 0.4, 0), 0x2f4a6f, 0, 1); // jeans
+  add(box(0.14, 0.8, 0.15, 0.09, 0.4, 0), 0x2f4a6f, 0, -1);
+  add(box(0.36, 0.56, 0.22, 0, 1.08, 0), 0xffffff, 1, 0); // shirt
+  add(box(0.09, 0.5, 0.1, -0.23, 1.06, 0), 0xffffff, 1, -0.6); // sleeves swing against the legs
+  add(box(0.09, 0.5, 0.1, 0.23, 1.06, 0), 0xffffff, 1, 0.6);
+  const head = new THREE.SphereGeometry(0.13, 8, 6);
+  head.translate(0, 1.5, 0);
+  add(head, 0xffffff, 2, 0);
+  add(box(0.25, 0.07, 0.25, 0, 1.62, 0), 0x2a2624, 0, 0); // hair
+  return mergeGeometries(parts)!;
+}
+
+const WALKER_CHUNK = /* glsl */ `
+#include <begin_vertex>
+float eccSwing = sin( uWorldTime * 7.0 + float( gl_InstanceID ) * 1.7 );
+float eccPivot = abs( aLeg ) > 0.8 ? 0.8 : 1.32;
+transformed.z += aLeg * eccSwing * max( 0.0, eccPivot - position.y ) * 0.5;
+`;
+
+class Walkers {
+  private im: THREE.InstancedMesh;
+  private skin: THREE.InstancedBufferAttribute;
+  private x = new Float32Array(WALKER_CAP);
+  private z = new Float32Array(WALKER_CAP);
+  private dir = new Float32Array(WALKER_CAP);
+  private live = new Uint8Array(WALKER_CAP);
+
+  constructor(scene: THREE.Scene) {
+    const geo = walkerGeometry();
+    this.skin = new THREE.InstancedBufferAttribute(new Float32Array(WALKER_CAP * 3), 3);
+    geo.setAttribute('iSkin', this.skin);
+    const mat = extendPatch(
+      worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+      'walkers',
+      (shader) => {
+        shader.uniforms.uWorldTime = WORLD_TIME;
+        shader.vertexShader =
+          'uniform float uWorldTime;\nattribute float aPart;\nattribute float aLeg;\nattribute vec3 iSkin;\n' +
+          shader.vertexShader
+            .replace('#include <begin_vertex>', WALKER_CHUNK)
+            .replace(
+              '#include <color_vertex>',
+              `#include <color_vertex>
+              vColor.rgb = aPart > 1.5 ? iSkin : aPart > 0.5 ? color * instanceColor.rgb : color;`,
+            );
+      },
+    );
+    this.im = new THREE.InstancedMesh(geo, mat, WALKER_CAP);
+    this.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    this.im.count = WALKER_CAP;
+    for (let i = 0; i < WALKER_CAP; i++) {
+      this.im.setColorAt(i, _color.set(SHIRTS[i % SHIRTS.length]));
+      this.hide(i);
+    }
+    scene.add(this.im);
+  }
+
+  private hide(i: number): void {
+    this.live[i] = 0;
+    _dummy.position.set(0, -50, 0);
+    _dummy.scale.setScalar(0);
+    _dummy.updateMatrix();
+    this.im.setMatrixAt(i, _dummy.matrix);
+  }
+
+  private spawn(i: number, z: number, tramo: Tramo): void {
+    this.live[i] = 1;
+    const sea = tramo !== 'zona' && Math.random() < 0.45 ? true : tramo === 'zona' && Math.random() < 0.3;
+    this.x[i] = sea ? WALK_SEA_X : WALK_FAR_X;
+    this.z[i] = z;
+    this.dir[i] = Math.random() < 0.5 ? 1 : -1;
+    this.im.setColorAt(i, _color.set(SHIRTS[Math.floor(Math.random() * SHIRTS.length)]));
+    _color.set(SKINS[Math.floor(Math.random() * SKINS.length)]);
+    this.skin.setXYZ(i, _color.r, _color.g, _color.b);
+    this.skin.needsUpdate = true;
+    if (this.im.instanceColor) this.im.instanceColor.needsUpdate = true;
+  }
+
+  // obZ: the Obelisco's z when it stands, so promenade walkers step out of
+  // its plinth instead of walking through it
+  update(ds: number, dt: number, tramo: Tramo, attract: boolean, obZ: number | null): void {
+    let alive = 0;
+    for (let i = 0; i < WALKER_CAP; i++) alive += this.live[i];
+    const want = WALKERS_PER_TRAMO[tramo];
+    for (let i = 0; i < WALKER_CAP; i++) {
+      if (!this.live[i]) {
+        // top the street back up out in the haze, or scattered along it on
+        // the title screen so it never starts empty
+        if (alive < want && Math.random() < dt * 3) {
+          this.spawn(i, attract && alive < want / 2 ? rand(10, 150) : rand(120, 200), tramo);
+          alive++;
+        }
+        continue;
+      }
+      this.z[i] += -ds + this.dir[i] * 1.25 * dt;
+      if (this.z[i] < -12 || this.z[i] > 230) {
+        this.hide(i);
+        continue;
+      }
+      const inPlinth = obZ !== null && this.x[i] > 0 && Math.abs(this.z[i] - obZ) < 2.4;
+      _dummy.position.set(this.x[i], Math.abs(Math.sin(WORLD_TIME.value * 7 + i * 1.7)) * 0.04, this.z[i]);
+      _dummy.rotation.set(0, this.dir[i] > 0 ? 0 : Math.PI, 0);
+      _dummy.scale.setScalar(inPlinth ? 0 : 1);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// El cobrador: hanging off the back step of a parked guagua, one hand on
+// the rail, waving people on and shouting ¡SÚBETE! at the sidewalk. Call once
+// on a stopped guagua's group (the guagua's addExtras in traffic.ts). The
+// geometry holds him on both sides; the shader keeps only the sidewalk side
+// (the guagua's x says which shoulder it is parked on), so he never hangs
+// into a lane and the rider can never ride through him. He rides the rear
+// corner because that is the corner the camera can see past. In-world
+// flavor, so the shout stays Spanish.
+let _cobradorGeo: THREE.BufferGeometry | null = null;
+let _cobradorMat: THREE.MeshToonMaterial | null = null;
+let _bubbleMat: THREE.MeshBasicMaterial | null = null;
+const COBRADOR_Z = -3.3;
+const SIDEWALK_SIDE = /* glsl */ `
+float eccSide = modelMatrix[3][0] > 0.0 ? 1.0 : -1.0;
+`;
+export function addCobrador(guagua: THREE.Object3D): void {
+  if (!_cobradorGeo) {
+    const figure = (s: number): THREE.BufferGeometry => {
+      const parts: THREE.BufferGeometry[] = [];
+      const z = COBRADOR_Z;
+      cbox(parts, 0.34, 0.55, 0.24, s * 1.32, 1.5, z, PALETTE.colmadoRed, 0, 0, -s * 0.32); // shirt, leaning out
+      cbox(parts, 0.14, 0.62, 0.15, s * 1.2, 0.9, z + 0.1, 0x2f4a6f, 0, 0, -s * 0.12); // legs on the step
+      cbox(parts, 0.14, 0.62, 0.15, s * 1.2, 0.9, z - 0.1, 0x2f4a6f, 0, 0, -s * 0.12);
+      cbox(parts, 0.09, 0.55, 0.1, s * 1.16, 1.98, z + 0.16, PALETTE.colmadoRed, 0, 0, s * 0.2); // hand on the rail
+      cbox(parts, 0.09, 0.45, 0.1, s * 1.66, 1.5, z - 0.18, PALETTE.colmadoRed, 0, 0, -s * 0.9); // arm out, waving
+      cgeo(parts, new THREE.SphereGeometry(0.14, 8, 6), PALETTE.skin, s * 1.5, 1.94, z);
+      cbox(parts, 0.26, 0.08, 0.26, s * 1.52, 2.06, z, 0x2a2624); // gorra
+      const g = mergeGeometries(parts)!;
+      g.setAttribute('aSide', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(s), 1));
+      return g;
+    };
+    _cobradorGeo = mergeGeometries([figure(-1), figure(1)])!;
+    _cobradorMat = extendPatch(
+      worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+      'cobrador',
+      (shader) => {
+        shader.vertexShader =
+          'attribute float aSide;\n' +
+          shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            '#include <begin_vertex>\n' + SIDEWALK_SIDE + 'if ( aSide != eccSide ) transformed = vec3( 0.0 );',
+          );
+      },
+    );
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const draw = (): void => {
+      g.clearRect(0, 0, 256, 128);
+      g.fillStyle = '#ffffff';
+      g.strokeStyle = '#002d62';
+      g.lineWidth = 6;
+      // a rounded bubble with its tail pointing down at him (drawn by hand:
+      // older iOS WebViews lack CanvasRenderingContext2D.roundRect)
+      const r = 34;
+      g.beginPath();
+      g.moveTo(8 + r, 8);
+      g.arcTo(248, 8, 248, 92, r);
+      g.arcTo(248, 92, 8, 92, r);
+      g.lineTo(130, 92);
+      g.lineTo(70, 122);
+      g.lineTo(96, 92);
+      g.arcTo(8, 92, 8, 8, r);
+      g.arcTo(8, 8, 248, 8, r);
+      g.closePath();
+      g.fill();
+      g.stroke();
+      g.fillStyle = '#ce1126';
+      g.font = `46px ${SIGN_FONT}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('¡SÚBETE!', 128, 52);
+      tex.needsUpdate = true;
+    };
+    draw();
+    whenSignFontReady(draw);
+    _bubbleMat = extendPatch(
+      worldMaterial(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
+      'bubble',
+      (shader) => {
+        // hops to his side of the guagua by translation, never by a mirror,
+        // so the words always read the right way round
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n' + SIDEWALK_SIDE + 'transformed.x += eccSide * 1.85;',
+        );
+      },
+    );
+  }
+  const man = new THREE.Mesh(_cobradorGeo, _cobradorMat!);
+  // the bubble's own geometry is centered at x 0; the shader offsets it
+  const bubbleGeo = new THREE.PlaneGeometry(1.5, 0.75);
+  bubbleGeo.rotateY(Math.PI); // face the riders coming up behind
+  bubbleGeo.translate(0, 2.9, COBRADOR_Z);
+  const bubble = new THREE.Mesh(bubbleGeo, _bubbleMat!);
+  guagua.add(man, bubble);
+}
+
+// ---------------------------------------------------------------------------
 // Wind motes: thin warm streaks in a tube around the rider that only show at
 // real speed and stretch with it, so a fondo reads as fast in the part of
 // the frame the road texture cannot fill. One instanced draw, only when on.
@@ -2282,6 +2615,7 @@ export class World {
   private viralata!: Viralata;
   private motes!: WindMotes;
   private overhead!: Overhead;
+  private walkers!: Walkers;
   private chichiguas: Chichigua[] = [];
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
@@ -2381,6 +2715,7 @@ export class World {
     for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
     this.buildObelisco(scene, atlas);
     this.overhead = new Overhead(scene, atlas);
+    this.walkers = new Walkers(scene);
   }
 
   private buildSky(scene: THREE.Scene): void {
@@ -2735,12 +3070,13 @@ export class World {
       if (yPx - reachPx < 0) draw(H);
       if (yPx + reachPx > H) draw(-H);
     };
-    // An irregular patch: a jittered hexagon with a darker hairline outline,
-    // so it reads as a repair in the road rather than a tiling glitch.
-    const patch = (xM: number, zM: number, wM: number, hM: number, fill: string, edge: string): void => {
+    // A repair in the road: a jittered hexagon (a pothole fill) or a jittered
+    // rectangle (a utility cut), with a darker hairline outline, so it reads
+    // as a patch and not as a tiling glitch.
+    const patch = (xM: number, zM: number, wM: number, hM: number, fill: string, edge: string, sides = 6): void => {
       const pts: Array<[number, number]> = [];
-      for (let k = 0; k < 6; k++) {
-        const a = (k / 6) * Math.PI * 2 + Math.random() * 0.5;
+      for (let k = 0; k < sides; k++) {
+        const a = (k / sides) * Math.PI * 2 + (sides === 4 ? Math.PI / 4 + (Math.random() - 0.5) * 0.12 : Math.random() * 0.5);
         const rx = (wM / 2) * (0.75 + Math.random() * 0.25);
         const ry = (hM / 2) * (0.75 + Math.random() * 0.25);
         pts.push([(xM + Math.cos(a) * rx) * pmx, (zM + Math.sin(a) * ry) * pmy]);
@@ -2848,7 +3184,7 @@ export class World {
       // seams every 7.5 m, the small things that stream past the rider.
       for (let i = 0; i < 4; i++) {
         patch(laneX(Math.floor(Math.random() * 4)) + (Math.random() - 0.5) * 1.2, Math.random() * CHUNK_LEN,
-          1.4 + Math.random() * 1.6, 1.5 + Math.random() * 1.5, 'rgba(44,40,38,0.95)', 'rgba(0,0,0,0.38)');
+          1.4 + Math.random() * 1.6, 1.5 + Math.random() * 1.5, 'rgba(44,40,38,0.7)', 'rgba(0,0,0,0.3)', 4);
       }
       for (let i = 0; i < 5; i++) crack(2 + Math.random() * 12.8, Math.random() * CHUNK_LEN, 0.25);
       manhole(laneX(Math.floor(Math.random() * 4)), 4 + Math.random() * 22);
@@ -3141,16 +3477,7 @@ export class World {
     });
     // And la bandera itself, correct with el escudo, as a banner facing the
     // road the player rides on.
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.76, 1.1),
-      worldMaterial(new THREE.MeshBasicMaterial({ map: atlas.tex, side: THREE.DoubleSide })),
-    );
-    const fr = atlas.rects.flag;
-    const uv = banner.geometry.attributes.uv as THREE.BufferAttribute;
-    uv.setXY(0, fr.u0, fr.v1);
-    uv.setXY(1, fr.u1, fr.v1);
-    uv.setXY(2, fr.u0, fr.v0);
-    uv.setXY(3, fr.u1, fr.v0);
+    const banner = new THREE.Mesh(waveFlag(1.76, 1.1, atlas.rects), flagMaterial(atlas.tex));
     banner.position.set(-1.15, 5.2, 0);
     banner.rotation.y = -Math.PI / 2; // face the road
     this.obelisco.add(banner);
@@ -3366,6 +3693,7 @@ export class World {
     this.viralata.update(ds, dt);
     this.motes.update(ds, this.lastSpeed, !attract);
     this.overhead.update(ds, this.runDistance);
+    this.walkers.update(ds, dt, this.tramoNow, attract, this.obelisco.visible ? this.obelisco.position.z : null);
     for (const k of this.chichiguas) k.update(ds, dt);
     for (const p of this.pelicans) p.update(ds, dt);
     const campoNow = this.tramoNow === 'campo';
