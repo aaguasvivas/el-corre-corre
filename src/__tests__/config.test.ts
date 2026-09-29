@@ -23,6 +23,12 @@ describe('CONFIG invariants from the brief', () => {
     expect(CONFIG.fogFar / (fastestRide + fastestOncoming)).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
   });
 
+  it('no tramo pulls its fog in closer than the fog the telegraph rule was checked against', () => {
+    for (const [tramo, far] of Object.entries(CONFIG.tramoFogFar)) {
+      expect(far, `${tramo} fog far`).toBeGreaterThanOrEqual(CONFIG.fogFar);
+    }
+  });
+
   it('same-direction traffic is slower than the rider by the time that type unlocks', () => {
     // The ramp matters: civics enter at civicUnlockSec, when the rider is
     // already past their top speed. Lowering baseSpeed once broke the naive

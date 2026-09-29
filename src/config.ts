@@ -35,7 +35,6 @@ export const PALETTE = {
   underglow: 0x2ee6d6,
   // Phase 3: el mundo
   seawallCream: 0xefe6d4,
-  mountainHaze: 0xc9a48e,
   dogTan: 0xc8a06a,
   poleWood: 0x6e5d4e,
   wire: 0x1f1b19,
@@ -178,7 +177,20 @@ export const CONFIG = {
   // Atmosphere
   fogNear: 60,
   fogFar: 140,
+  // FEEL: how far each tramo's haze reaches. SACRED floor: none of these may
+  // sit below fogFar, or the reaction window the spawner promises sinks into
+  // the fog (tested in config.test.ts).
+  tramoFogFar: { malecon: 140, zona: 140, campo: 156 },
+  seaFogFar: 400, // FEEL: how far out the Caribbean stays turquoise before the haze takes it
   rimStrength: 0.5, // FEEL: golden silhouette light on everything; 0 kills it
+  // FEEL: overall scene brightness. three r155+ lights are physical (the
+  // Lambert term divides by pi), and the old intensities rendered every lit
+  // face at about 60% of its palette hex. At 1.5 a camera-facing face lands
+  // near its hex and a sun-facing one a touch warmer. Scales sun, fill, sky.
+  lightExposure: 1.5,
+  // FEEL: shadowless camera-side fill. Lifts rider backs, car rears and
+  // oncoming fronts out of the darkest toon step without flattening form.
+  fillLight: 0.27,
 
   // Spawning. Pressure raised after the Phase 4 feel test.
   spawnAhead: 150,

@@ -62,12 +62,18 @@ interface Atmo {
   rim: THREE.Color; // premultiplied by CONFIG.rimStrength
 }
 
-function atmo(fog: number, fogFar: number, sun: number, sunI: number, hemiSky: number, hemiGround: number, rim: number): Atmo {
+// Intensities are authored in the old units and scaled by CONFIG.lightExposure
+// here, so one knob moves the whole scene and the per-tramo lerp in step()
+// never pulls a light back to its unscaled value. The sun colors stay close to
+// white on purpose: a saturated orange key light dragged every palette hex
+// toward brown (pinks went salmon, the teal shirt went olive). The golden
+// hour lives in the sky, the fog and the rim instead.
+function atmo(tramo: Tramo, fog: number, sun: number, sunI: number, hemiSky: number, hemiGround: number, rim: number): Atmo {
   return {
     fog: new THREE.Color(fog),
-    fogFar,
+    fogFar: CONFIG.tramoFogFar[tramo],
     sun: new THREE.Color(sun),
-    sunI,
+    sunI: sunI * CONFIG.lightExposure,
     hemiSky: new THREE.Color(hemiSky),
     hemiGround: new THREE.Color(hemiGround),
     rim: new THREE.Color(rim).multiplyScalar(CONFIG.rimStrength),
@@ -75,10 +81,20 @@ function atmo(fog: number, fogFar: number, sun: number, sunI: number, hemiSky: n
 }
 
 const ATMOS: Record<Tramo, Atmo> = {
-  malecon: atmo(PALETTE.skyHorizon, 140, 0xffe3b3, 1.7, 0xbfe3ef, 0xe8c39a, PALETTE.skyHorizon),
-  zona: atmo(0xf7c6ab, 140, 0xffd7a8, 1.62, 0xb7d0e6, 0xe0b691, 0xffc79f),
-  campo: atmo(0xeed7a4, 156, 0xffeabf, 1.78, 0xc9e2da, 0xdcc18c, 0xffe3ae),
+  malecon: atmo('malecon', PALETTE.skyHorizon, 0xffecd0, 1.7, 0xbfe3ef, 0xe8c39a, PALETTE.skyHorizon),
+  zona: atmo('zona', 0xf7c6ab, 0xffe3c6, 1.62, 0xb7d0e6, 0xe0b691, 0xffc79f),
+  campo: atmo('campo', 0xeed7a4, 0xfff0d6, 1.78, 0xc9e2da, 0xdcc18c, 0xffe3ae),
 };
+const HEMI_I = 0.85 * CONFIG.lightExposure;
+
+// Where the low sun sits, as a direction from the rider: a little left of
+// straight ahead and a few degrees up, so it hangs over the sea inside a
+// portrait frame with either camera height. Celestial, so the dome draws it
+// at infinity and nothing on the road parallaxes against it.
+const SUN_DIR = new THREE.Vector3(0.176, 0.07, 0.985).normalize();
+// The water's reflection of that sun, on the ground plane, runs out from the
+// rider along the same bearing.
+const SUN_BEARING = Math.atan2(SUN_DIR.x, SUN_DIR.z);
 
 // ---------------------------------------------------------------------------
 // The bend field
@@ -157,7 +173,8 @@ function rimBendPatch(shader: {
 
 // Every world-space material goes through this so the whole Malecon bends as
 // one. Toon materials additionally get the rim light; unlit materials (glint,
-// kites, banners) just bend. Celestial things (sun, halo, sky) are NOT wrapped.
+// kites, banners) just bend. Celestial things (sky dome, clouds, the mountain
+// backdrop) are NOT wrapped.
 export function worldMaterial<T extends THREE.Material>(m: T): T {
   if ((m as unknown as THREE.MeshToonMaterial).isMeshToonMaterial) {
     m.onBeforeCompile = rimBendPatch as unknown as (shader: unknown) => void;
@@ -167,6 +184,37 @@ export function worldMaterial<T extends THREE.Material>(m: T): T {
     m.customProgramCacheKey = () => 'eccbend';
   }
   return m;
+}
+
+type ShaderPatch = (shader: THREE.WebGLProgramParametersWithUniforms) => void;
+
+// Chain one more shader edit onto a material that already went through
+// worldMaterial. The key keeps each variant in its own cached program.
+function extendPatch<T extends THREE.Material>(m: T, key: string, patch: ShaderPatch): T {
+  const base = m.onBeforeCompile.bind(m);
+  const baseKey = m.customProgramCacheKey();
+  m.onBeforeCompile = (shader, renderer) => {
+    base(shader, renderer);
+    patch(shader);
+  };
+  m.customProgramCacheKey = () => `${baseKey}-${key}`;
+  return m;
+}
+
+// A per-material fog reach. Some things belong to a longer view than the
+// road: the open sea should stay turquoise out to the horizon, and La Cinta's
+// arch should rise out of the haze instead of popping in. Same fog color and
+// near distance, only the far end moves.
+function farFog<T extends THREE.Material>(m: T, far: number): T {
+  return extendPatch(m, `fog${far}`, (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <fog_fragment>',
+      `#ifdef USE_FOG
+        float fogFactor = smoothstep( fogNear, ${far.toFixed(1)}, vFogDepth );
+        gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+      #endif`,
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +346,27 @@ function cgeo(
   if (ry) g.rotateY(ry);
   g.translate(x, y, z);
   parts.push(paint(g, color));
+}
+
+// A flat triangle with a face on each side (separate vertices, so each face
+// keeps its own flat normal), shaped to merge with the box parts (indexed,
+// with normals and uvs).
+function sailGeometry(a: [number, number], b: [number, number], c: [number, number]): THREE.BufferGeometry {
+  const t = 0.03;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      [a[0], a[1], t, b[0], b[1], t, c[0], c[1], t, a[0], a[1], -t, b[0], b[1], -t, c[0], c[1], -t],
+      3,
+    ),
+  );
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
+  // wind both faces outward whatever the corner order was
+  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  g.setIndex(cross > 0 ? [0, 1, 2, 3, 5, 4] : [0, 2, 1, 3, 4, 5]);
+  g.computeVertexNormals();
+  return g;
 }
 
 // ---------------------------------------------------------------------------
@@ -666,8 +735,8 @@ function makePalm(lean: number): THREE.BufferGeometry {
 
 function makeSeawallPost(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  cbox(parts, 0.2, 0.7, 0.2, 0, 0.85, 0, 0xf6efdf);
-  cbox(parts, 0.3, 0.1, 0.3, 0, 1.24, 0, 0xf6efdf);
+  cbox(parts, 0.18, 0.46, 0.18, 0, 0.6, 0, 0xf6efdf);
+  cbox(parts, 0.27, 0.08, 0.27, 0, 0.84, 0, 0xf6efdf);
   return mergeGeometries(parts)!;
 }
 
@@ -1459,6 +1528,224 @@ class Gallina {
 }
 
 // ---------------------------------------------------------------------------
+// Sky, clouds and the mountain backdrop: celestial, never bent, never fogged
+// by the scene fog (the dome and backdrop fade to the fog color themselves).
+// ---------------------------------------------------------------------------
+
+const DEG = Math.PI / 180;
+
+const SKY_VERT = /* glsl */ `
+varying vec3 vDir;
+void main() {
+  vDir = position;
+  // centered on the camera, so the sky never parallaxes and never clips
+  gl_Position = projectionMatrix * viewMatrix * vec4( cameraPosition + position, 1.0 );
+}
+`;
+
+const SKY_FRAG = /* glsl */ `
+uniform vec3 uTop;
+uniform vec3 uMid;
+uniform vec3 uCream;
+uniform vec3 uHorizon;
+uniform vec3 uSunDir;
+uniform vec3 uSun;
+uniform vec3 uGlow;
+varying vec3 vDir;
+void main() {
+  vec3 d = normalize( vDir );
+  float e = d.y;
+  // peach on the horizon (the fog color), a cream band, then blue overhead
+  vec3 c = mix( uHorizon, uCream, smoothstep( 0.0, 0.07, e ) );
+  c = mix( c, uMid, smoothstep( 0.05, 0.24, e ) );
+  c = mix( c, uTop, smoothstep( 0.22, 0.46, e ) );
+  float s = max( dot( d, uSunDir ), 0.0 );
+  // bloom: a warm peach ring hugging the disc and a wide soft wash, kept
+  // below the disc's own brightness so the sun still reads as a shape
+  c = mix( c, uGlow, pow( s, 260.0 ) * 0.75 + pow( s, 14.0 ) * 0.28 );
+  // the flare lying along the horizon under the sun
+  vec2 hz = normalize( d.xz + vec2( 1e-5 ) );
+  vec2 sz = normalize( uSunDir.xz );
+  c = mix( c, uGlow, exp( -abs( e - 0.012 ) * 36.0 ) * pow( max( dot( hz, sz ), 0.0 ), 50.0 ) * 0.4 );
+  // the disc: crisp, with a hairline of softness so it never shimmers
+  c = mix( c, uSun, smoothstep( 0.99881, 0.99894, s ) );
+  gl_FragColor = vec4( c, 1.0 );
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+// Cel clouds: overlapping solid circles, cream underneath and white on top
+// with the white nudged toward the sun (screen left), a flat-cut base and a
+// thin peach rim along it. No gradients: they have to sit with the toon world.
+function cloudAtlas(): { tex: THREE.CanvasTexture; big: AtlasRect; small: AtlasRect } {
+  const W = 512;
+  const H = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const cloud = (ox: number, oy: number, w: number, h: number, blobs: Array<[number, number, number]>): void => {
+    const base = oy + h * 0.86;
+    const circle = (cx: number, cy: number, r: number): void => {
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fill();
+    };
+    g.save();
+    g.beginPath();
+    g.rect(ox, oy, w, base - oy);
+    g.clip();
+    g.fillStyle = '#ffe3c0';
+    for (const [x, y, r] of blobs) circle(ox + x * w, oy + y * h, r * h);
+    g.fillStyle = '#ffffff';
+    for (const [x, y, r] of blobs) circle(ox + x * w - r * h * 0.08, oy + y * h - r * h * 0.16, r * h * 0.86);
+    g.restore();
+    // the flat base's rim, only where the cloud actually touches the cut
+    g.fillStyle = '#ffd3b6';
+    for (const [x, y, r] of blobs) {
+      const dy = base - (oy + y * h);
+      const rr = r * h;
+      if (Math.abs(dy) < rr) {
+        const half = Math.sqrt(rr * rr - dy * dy);
+        g.fillRect(ox + x * w - half, base - 3, half * 2, 3);
+      }
+    }
+  };
+  // big cumulus: 512 x 150
+  cloud(4, 4, 504, 146, [
+    [0.06, 0.8, 0.12],
+    [0.16, 0.7, 0.22],
+    [0.3, 0.6, 0.32],
+    [0.41, 0.46, 0.26],
+    [0.52, 0.5, 0.44],
+    [0.62, 0.42, 0.25],
+    [0.7, 0.6, 0.34],
+    [0.84, 0.7, 0.24],
+    [0.94, 0.8, 0.12],
+  ]);
+  // small puff: 256 x 96
+  cloud(4, 156, 248, 96, [
+    [0.12, 0.76, 0.16],
+    [0.28, 0.62, 0.28],
+    [0.48, 0.52, 0.4],
+    [0.68, 0.6, 0.3],
+    [0.86, 0.72, 0.18],
+  ]);
+  const rect = (x: number, y: number, w: number, h: number): AtlasRect => ({
+    u0: x / W,
+    v0: 1 - (y + h) / H,
+    u1: (x + w) / W,
+    v1: 1 - y / H,
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { tex, big: rect(4, 4, 504, 146), small: rect(4, 156, 248, 96) };
+}
+
+const BACKDROP_VERT = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+}
+`;
+
+// Three rows of 128 px in a 384 px canvas: row 0 on top (v 2/3..1).
+const BACKDROP_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uRowA;
+uniform float uRowB;
+uniform float uMix;
+uniform vec3 uHaze;
+varying vec2 vUv;
+void main() {
+  vec4 a = texture2D( uMap, vec2( vUv.x, ( vUv.y + 2.0 - uRowA ) / 3.0 ) );
+  vec4 b = texture2D( uMap, vec2( vUv.x, ( vUv.y + 2.0 - uRowB ) / 3.0 ) );
+  vec4 c = mix( a, b, uMix );
+  if ( c.a < 0.004 ) discard;
+  // the same air as the road: lean toward the live fog color
+  c.rgb = mix( c.rgb, uHaze, 0.32 );
+  gl_FragColor = c;
+  #include <colorspace_fragment>
+}
+`;
+
+const BACKDROP_ROWS: Record<Tramo, number> = { malecon: 0, zona: 1, campo: 2 };
+
+// Low-poly ridges painted flat: each ridge is a jagged polyline filled in its
+// haze color, then split into facets from every peak down to the base, with
+// the sun side (screen left) a shade lighter. Everything sits on the land
+// side of the canvas; the sea half stays clear so the water meets the sky.
+function backdropCanvas(): HTMLCanvasElement {
+  const W = 1024;
+  const ROW = 128;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = ROW * 3;
+  const g = c.getContext('2d')!;
+  const ridge = (
+    row: number,
+    x0: number,
+    x1: number,
+    base: number,
+    peakMin: number,
+    peakMax: number,
+    step: number,
+    lit: string,
+    shade: string,
+  ): void => {
+    const top = row * ROW;
+    const yb = top + ROW - 4;
+    const pts: Array<[number, number]> = [[x0, yb - base]];
+    for (let x = x0 + step * 0.5; x < x1; x += step * (0.6 + Math.random() * 0.8)) {
+      const peak = peakMin + Math.random() * (peakMax - peakMin);
+      // taper toward both ends so a range rises and falls instead of stopping
+      const t = Math.min(1, (x - x0) / 120, (x1 - x) / 90);
+      pts.push([x, yb - base - peak * t]);
+    }
+    pts.push([x1, yb - base]);
+    g.fillStyle = shade;
+    g.beginPath();
+    g.moveTo(x0, yb);
+    for (const [x, y] of pts) g.lineTo(x, y);
+    g.lineTo(x1, yb);
+    g.closePath();
+    g.fill();
+    // sun-side facets: from each peak down-left to the base
+    g.fillStyle = lit;
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = pts[i];
+      const [qx, qy] = pts[i - 1];
+      g.beginPath();
+      g.moveTo(qx, qy);
+      g.lineTo(px, py);
+      g.lineTo(px - (yb - py) * 0.35, yb);
+      g.lineTo(qx, yb);
+      g.closePath();
+      g.fill();
+    }
+  };
+  // Row 0, el Malecon: two hazy ridges far inland and the city's towers.
+  ridge(0, 520, 1024, 0, 30, 52, 76, '#ecd3b8', '#dfc0a4');
+  g.fillStyle = '#dcbc9f';
+  for (let x = 548; x < 760; x += 12 + Math.random() * 16) {
+    const w = 7 + Math.random() * 10;
+    const h = 16 + Math.random() * 26;
+    g.fillRect(x, ROW - 4 - h, w, h);
+  }
+  ridge(0, 640, 1024, 0, 16, 30, 58, '#e3c4a6', '#d4ae92');
+  // Row 1, la Zona: the ridges alone; the colonial walls hide the low city.
+  ridge(1, 520, 1024, 0, 32, 54, 76, '#efcdb8', '#e2b9a3');
+  ridge(1, 610, 1024, 0, 18, 32, 58, '#e5bca4', '#d7a78f');
+  // Row 2, el campo: the Cordillera Central, taller and green, with a nearer
+  // line of lomas in front.
+  ridge(2, 500, 1024, 0, 44, 70, 84, '#bfd197', '#a8c085');
+  ridge(2, 540, 1024, 0, 20, 36, 54, '#a3c276', '#8fb064');
+  return c;
+}
+
+// ---------------------------------------------------------------------------
 
 interface Confetto {
   im: THREE.InstancedMesh;
@@ -1506,8 +1793,16 @@ export class World {
   private fogRef!: THREE.Fog;
   private hemi!: THREE.HemisphereLight;
   private sunLight!: THREE.DirectionalLight;
-  private clouds: Array<{ mesh: THREE.Mesh; speed: number }> = [];
-  private boats: Array<{ mesh: THREE.Mesh; phase: number; drift: number }> = [];
+  private cloudLayer!: THREE.Mesh;
+  private cloudPeriod = 600;
+  private boats!: THREE.Mesh;
+  private backdropU!: {
+    uMap: { value: THREE.Texture };
+    uRowA: { value: number };
+    uRowB: { value: number };
+    uMix: { value: number };
+    uHaze: { value: THREE.Color };
+  };
   private tramoNow: Tramo = 'malecon';
   onTramoChange: ((t: Tramo) => void) | null = null;
   private gallinas: Gallina[] = [];
@@ -1548,7 +1843,7 @@ export class World {
     this.buildLights(scene);
     this.buildGround(scene);
     this.buildSea(scene);
-    this.buildMountains(scene);
+    this.buildBackdrop(scene);
     this.buildRoad(scene, renderer);
     this.buildTape(scene);
     this.buildConfetti(scene);
@@ -1570,132 +1865,113 @@ export class World {
   }
 
   private buildSky(scene: THREE.Scene): void {
-    const c = document.createElement('canvas');
-    c.width = 2;
-    c.height = 512;
-    const g = c.getContext('2d')!;
-    const grad = g.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, hex(PALETTE.skyTop));
-    grad.addColorStop(0.68, hex(PALETTE.skyHorizon));
-    grad.addColorStop(1, '#ffe9bc');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 2, 512);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    scene.background = tex;
-
     scene.fog = new THREE.Fog(PALETTE.skyHorizon, CONFIG.fogNear, CONFIG.fogFar);
     this.fogRef = scene.fog as THREE.Fog;
 
-    // Clouds: a few cream puffs drifting high and far, one shared texture.
-    // Not bend-patched and not fogged: they belong to the sky, not the road.
-    const cc = document.createElement('canvas');
-    cc.width = 256;
-    cc.height = 128;
-    const cg = cc.getContext('2d')!;
-    const puff = (x: number, y: number, r: number): void => {
-      const rg = cg.createRadialGradient(x, y, 0, x, y, r);
-      rg.addColorStop(0, 'rgba(255,248,236,0.92)');
-      rg.addColorStop(0.62, 'rgba(255,248,236,0.5)');
-      rg.addColorStop(1, 'rgba(255,248,236,0)');
-      cg.fillStyle = rg;
-      cg.fillRect(x - r, y - r, r * 2, r * 2);
-    };
-    puff(70, 74, 50);
-    puff(118, 60, 62);
-    puff(172, 74, 46);
-    puff(104, 86, 38);
-    const cloudTex = new THREE.CanvasTexture(cc);
-    const cloudMat = new THREE.MeshBasicMaterial({
-      map: cloudTex,
-      transparent: true,
-      fog: false,
-      depthWrite: false,
-      opacity: 0.8,
-      side: THREE.DoubleSide, // the plane's +z normal points away from the camera
-    });
-    for (let i = 0; i < 6; i++) {
-      const w = 36 + Math.random() * 30;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.42), cloudMat);
-      m.position.set(-170 + Math.random() * 340, 30 + Math.random() * 30, 238 + i * 13);
-      scene.add(m);
-      this.clouds.push({ mesh: m, speed: 0.35 + Math.random() * 0.5 });
-    }
+    // The sky is a dome that rides with the camera, colored by elevation, so
+    // the peach band sits exactly on the real horizon at any aspect ratio.
+    // Its horizon uniform IS the fog color object: every tramo mood the fog
+    // glides into, the sky glides into with it, and fogged scenery melts into
+    // the sky instead of standing in front of it as a cutout. The sun, its
+    // bloom and the flare along the horizon are drawn in the same pass.
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(385, 32, 16),
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uTop: { value: new THREE.Color(PALETTE.skyTop) },
+          uMid: { value: new THREE.Color(0xa9dcea) },
+          uCream: { value: new THREE.Color(PALETTE.sunGlow) },
+          uHorizon: { value: this.fogRef.color },
+          uSunDir: { value: SUN_DIR },
+          uSun: { value: new THREE.Color(0xfffaea) },
+          uGlow: { value: new THREE.Color(0xffc987) },
+        },
+        vertexShader: SKY_VERT,
+        fragmentShader: SKY_FRAG,
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    dome.renderOrder = -10; // first in the opaque pass; everything paints over it
+    dome.frustumCulled = false;
+    scene.add(dome);
 
-    // Celestial: deliberately NOT bend-patched.
-    const sun = new THREE.Mesh(
-      new THREE.CircleGeometry(14, 32),
-      new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow, fog: false, side: THREE.DoubleSide }),
+    // Clouds: flat cel cumulus, two big ones low over the horizon and a few
+    // small ones higher up, all in one merged geometry drawn once. Two copies
+    // of the set sit one period apart, so the whole layer drifts as a single
+    // group and wraps without a seam. Not bend-patched and not fogged: they
+    // belong to the sky, not the road.
+    const { tex: cloudTex, big, small } = cloudAtlas();
+    const PERIOD = 600;
+    const parts: THREE.BufferGeometry[] = [];
+    for (const copy of [0, -PERIOD]) {
+      const layout: Array<[number, number, number, AtlasRect]> = [
+        // [x, elevation deg, width, shape]
+        [-150, 5.2, 104, big],
+        [95, 6.4, 92, big],
+        [-60, 11.5, 44, small],
+        [30, 15.5, 36, small],
+        [170, 12.5, 40, small],
+        [-230, 16.5, 34, small],
+        [250, 9.5, 50, small],
+        [-10, 14, 30, small],
+      ];
+      for (const [x, el, w, r] of layout) {
+        const z = 300 + ((x * 7) % 40 + 40) % 40; // a little depth jitter, deterministic
+        const h = w * ((r.v1 - r.v0) / (r.u1 - r.u0)) * 0.5; // atlas is 2:1
+        const q = quadUV(w, h, r);
+        q.rotateY(Math.PI); // face the camera; the texture's left stays screen left
+        q.translate(x + copy, 3 + Math.tan(el * DEG) * z + h / 2, z);
+        parts.push(q);
+      }
+    }
+    this.cloudLayer = new THREE.Mesh(
+      mergeGeometries(parts)!,
+      new THREE.MeshBasicMaterial({ map: cloudTex, transparent: true, fog: false, depthWrite: false }),
     );
-    sun.position.set(58, 11, 155);
-    scene.add(sun);
-    const halo = new THREE.Mesh(
-      new THREE.CircleGeometry(27, 32),
-      new THREE.MeshBasicMaterial({
-        color: PALETTE.sunGlow,
-        fog: false,
-        side: THREE.DoubleSide,
-        // A flat camera-facing disc has no front/back ordering to resolve, so
-        // skip the two-pass transparency three.js would otherwise do here.
-        forceSinglePass: true,
-        transparent: true,
-        opacity: 0.35,
-      }),
-    );
-    halo.position.set(58, 11, 157);
-    scene.add(halo);
-    // The soft outer bloom and a wide flare hugging the horizon: the closest
-    // a mobile toon game gets to bloom for the price of two quads.
-    const glow2 = new THREE.Mesh(
-      new THREE.CircleGeometry(44, 32),
-      new THREE.MeshBasicMaterial({
-        color: PALETTE.sunGlow,
-        fog: false,
-        side: THREE.DoubleSide,
-        forceSinglePass: true,
-        transparent: true,
-        opacity: 0.16,
-      }),
-    );
-    glow2.position.set(58, 11, 159);
-    scene.add(glow2);
-    const flare = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 32),
-      new THREE.MeshBasicMaterial({
-        color: 0xffefc8,
-        fog: false,
-        side: THREE.DoubleSide,
-        forceSinglePass: true,
-        transparent: true,
-        opacity: 0.12,
-      }),
-    );
-    flare.scale.set(120, 7, 1);
-    flare.position.set(45, 6, 161);
-    scene.add(flare);
+    this.cloudLayer.frustumCulled = false;
+    this.cloudLayer.renderOrder = -6; // behind the mountain backdrop, drawn first
+    this.cloudPeriod = PERIOD;
+    scene.add(this.cloudLayer);
   }
 
   private buildLights(scene: THREE.Scene): void {
-    const hemi = new THREE.HemisphereLight(0xbfe3ef, 0xe8c39a, 0.85);
+    const hemi = new THREE.HemisphereLight(0xbfe3ef, 0xe8c39a, HEMI_I);
     this.hemi = hemi;
     scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xffe3b3, 1.7);
+    // The key light comes from the sea side, a little behind the rider and
+    // about 28 degrees up, so the faces the camera actually sees (the rider's
+    // back, car rears, oncoming fronts) land on the middle toon step and the
+    // tops and sea-facing sides go full: the classic three-tone read. The
+    // visible sun hangs ahead in the dome; nobody can see that it lies.
+    const sun = new THREE.DirectionalLight(ATMOS.malecon.sun, ATMOS.malecon.sunI);
     this.sunLight = sun;
-    sun.position.set(40, 22, 90);
+    sun.position.set(55, 30, 2);
     sun.target.position.set(0, 0, 10);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
+    // The light looks across the road now, so the shadow box's width runs
+    // along the road: about 15 m behind the rider to 80 m ahead, and from
+    // the sea wall up over the rooftops on the far side.
     const sc = sun.shadow.camera;
-    sc.left = -45;
-    sc.right = 45;
-    sc.top = 45;
-    sc.bottom = -45;
+    sc.left = -78;
+    sc.right = 26;
+    sc.top = 28;
+    sc.bottom = -12;
     sc.near = 10;
     sc.far = 220;
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.6;
     scene.add(sun, sun.target);
+
+    // Shadowless fill from over the camera's shoulder: lifts what the key
+    // light leaves on the dark step without flattening the form.
+    const fill = new THREE.DirectionalLight(0xffeedd, CONFIG.fillLight * CONFIG.lightExposure);
+    fill.position.set(-15, 12, -30);
+    fill.target.position.set(0, 0, 10);
+    scene.add(fill, fill.target);
   }
 
   private buildGround(scene: THREE.Scene): void {
@@ -1726,14 +2002,16 @@ export class World {
       scene.add(walk);
     }
 
-    // El malecon: base wall and rail; the balusters are instanced in the belts
-    const baseGeo = new THREE.BoxGeometry(0.5, 0.6, 420, 1, 1, 24);
+    // El malecon: base wall and rail; the balusters are instanced in the belts.
+    // Kept low (the rail tops out under a metre) so a phone-height camera sees
+    // open water over it instead of a cream wall.
+    const baseGeo = new THREE.BoxGeometry(0.5, 0.4, 420, 1, 1, 24);
     const base = new THREE.Mesh(baseGeo, toonMaterial(PALETTE.seawallCream));
-    base.position.set(11.85, 0.3, 120);
+    base.position.set(11.85, 0.2, 120);
     scene.add(base);
-    const railGeo = new THREE.BoxGeometry(0.42, 0.14, 420, 1, 1, 24);
+    const railGeo = new THREE.BoxGeometry(0.42, 0.12, 420, 1, 1, 24);
     const rail = new THREE.Mesh(railGeo, toonMaterial(0xf6efdf));
-    rail.position.set(11.85, 1.28, 120);
+    rail.position.set(11.85, 0.88, 120);
     scene.add(rail);
   }
 
@@ -1741,7 +2019,12 @@ export class World {
     const flat = (w: number, l: number, color: number, x: number, y: number): void => {
       const geo = new THREE.PlaneGeometry(w, l, 1, 24);
       geo.rotateX(-Math.PI / 2);
-      const mat = toonMaterial(color);
+      // Its own material, not the shared toon cache: the water keeps its
+      // turquoise far past the road's haze, out to the horizon.
+      const mat = farFog(
+        worldMaterial(new THREE.MeshToonMaterial({ color, gradientMap: getGradientMap() })),
+        CONFIG.seaFogFar,
+      );
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, 120);
       scene.add(m);
@@ -1750,8 +2033,9 @@ export class World {
       // leaving the Malecon.
       this.seaMats.push({ mat, sea: new THREE.Color(color) });
     };
-    flat(33, 420, PALETTE.seaNear, 12 + 16.5, -0.5);
-    flat(195, 420, PALETTE.seaDeep, 45 + 97.5, -0.55);
+    // Just under the promenade, so the water shows over the low rail.
+    flat(33, 420, PALETTE.seaNear, 12 + 16.5, -0.15);
+    flat(195, 420, PALETTE.seaDeep, 45 + 97.5, -0.2);
 
     // Shimmer: two drifting fleck layers
     const fleckCanvas = (count: number, alpha: number): THREE.CanvasTexture => {
@@ -1783,10 +2067,13 @@ export class World {
       scene.add(m);
       this.waterFx.push({ mat, base: opacity }); // fades out when the water does
     };
-    mkShimmer(this.shimmerA, 0.22, -0.42);
-    mkShimmer(this.shimmerB, 0.15, -0.4);
+    mkShimmer(this.shimmerA, 0.22, -0.08);
+    mkShimmer(this.shimmerB, 0.15, -0.06);
 
-    // The sun's glint road on the water
+    // The sun's glint road on the water: a tapering strip laid along the
+    // sun's bearing from the rider, so it points straight at the disc in the
+    // dome. Its near end starts behind the rail; the far end fades into the
+    // horizon. Additive and unfogged, so it glows through the haze.
     const gc = document.createElement('canvas');
     gc.width = 128;
     gc.height = 256;
@@ -1797,9 +2084,18 @@ export class World {
     grad.addColorStop(1, 'rgba(255,243,196,0)');
     gg.fillStyle = grad;
     gg.fillRect(0, 0, 128, 256);
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < 52; i++) {
       gg.clearRect(0, Math.random() * 256, 128, 1 + Math.random() * 3);
     }
+    // fade both ends (canvas top is the far end)
+    gg.globalCompositeOperation = 'destination-in';
+    const along = gg.createLinearGradient(0, 0, 0, 256);
+    along.addColorStop(0, 'rgba(0,0,0,0)');
+    along.addColorStop(0.35, 'rgba(0,0,0,1)');
+    along.addColorStop(0.85, 'rgba(0,0,0,1)');
+    along.addColorStop(1, 'rgba(0,0,0,0)');
+    gg.fillStyle = along;
+    gg.fillRect(0, 0, 128, 256);
     const glintTex = new THREE.CanvasTexture(gc);
     this.glintMat = worldMaterial(
       new THREE.MeshBasicMaterial({
@@ -1808,48 +2104,86 @@ export class World {
         opacity: 0.42,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        fog: false,
       }),
     );
-    const glintGeo = new THREE.PlaneGeometry(13, 150, 1, 16);
-    glintGeo.rotateX(-Math.PI / 2);
+    const R0 = 70; // meters from the rider along the bearing
+    const R1 = 330;
+    const glintGeo = new THREE.BufferGeometry();
+    glintGeo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([-2.5, 0, R0, 2.5, 0, R0, -16, 0, R1, 16, 0, R1], 3),
+    );
+    glintGeo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+    glintGeo.setIndex([0, 2, 1, 1, 2, 3]);
+    glintGeo.rotateY(SUN_BEARING);
     const glint = new THREE.Mesh(glintGeo, this.glintMat);
-    glint.position.set(56, -0.38, 100);
+    glint.position.set(0, -0.04, -6);
+    glint.frustumCulled = false;
     scene.add(glint);
     this.waterFx.push({ mat: this.glintMat, base: 0.42 });
 
-    // Veleros: three small sails far out, bobbing, drifting along the coast.
-    // They vanish with the water when el campo takes over.
+    // Veleros: three small sails out on the sun's road, one merged mesh that
+    // bobs as a whole. They vanish with the water when el campo takes over.
+    const boatParts: THREE.BufferGeometry[] = [];
     for (let i = 0; i < 3; i++) {
       const parts: THREE.BufferGeometry[] = [];
       cbox(parts, 2.2, 0.5, 0.8, 0, 0.25, 0, i === 1 ? 0xce1126 : 0xf2e9dc); // hull
       cgeo(parts, new THREE.CylinderGeometry(0.05, 0.05, 3.2, 6), 0x6b5645, 0.2, 1.85, 0);
-      const sail = new THREE.BoxGeometry(1.6, 2.6, 0.06);
-      sail.translate(0.9, 1.9, 0); // hangs off the mast
-      parts.push(paint(sail, i === 2 ? 0xffd3b6 : 0xffffff));
-      const m = new THREE.Mesh(mergeGeometries(parts)!, vcToonMaterial());
-      m.position.set(52 + i * 17, -0.3, 110 + i * 55);
-      m.rotation.y = 0.5 + i * 0.4;
-      m.scale.setScalar(1.6);
-      scene.add(m);
-      this.boats.push({ mesh: m, phase: i * 2.1, drift: 0.35 + i * 0.12 });
+      // A mainsail and a jib: triangles are what make a sail read as a sail
+      // at 150 m; rectangles read as billboards.
+      parts.push(paint(sailGeometry([0.25, 0.6], [0.25, 3.35], [1.7, 0.6]), i === 2 ? 0xffd3b6 : 0xffffff));
+      parts.push(paint(sailGeometry([0.15, 3.1], [0.15, 0.6], [-0.95, 0.6]), 0xffffff));
+      const boat = mergeGeometries(parts)!;
+      boat.scale(1.6, 1.6, 1.6);
+      boat.rotateY(0.5 + i * 0.4);
+      boat.translate(18 + i * 8, 0, 90 + i * 45);
+      boatParts.push(boat);
     }
+    this.boats = new THREE.Mesh(
+      mergeGeometries(boatParts)!,
+      farFog(
+        worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+        CONFIG.seaFogFar,
+      ),
+    );
+    scene.add(this.boats);
   }
 
-  private buildMountains(scene: THREE.Scene): void {
-    // Distant loma silhouettes inland. Static: they read as infinitely far.
-    const mat = toonMaterial(PALETTE.mountainHaze);
-    const ridge = (x: number, z: number, w: number, h: number, ry: number): void => {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(w, h, 4), mat);
-      m.position.set(x, h / 2 - 1, z);
-      m.rotation.y = ry;
-      m.scale.z = 0.55;
-      scene.add(m);
+  // Distant lomas inland: one backdrop plane holding a row per tramo (the
+  // Malecon's ridges with the city's towers, the Zona's, and the taller green
+  // Cordillera for el campo). Unfogged but pre-hazed, and pulled toward the
+  // live fog color in the shader, so it sits in the same air as the road.
+  // Crossing a border crossfades one row into the next.
+  private buildBackdrop(scene: THREE.Scene): void {
+    const tex = new THREE.CanvasTexture(backdropCanvas());
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = false; // rows share one canvas; mips would bleed them together
+    tex.minFilter = THREE.LinearFilter;
+    this.backdropU = {
+      uMap: { value: tex },
+      uRowA: { value: 0 },
+      uRowB: { value: 0 },
+      uMix: { value: 0 },
+      uHaze: { value: this.fogRef.color },
     };
-    ridge(-62, 40, 42, 15, 0.4);
-    ridge(-58, 95, 55, 21, 0.9);
-    ridge(-70, 150, 48, 17, 0.2);
-    ridge(-85, 215, 70, 26, 0.7);
-    ridge(-95, 300, 80, 24, 0.5);
+    const geo = new THREE.PlaneGeometry(520, 60);
+    geo.rotateY(Math.PI); // face the camera; the canvas's left stays screen left (the sea)
+    const m = new THREE.Mesh(
+      geo,
+      new THREE.ShaderMaterial({
+        uniforms: this.backdropU,
+        vertexShader: BACKDROP_VERT,
+        fragmentShader: BACKDROP_FRAG,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    m.position.set(0, 22, 250); // bottom edge at y -8, under the horizon
+    m.renderOrder = -4; // after the clouds (-6), which sit behind it
+    m.frustumCulled = false;
+    scene.add(m);
   }
 
   // One road texture per tramo, all built at boot: warm asphalt on the
@@ -2192,17 +2526,21 @@ export class World {
     RIM_U.value.lerp(a.rim, ak);
 
     // Clouds drift on their own time, indifferent to the corre corre below
-    for (const cl of this.clouds) {
-      cl.mesh.position.x += cl.speed * dt;
-      if (cl.mesh.position.x > 200) cl.mesh.position.x = -200;
+    this.cloudLayer.position.x = (this.t * 0.5) % this.cloudPeriod;
+    // Sailboats bob; gone once the sea is fields
+    this.boats.visible = this.landBlend < 0.35;
+    this.boats.position.y = -0.3 + Math.sin(this.t * 0.9) * 0.12;
+    // The mountains crossfade to the new tramo's row after a border
+    const row = BACKDROP_ROWS[this.tramoNow];
+    const bu = this.backdropU;
+    if (bu.uRowB.value !== row) {
+      if (bu.uMix.value > 0.5) bu.uRowA.value = bu.uRowB.value;
+      bu.uRowB.value = row;
+      bu.uMix.value = 0;
     }
-    // Sailboats bob and slide along the coast; gone once the sea is fields
-    for (const b of this.boats) {
-      b.mesh.visible = this.landBlend < 0.35;
-      b.mesh.position.y = -0.3 + Math.sin(this.t * 0.9 + b.phase) * 0.18;
-      b.mesh.rotation.z = Math.sin(this.t * 0.7 + b.phase) * 0.05;
-      b.mesh.position.z -= b.drift * dt;
-      if (b.mesh.position.z < 60) b.mesh.position.z = 260;
+    if (bu.uMix.value < 1) {
+      bu.uMix.value = Math.min(1, bu.uMix.value + dt * 0.5);
+      if (bu.uMix.value >= 1) bu.uRowA.value = row;
     }
 
     // El campo is inland: the sea drains to farmland over about a second and
