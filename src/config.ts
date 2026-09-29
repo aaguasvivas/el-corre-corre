@@ -168,12 +168,21 @@ export const CONFIG = {
   camBack: 6.2,
   camUp: 2.8,
   camLookAhead: 8,
+  camLookY: 1.1, // FEEL: height the camera aims at, landscape and desktop
   fovMobile: 68,
   fovDesktop: 60,
+  // Portrait framing (a phone held upright). The landscape camera spent 41%
+  // of a tall frame on sky and squeezed the whole road into a thin band.
+  camUpPortrait: 3.6, // FEEL: camera height in portrait; higher = more road ahead, less sky
+  camLookYPortrait: -0.2, // FEEL: aim point in portrait; lower = steeper view, the ride sits higher above the pedals
+  camXFollowPortrait: 0.9, // FEEL: in a tall frame the ride must stay on screen at the kerb
   camDamping: 6, // FEEL: camera lag chasing the player laterally
   camXFollow: 0.72, // FEEL: fraction of player x the camera follows; <1 keeps edges in view
   fovSpeedKick: 6, // FEEL: extra FOV at top speed; speed you can feel in your stomach
   fovCafecito: 3, // FEEL: extra kick while the cafecito burns
+  fovGasKick: 5, // FEEL: the stomach drop when you floor it, on top of the speed kick
+  fovBrakeDip: 2, // FEEL: the frame tightens a little when you brake
+  camGasPullBack: 0.45, // FEEL: metres the bike surges away from the lens a fondo
 
   // Atmosphere
   fogNear: 60,
@@ -306,17 +315,29 @@ export const CONFIG = {
   cafecitoSec: 5,
   cafecitoBoost: 1.35, // FEEL: cafecito speed multiplier
 
-  // El acelerador. Speed is the risk dial: gas raises the ramp speed and pays
-  // a multiplier, the brake lowers it to a floor, never to a stop (el corre
-  // corre never stops). Gas does not stack with the cafecito, so the telegraph
-  // invariant is bounded by whichever of the two is larger (tested).
-  gasSpeedMult: 1.3, // FEEL: top speed multiplier at full throttle
-  brakeSpeedMult: 0.7, // FEEL: speed floor at full brake
-  throttleResponse: 3.5, // FEEL: how fast speed follows the throttle, per second
-  gasScoreMult: 1.25, // FEEL: ALL points x this while a fondo
-  gasEngageAt: 0.5, // throttle above this is "a fondo": the pill and the multiplier
-  touchThrottleDeadPx: 30, // FEEL: vertical drag before the throttle wakes up
-  touchThrottleRangePx: 150, // FEEL: pixels past the dead zone to full gas / full brake
+  // El pedal. Speed is the risk dial: hold ¡DALE! and the ride surges and
+  // pays, hold FRENO and it slows to a floor, never to a stop (el corre corre
+  // never stops). Release both and it cruises. Gas does not stack with the
+  // cafecito.
+  // DECISION: two on-screen pedals, bottom left, for the non-dominant thumb;
+  // the dominant thumb keeps drag-anywhere steering. A finger that lands on
+  // the pedals never steers. The finger-height throttle is gone.
+  gasSpeedMult: 1.3, // FEEL: speed multiplier at full gas, before the ceiling below
+  brakeSpeedMult: 0.75, // FEEL: speed floor at full brake
+  gasResponse: 3.5, // FEEL: how fast speed rises toward the gas target, per second
+  brakeResponse: 6, // FEEL: how fast speed drops (brake or gas release); the brake must bite
+  // SACRED: gas and the cafecito never lift the rider past this (or past the
+  // ride's own cruise speed, if that is higher). It keeps the telegraph rule:
+  // at the 70% fog line (104 m ahead of the rider with the gas pull-back) a
+  // car closing at 52 + 17 m/s gives 1.51 s. config.test.ts derives it.
+  gasMaxMps: 52,
+  gasScoreMult: 1.5, // FEEL: ALL points x this while a fondo (felt speed, not the raw press)
+  brakeScoreMult: 0.5, // FEEL: ALL points x this while braking: safe, slow to score
+  gasEngageAt: 0.5, // |throttle| past this is "a fondo" (gas) or "frenando" (brake)
+  gasSpeedLines: 1, // FEEL: speed-line strength while floored, 0..1, at any speed
+  gasPitchRad: 0.06, // FEEL: the rider tucks forward this much on gas (the Civic squats instead)
+  brakePitchRad: 0.05, // FEEL: the rider sits back this much on the brake (the Civic dives)
+  pedalPitchResponse: 12, // FEEL: how fast the ride answers the pedal visually; it should feel instant
   imanSec: 8,
   imanRadius: 6,
   imanPullSpeed: 15,
@@ -377,6 +398,9 @@ export const CONFIG = {
   musicVolume: 0.5, // FEEL: music bus level
   sfxVolume: 0.75, // FEEL: effects bus level
   engineVolume: 0.085, // FEEL: engine loudness at max speed; it hums, never drones
+  engineGasRev: 0.28, // FEEL: engine pitch rise a fondo, even at the speed cap
+  engineBrakeDrop: 0.16, // FEEL: engine pitch drop on the brake
+  pedalSfxVolume: 0.18, // FEEL: the turbo whoosh on gas and the tire chirp on the brake
   washVolume: 0.026, // FEEL: the sea, barely there
   comboHatsAt: 3, // hats swell in at this combo
   comboBassAt: 5, // bass pulse joins at this combo

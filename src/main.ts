@@ -12,7 +12,7 @@ import { Traffic, type ObstacleKind, type PickupKind, type StepCtx, type Vehicle
 import { Score, type RunResult } from './score';
 import { tramoFor } from './tour';
 import { UI } from './ui';
-import { AudioEngine } from './audio';
+import { AudioEngine, type AudioUpdateCtx } from './audio';
 import { haptics } from './haptics';
 import { submitScore } from './leaderboard';
 
@@ -102,7 +102,16 @@ let shakeAmp = 0;
 let baseFov: number = CONFIG.fovDesktop;
 let lastRun: RunResult | null = null;
 let shownMult = 1;
-let throttleMult = 1; // eased speed factor from the throttle, 0.7 .. 1.3
+let throttleMult = 1; // eased speed factor from the pedal, brakeSpeedMult .. gas ratio
+// El pedal's feel channels, 0..1: how far into the gas or the brake the FELT
+// speed is (not the raw press). FOV, camera, speed lines and engine read
+// these, so they work the same at the speed cap as at the start.
+let gasK = 0;
+let brakeK = 0;
+let gasOn = false; // a fondo and paying (felt speed gate)
+let brakeOn = false; // braking and paying less
+let gasInPrev = false; // raw press edges, for the instant cues
+let brakeInPrev = false;
 
 function addShake(amp: number): void {
   shakeAmp = Math.max(shakeAmp, amp);
@@ -237,6 +246,7 @@ function doShare(): void {
 }
 
 const ui = new UI(document.getElementById('ui')!, {
+  onPedal: (v) => player.setPedal(v),
   onStart: startRun,
   onRestart: tryRestart,
   onResume: resume,
@@ -308,6 +318,7 @@ const traffic = new Traffic(scene, {
 
 const player = new Player(scene, {
   isSteeringActive: () => state === 'playing',
+  isReservedPointer: (id) => ui.isPedalPointer(id),
   onScrape: () => {
     scrapeTimer = CONFIG.scrapeSlowSec;
     score.resetCombo();
@@ -371,6 +382,12 @@ function resetRunState(): void {
   shakeAmp = 0;
   shownMult = 1;
   throttleMult = 1;
+  gasK = 0;
+  brakeK = 0;
+  gasOn = false;
+  brakeOn = false;
+  gasInPrev = false;
+  brakeInPrev = false;
   acc = 0;
 }
 
@@ -417,6 +434,7 @@ function pauseGame(): void {
 function doCrash(): void {
   state = 'crashing';
   crashRealT = 0;
+  ui.setPedalLive(false);
   player.crash();
   score.setContraVia(false);
   ui.setContraVia(false);
@@ -447,12 +465,22 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden && state === 'playing') pauseGame();
 });
 
+// Portrait framing: a tall frame gets a higher, steeper camera and follows
+// the rider further toward the kerbs.
+let camFollow: number = CONFIG.camXFollow;
+let camUp: number = CONFIG.camUp;
+let camLookY: number = CONFIG.camLookY;
+
 function resize(): void {
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  baseFov = h > w ? CONFIG.fovMobile : CONFIG.fovDesktop;
+  const portrait = h > w;
+  baseFov = portrait ? CONFIG.fovMobile : CONFIG.fovDesktop;
+  camFollow = portrait ? CONFIG.camXFollowPortrait : CONFIG.camXFollow;
+  camUp = portrait ? CONFIG.camUpPortrait : CONFIG.camUp;
+  camLookY = portrait ? CONFIG.camLookYPortrait : CONFIG.camLookY;
   camera.fov = baseFov;
   camera.updateProjectionMatrix();
 }
@@ -474,11 +502,17 @@ function stepSim(h: number): void {
   speed = Math.min(veh.speedCap, raw) * veh.speedMult;
   const topSpeed = veh.speedCap * veh.speedMult;
 
-  // El acelerador: speed chases the throttle. The cafecito overrides it
-  // (already the fastest you get), so the two never stack.
+  // El pedal: speed chases the throttle. Gas is a target SPEED under the
+  // sacred ceiling (gasMaxMps, or the ride's own cruise if that is higher),
+  // so the telegraph rule holds a fondo at the speed cap. The brake bites
+  // faster than the gas rises. The cafecito overrides the pedal (they never
+  // stack) and obeys the same ceiling.
   const th = state === 'playing' ? player.throttle : 0;
-  const thTarget = th >= 0 ? 1 + th * (CONFIG.gasSpeedMult - 1) : 1 - -th * (1 - CONFIG.brakeSpeedMult);
-  throttleMult += (thTarget - throttleMult) * Math.min(1, CONFIG.throttleResponse * h);
+  const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
+  const gasRatio = Math.min(CONFIG.gasSpeedMult, ceiling);
+  const thTarget = th >= 0 ? 1 + th * (gasRatio - 1) : 1 - -th * (1 - CONFIG.brakeSpeedMult);
+  const rate = thTarget < throttleMult ? CONFIG.brakeResponse : CONFIG.gasResponse;
+  throttleMult += (thTarget - throttleMult) * Math.min(1, rate * h);
   if (scrapeTimer > 0) scrapeTimer = Math.max(0, scrapeTimer - h);
   if (hoyoTimer > 0) hoyoTimer = Math.max(0, hoyoTimer - h);
   if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - h);
@@ -492,7 +526,8 @@ function stepSim(h: number): void {
     scrapeTimer > 0 ? CONFIG.scrapeSpeedLoss * (scrapeTimer / CONFIG.scrapeSlowSec) : 0,
     hoyoTimer > 0 ? CONFIG.potholeSpeedLoss * (hoyoTimer / CONFIG.hoyoRecoverSec) : 0,
   );
-  const effSpeed = speed * (1 - slow) * (cafecitoT > 0 ? CONFIG.cafecitoBoost : throttleMult);
+  const effSpeed =
+    speed * (1 - slow) * (cafecitoT > 0 ? Math.min(CONFIG.cafecitoBoost, ceiling) : throttleMult);
   currentEff = effSpeed;
   // Felt speed drives the FOV kick and the engine: a fondo pushes past 1.
   currentNorm = Math.max(0, Math.min(1.25, (effSpeed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
@@ -506,9 +541,33 @@ function stepSim(h: number): void {
   ui.setContraVia(cv);
   score.setWheelie(live && player.isWheelie);
   ui.setCaballito(live && player.isWheelie);
-  const gasOn = live && cafecitoT <= 0 && player.throttle >= CONFIG.gasEngageAt;
+  // The pedal's feel channels follow the eased speed, not the press.
+  const cafe = cafecitoT > 0;
+  gasK = cafe ? 0 : Math.max(0, Math.min(1, (throttleMult - 1) / Math.max(gasRatio - 1, 1e-3)));
+  brakeK = cafe ? 0 : Math.max(0, Math.min(1, (1 - throttleMult) / (1 - CONFIG.brakeSpeedMult)));
+  // The rewards follow the speed you actually feel: ×1.5 only once the
+  // surge is at least halfway in (a tap cannot farm it), ×0.5 while the
+  // brake holds you under cruise. The cafecito pays neither.
+  const gasIn = live && th >= CONFIG.gasEngageAt;
+  const brakeIn = live && th <= -CONFIG.gasEngageAt;
+  gasOn = gasIn && !cafe && throttleMult >= 1 + 0.5 * (gasRatio - 1) - 1e-4;
+  brakeOn = brakeIn && !cafe && throttleMult < 1;
   score.setGas(gasOn);
+  score.setBrake(brakeOn);
   ui.setGas(gasOn);
+  ui.setBrake(brakeOn);
+  // The press itself answers at once, ahead of the eased speed.
+  if (gasIn && !gasInPrev) {
+    audio.turbo();
+    haptics.tick();
+    player.gasPuff();
+  }
+  if (brakeIn && !brakeInPrev) {
+    audio.brake();
+    haptics.tick();
+  }
+  gasInPrev = gasIn;
+  brakeInPrev = brakeIn;
 
   // Mutated in place: this runs at 120 Hz, and the brief's rule is zero
   // allocations in hot loops.
@@ -580,14 +639,17 @@ function stepSim(h: number): void {
 // Camera chase state; vectors reused every frame, no per-frame allocations.
 let camX = 0;
 let camRoll = 0;
+let camGas = 0; // gasK, smoothed: the cafecito zeroes gasK in one step
 const lookTarget = new THREE.Vector3();
 
 function updateCamera(dt: number): void {
   const k = 1 - Math.exp(-CONFIG.camDamping * dt);
-  camX += (player.x * CONFIG.camXFollow - camX) * k;
+  camX += (player.x * camFollow - camX) * k;
   camRoll += (-player.velXNorm * CONFIG.cameraRollMaxDeg * DEG - camRoll) * k;
   camera.up.set(Math.sin(camRoll), Math.cos(camRoll), 0);
-  camera.position.set(camX, CONFIG.camUp, -CONFIG.camBack);
+  // A fondo the bike surges away from the lens.
+  camGas += (gasK - camGas) * Math.min(1, 6 * dt);
+  camera.position.set(camX, camUp, -(CONFIG.camBack + CONFIG.camGasPullBack * camGas));
   if (shakeT > 0) {
     shakeT -= dt;
     const kk = shakeAmp * Math.max(0, shakeT / 0.3);
@@ -595,12 +657,18 @@ function updateCamera(dt: number): void {
     camera.position.y += (Math.random() - 0.5) * 1.2 * kk;
     if (shakeT <= 0) shakeAmp = 0;
   }
-  // FOV speed kick: velocity you can feel in your stomach
+  // FOV speed kick: velocity you can feel in your stomach. The pedal adds
+  // its own kick (or a small dip on the brake) on top, at any speed.
   const kickNorm = state === 'playing' || state === 'crashing' ? currentNorm : 0;
-  const targetFov = baseFov + CONFIG.fovSpeedKick * kickNorm + (cafecitoT > 0 ? CONFIG.fovCafecito : 0);
+  const targetFov =
+    baseFov +
+    CONFIG.fovSpeedKick * kickNorm +
+    CONFIG.fovGasKick * camGas -
+    CONFIG.fovBrakeDip * brakeK +
+    (cafecitoT > 0 ? CONFIG.fovCafecito : 0);
   camera.fov += (targetFov - camera.fov) * Math.min(1, 4 * dt);
   camera.updateProjectionMatrix();
-  lookTarget.set((camX + player.x) / 2, 1.1, CONFIG.camLookAhead);
+  lookTarget.set((camX + player.x) / 2, camLookY, CONFIG.camLookAhead);
   camera.lookAt(lookTarget);
 }
 
@@ -612,7 +680,10 @@ function syncHud(): void {
   ui.setScore(score.points);
   ui.setCombo(score.combo, ui.ladderTierText(score.combo));
   ui.setComboFraction(score.comboFraction);
-  ui.setSpeedLines(state === 'playing' ? currentNorm : 0);
+  // Streaks from felt speed, or from the gas at any speed: floored is full.
+  ui.setSpeedLines(state === 'playing' ? Math.max(currentNorm, 0.6 + 0.6 * gasK * CONFIG.gasSpeedLines) : 0);
+  ui.showPedal(player.throttle > 0 ? 1 : player.throttle < 0 ? -1 : 0);
+  ui.setSpeedKmh(Math.round(currentEff * 3.6));
 }
 
 let last = performance.now();
@@ -641,14 +712,20 @@ function advance(dt: number, now: number): void {
   player.updateFx(dt);
 }
 
-function audioCtxNow(): { running: boolean; speedNorm: number; combo: number; contraVia: boolean; wheelie: boolean } {
-  return {
-    running: state === 'playing',
-    speedNorm: Math.min(1, currentNorm),
-    combo: score.combo,
-    contraVia: score.isContraVia,
-    wheelie: player.isWheelie,
-  };
+// Reused every frame: the audio update allocates nothing.
+const audioCtx: AudioUpdateCtx = {
+  running: false, speedNorm: 0, combo: 0, contraVia: false, wheelie: false, gas: 0, brake: 0,
+};
+
+function audioCtxNow(): AudioUpdateCtx {
+  audioCtx.running = state === 'playing';
+  audioCtx.speedNorm = Math.min(1, currentNorm);
+  audioCtx.combo = score.combo;
+  audioCtx.contraVia = score.isContraVia;
+  audioCtx.wheelie = player.isWheelie;
+  audioCtx.gas = gasK;
+  audioCtx.brake = brakeK;
+  return audioCtx;
 }
 
 function frame(now: number): void {
@@ -691,6 +768,17 @@ let testGod = false;
   speed: () => speed,
   effSpeed: () => +currentEff.toFixed(2),
   throttle: () => player.throttle,
+  // El pedal: hold (-1 FRENO, 0 release, 1 ¡DALE!) without touch events,
+  // and read back what the pedal is doing to speed, feel and score.
+  pedal: (v: -1 | 0 | 1) => player.setPedal(v),
+  gas: () => ({
+    gasOn,
+    brakeOn,
+    gasK: +gasK.toFixed(3),
+    brakeK: +brakeK.toFixed(3),
+    throttleMult: +throttleMult.toFixed(3),
+    kmh: Math.round(currentEff * 3.6),
+  }),
   cars: () => traffic.activeCars,
   combo: () => score.combo,
   platanos: () => score.platanos,

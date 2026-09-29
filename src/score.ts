@@ -1,7 +1,8 @@
 // score.ts: the full scoring model with per-vehicle records.
 // Distance +1/m, platano +10, near-miss +25 x combo, airtime +15/s,
-// wheelie +5/s. EVERYTHING x2 en contra via, x1.5 during the caballito
-// (they stack), and the Civic adds its own +15%. Records persist per vehicle.
+// wheelie +5/s. EVERYTHING x2 en contra via, x1.5 during the caballito,
+// x1.5 a fondo, x0.5 while braking (they all stack), and the Civic adds its
+// own +22%. Records persist per vehicle.
 
 import { CONFIG, VEHICLES, type VehicleId } from './config';
 import type { Tramo } from './tour';
@@ -80,6 +81,7 @@ export class Score {
   private contraVia = false;
   private wheelieOn = false;
   private gasOn = false;
+  private brakeOn = false;
   private airAccum = 0;
   private wheelieAccum = 0;
   private platanosLifetime = readInt(PLATANOS_KEY);
@@ -123,6 +125,7 @@ export class Score {
       (this.contraVia ? CONFIG.contraViaMultiplier : 1) *
       (this.wheelieOn ? CONFIG.wheelieMultiplier : 1) *
       (this.gasOn ? CONFIG.gasScoreMult : 1) *
+      (this.brakeOn ? CONFIG.brakeScoreMult : 1) *
       this.vehicleScoreMult *
       this.distTier
     );
@@ -136,9 +139,14 @@ export class Score {
     this.wheelieOn = on;
   }
 
-  // A fondo: the throttle's reward side. Stacks with everything else.
+  // A fondo: the pedal's reward side. Stacks with everything else.
   setGas(on: boolean): void {
     this.gasOn = on;
+  }
+
+  // Frenando: the pedal's cost side. Braking is always safe and never free.
+  setBrake(on: boolean): void {
+    this.brakeOn = on;
   }
 
   step(ds: number, dt: number, opts: { airborne: boolean; wheelie: boolean }): void {
@@ -267,6 +275,7 @@ export class Score {
     this.contraVia = false;
     this.wheelieOn = false;
     this.gasOn = false;
+    this.brakeOn = false;
     this.airAccum = 0;
     this.wheelieAccum = 0;
   }
