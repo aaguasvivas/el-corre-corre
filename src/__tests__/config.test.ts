@@ -58,6 +58,11 @@ describe('CONFIG invariants from the brief', () => {
     expect(CONFIG.obeliscoOffsetM).toBeLessThan(CONFIG.tramoLengthM);
   });
 
+  it('the tour is coherent: La Puerta del Conde lands inside a Zona stretch', () => {
+    expect(CONFIG.puertaOffsetM).toBeGreaterThan(0);
+    expect(CONFIG.puertaOffsetM).toBeLessThan(CONFIG.tramoLengthM);
+  });
+
   it('distance multiplier tiers ascend in both distance and multiplier', () => {
     const tiers = CONFIG.distMultTiers as ReadonlyArray<readonly [number, number]>;
     for (let i = 1; i < tiers.length; i++) {

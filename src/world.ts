@@ -18,7 +18,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { tramoFor, nextObeliscoAfter, type Tramo } from './tour';
+import { tramoFor, nextObeliscoAfter, lapLength, TRAMO_ORDER, type Tramo } from './tour';
 import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 
 const CHUNK_LEN = 30;
@@ -686,34 +686,53 @@ function makeColmadoBody(width: number): Sized {
   return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
 }
 
-// La Zona Colonial: taller openings, wooden shutters, a wrought-iron balcony
-// running the full front, heavier cornice. Body stays white for instance tint.
-function makeZonaFacade(width: number, cols: number): Sized {
+// La Zona Colonial: tall painted doors, wooden shutters, wrought-iron
+// balconies running the full front, heavy cornices. One-storey casas, two-
+// and three-storey houses, so the roofline steps instead of running as one
+// wall. The body stays white for the instance tint; the doors carry their
+// own paint (teal, red, navy or wood), baked per variant, because a tint
+// cannot reach them.
+function makeZonaFacade(width: number, cols: number, floors: 1 | 2 | 3, door: number): Sized {
   const parts: THREE.BufferGeometry[] = [];
   const depth = 7;
-  const H = 7.2;
+  const FLOOR = 3.3;
+  const H = floors === 1 ? 4.6 : floors === 2 ? 7.2 : 10;
   const IRON = 0x241f1d;
   const SHUTTER = 0x2f5d3a;
+  const STONE = 0xf2ead8;
   cbox(parts, depth, H, width, 0, H / 2, 0, 0xffffff);
-  cbox(parts, depth + 0.4, 0.5, width + 0.4, 0, H + 0.2, 0, 0xf2ead8); // cornice
-  cbox(parts, depth + 0.2, 0.25, width + 0.2, 0, 3.62, 0, 0xf2ead8); // string course
+  cbox(parts, depth + 0.4, 0.5, width + 0.4, 0, H + 0.2, 0, STONE); // cornice
   const fx = depth / 2 + 0.05;
   const span = width - 2.0;
   for (let i = 0; i < cols; i++) {
     const wz = -span / 2 + (span / Math.max(1, cols - 1)) * i;
-    // ground floor: tall arched doors (a box with a small header reads arched enough)
-    cbox(parts, 0.14, 2.7, 1.05, fx, 1.35, wz, 0x3a2c22);
-    cbox(parts, 0.2, 0.18, 1.3, fx, 2.85, wz, 0xf2ead8);
-    // upper floor: shuttered French windows onto the balcony
-    cbox(parts, 0.12, 2.0, 0.5, fx, 5.1, wz - 0.29, SHUTTER);
-    cbox(parts, 0.12, 2.0, 0.5, fx, 5.1, wz + 0.29, SHUTTER);
+    if (floors === 1 && i % 2 === 1) {
+      // a casa's street window behind its iron reja
+      cbox(parts, 0.12, 1.5, 0.95, fx, 1.75, wz, 0x2a2a2e);
+      for (let b = -2; b <= 2; b++) cbox(parts, 0.05, 1.6, 0.04, fx + 0.1, 1.75, wz + b * 0.2, IRON);
+      cbox(parts, 0.2, 0.14, 1.15, fx, 2.6, wz, STONE);
+    } else {
+      // ground floor: tall painted doors (a box with a header reads arched enough)
+      cbox(parts, 0.14, 2.7, 1.05, fx, 1.35, wz, door);
+      cbox(parts, 0.2, 0.18, 1.3, fx, 2.85, wz, STONE);
+    }
+    // upper floors: shuttered French windows onto the balconies
+    for (let f = 1; f < floors; f++) {
+      const y = 1.8 + f * FLOOR;
+      cbox(parts, 0.12, 2.0, 0.5, fx, y, wz - 0.29, SHUTTER);
+      cbox(parts, 0.12, 2.0, 0.5, fx, y, wz + 0.29, SHUTTER);
+    }
   }
-  // the balcony: slab, top rail, and iron pickets across the whole front
-  cbox(parts, 0.9, 0.1, width - 0.6, fx + 0.4, 4.1, 0, 0xf2ead8);
-  cbox(parts, 0.05, 0.06, width - 0.7, fx + 0.82, 5.0, 0, IRON);
-  const pickets = Math.max(6, Math.round(width * 1.4));
-  for (let b = 0; b <= pickets; b++) {
-    cbox(parts, 0.045, 0.9, 0.045, fx + 0.82, 4.6, -(width - 0.8) / 2 + ((width - 0.8) / pickets) * b, IRON);
+  for (let f = 1; f < floors; f++) {
+    const base = 0.8 + f * FLOOR; // 4.1 for the first balcony
+    cbox(parts, depth + 0.2, 0.25, width + 0.2, 0, base - 0.48, 0, STONE); // string course
+    // the balcony: slab, top rail, and iron pickets across the whole front
+    cbox(parts, 0.9, 0.1, width - 0.6, fx + 0.4, base, 0, STONE);
+    cbox(parts, 0.05, 0.06, width - 0.7, fx + 0.82, base + 0.9, 0, IRON);
+    const pickets = Math.max(6, Math.round(width * 1.4));
+    for (let b = 0; b <= pickets; b++) {
+      cbox(parts, 0.045, 0.9, 0.045, fx + 0.82, base + 0.5, -(width - 0.8) / 2 + ((width - 0.8) / pickets) * b, IRON);
+    }
   }
   // farolito: a little iron lantern beside the center door
   cbox(parts, 0.3, 0.05, 0.05, fx + 0.15, 3.2, 0.85, IRON);
@@ -1147,7 +1166,13 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
     fruit: makeFruitStand(),
     chair: makeChair(),
     street: makeStreetSign(atlas.rects),
-    zonaFacades: [makeZonaFacade(9, 3), makeZonaFacade(12, 4), makeZonaFacade(7.5, 2)],
+    zonaFacades: [
+      makeZonaFacade(9, 3, 2, 0x2a9d8f),
+      makeZonaFacade(12, 4, 2, 0xe63946),
+      makeZonaFacade(7.5, 3, 1, 0x002d62),
+      makeZonaFacade(10, 3, 3, 0x6b4a33),
+      makeZonaFacade(8, 3, 1, 0x2a9d8f),
+    ],
     ironLamp: makeIronLamp(),
     campoHouses: [
       makeCampoHouse(4.2, 0x6fc7be, 0xffffff),
@@ -1181,7 +1206,10 @@ function stripMaterial(): THREE.MeshBasicMaterial {
   return _stripMat;
 }
 
-const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0xffffff, 0xa8c6a1, 0xf2d0a4];
+// Coral stone, ochre and terracotta, with the locked palette's teal, blue,
+// pink and yellow between them: the Zona's real color, and no longer one
+// sand-colored wall under the rosy haze.
+const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0x2a9d8f, 0xb3d9ff, 0xff8b94, 0xffeaa7];
 
 const PASTELS = PALETTE.buildingPastels;
 const COLMADO_TINTS = [PALETTE.colmadoTeal, PALETTE.colmadoRed, 0xf4c430, 0xffffff];
@@ -1378,22 +1406,33 @@ class Belt {
         }
       }
     } else {
-      // El campo: houses breathe, and the platanal fills the land behind them
+      // El campo: houses breathe, and the platanal fills the land around
+      // them. The first row stands close and big, leaves over the shoulder,
+      // so a portrait frame actually sees green; no plant grows inside a
+      // house.
+      const houses: Array<[number, number]> = [];
       while (cursor < L - 6) {
         const vi = Math.floor(Math.random() * this.assets.campoHouses.length);
         const v = this.assets.campoHouses[vi];
         if (cursor + v.width > L - 4) break;
         place(this.campoHouseIMs[vi], -12.3 - 2.5, 0, cursor + v.width / 2, rand(-0.08, 0.08));
+        houses.push([cursor - 1.2, cursor + v.width + 1.2]);
         cursor += v.width + rand(7, 15);
       }
+      let friturZ = -99;
       if (Math.random() < 0.6) {
-        place(this.frituraIM, -10.6, 0, rand(8, L - 8), rand(-0.4, 0.4) + Math.PI / 2);
+        friturZ = rand(8, L - 8);
+        place(this.frituraIM, -10.6, 0, friturZ, rand(-0.4, 0.4) + Math.PI / 2);
       }
+      const inHouse = (z: number): boolean => houses.some(([a, b]) => z > a && z < b);
       // field rows, jittered so they read planted, not printed
       for (let row = 0; row < 3; row++) {
-        const rx = -15.5 - row * 3.1;
+        const rx = -13.4 - row * 3.1;
         for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
-          place(this.platanoIM, rx + rand(-0.7, 0.7), 0, z, rand(0, 6.3), rand(0.8, 1.25));
+          if (row < 2 && inHouse(z)) continue;
+          if (row === 0 && Math.abs(z - friturZ) < 2.5) continue;
+          const big = row === 0 ? rand(1.2, 1.5) : rand(0.8, 1.25);
+          place(this.platanoIM, rx + rand(-0.4, 0.4), 0, z, rand(0, 6.3), big);
         }
       }
     }
@@ -1445,17 +1484,24 @@ class Belt {
         sx += v.width + rand(0, 0.8);
       }
     } else {
-      // el platanal on both shoulders, and the fence that keeps it there
+      // el platanal on both shoulders, and the fence that keeps it there;
+      // the first row leans over the shoulder, inside the portrait frame
       for (let i = 0; i <= 20; i++) place(this.postIM, 11.85, 0, i * 6, 0, 0.85, 0x9a7b52);
-      for (let row = 0; row < 3; row++) {
-        const rx = 13.2 + row * 3.1; // close enough to read at phone FOV
-        for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
-          place(this.platanoIM, rx + rand(-0.7, 0.7), 0, z, rand(0, 6.3), rand(0.8, 1.25));
-        }
-      }
+      let seaHouse: [number, number] = [-99, -99];
       if (Math.random() < 0.5) {
         const vi = Math.floor(Math.random() * this.assets.campoHouses.length);
-        place(this.campoHouseIMs[vi], 12.3 + 2.5, 0, rand(8, L - 8), Math.PI + rand(-0.08, 0.08));
+        const hz = rand(8, L - 8);
+        place(this.campoHouseIMs[vi], 12.3 + 2.5, 0, hz, Math.PI + rand(-0.08, 0.08));
+        const half = this.assets.campoHouses[vi].width / 2 + 1.2;
+        seaHouse = [hz - half, hz + half];
+      }
+      for (let row = 0; row < 3; row++) {
+        const rx = row === 0 ? 11.2 : 12.3 + row * 3.1;
+        for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
+          if (row > 0 && z > seaHouse[0] && z < seaHouse[1]) continue;
+          const big = row === 0 ? rand(1.2, 1.5) : rand(0.8, 1.25);
+          place(this.platanoIM, rx + rand(-0.25, 0.25), 0, z, rand(0, 6.3), big);
+        }
       }
     }
     if (tramo === 'zona') {
@@ -2380,7 +2426,9 @@ class Walkers {
 
   private spawn(i: number, z: number, tramo: Tramo): void {
     this.live[i] = 1;
-    const sea = tramo !== 'zona' && Math.random() < 0.45 ? true : tramo === 'zona' && Math.random() < 0.3;
+    // the promenade belongs to the Malecon and the Zona; in el campo the
+    // platanal grows right up to the fence, so people keep to the far side
+    const sea = tramo === 'malecon' ? Math.random() < 0.45 : tramo === 'zona' && Math.random() < 0.3;
     this.x[i] = sea ? WALK_SEA_X : WALK_FAR_X;
     this.z[i] = z;
     this.dir[i] = Math.random() < 0.5 ? 1 : -1;
@@ -2391,9 +2439,9 @@ class Walkers {
     if (this.im.instanceColor) this.im.instanceColor.needsUpdate = true;
   }
 
-  // obZ: the Obelisco's z when it stands, so promenade walkers step out of
-  // its plinth instead of walking through it
-  update(ds: number, dt: number, tramo: Tramo, attract: boolean, obZ: number | null): void {
+  // obZ, gateZ: where the Obelisco and La Puerta del Conde stand, so
+  // promenade walkers step out of their plinths instead of walking through
+  update(ds: number, dt: number, tramo: Tramo, attract: boolean, obZ: number | null, gateZ: number | null): void {
     let alive = 0;
     for (let i = 0; i < WALKER_CAP; i++) alive += this.live[i];
     const want = WALKERS_PER_TRAMO[tramo];
@@ -2412,7 +2460,9 @@ class Walkers {
         this.hide(i);
         continue;
       }
-      const inPlinth = obZ !== null && this.x[i] > 0 && Math.abs(this.z[i] - obZ) < 2.4;
+      const inPlinth =
+        this.x[i] > 0 &&
+        ((obZ !== null && Math.abs(this.z[i] - obZ) < 2.4) || (gateZ !== null && Math.abs(this.z[i] - gateZ) < 2.1));
       _dummy.position.set(this.x[i], Math.abs(Math.sin(WORLD_TIME.value * 7 + i * 1.7)) * 0.04, this.z[i]);
       _dummy.rotation.set(0, this.dir[i] > 0 ? 0 : Math.PI, 0);
       _dummy.scale.setScalar(inPlinth ? 0 : 1);
@@ -2625,6 +2675,8 @@ export class World {
   // Malecon and a crossing is an achievement of THIS run.
   private runOrigin = 0;
   private obeliscoPassed = false;
+  private puerta!: THREE.Group;
+  private nextPuertaAt = 0;
   onObeliscoPass: (() => void) | null = null;
   private shimmerA!: THREE.CanvasTexture;
   private shimmerB!: THREE.CanvasTexture;
@@ -2686,6 +2738,8 @@ export class World {
     }
     this.obelisco.visible = false;
     this.scheduleObelisco();
+    this.puerta.visible = false;
+    this.schedulePuerta();
     this.overhead.redressBeyond(CONFIG.fogFar, this.runDistance);
   }
 
@@ -2714,6 +2768,8 @@ export class World {
     for (let i = 0; i < 3; i++) this.pelicans.push(new Pelican(scene));
     for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
     this.buildObelisco(scene, atlas);
+    this.buildPuerta(scene, atlas);
+    this.schedulePuerta();
     this.overhead = new Overhead(scene, atlas);
     this.walkers = new Walkers(scene);
   }
@@ -3452,6 +3508,58 @@ export class World {
     }
   }
 
+  // La Puerta del Conde, the Zona's landmark, as a gate the road passes
+  // through: two brick bastions on stone plinths standing on the sidewalks
+  // (inner faces on the road edge, never in a lane), a brick arch with a
+  // cream cornice across the road high above the tallest guagua, the gable,
+  // and la bandera flying on top. Scheduled once per lap like the Obelisco.
+  private buildPuerta(scene: THREE.Scene, atlas: Atlas): void {
+    this.puerta = new THREE.Group();
+    const BRICK = 0xd77a61;
+    const STONE = 0xf5e6c8;
+    const parts: THREE.BufferGeometry[] = [];
+    for (const s of [-1, 1]) {
+      const x = s * 10.1;
+      cbox(parts, 3.4, 0.8, 3.4, x, 0.4, 0, STONE); // plinth: inner face on the road edge
+      cbox(parts, 3.0, 7.2, 3.0, x, 4.4, 0, BRICK);
+      cbox(parts, 3.4, 0.35, 3.4, x, 8.15, 0, STONE); // cornice
+      for (const mz of [-1.1, 0, 1.1]) cbox(parts, 0.6, 0.6, 0.6, x + s * 1.1, 8.6, mz, BRICK); // merlons
+      cbox(parts, 0.9, 1.3, 0.12, x - s * 1.2, 2.6, -1.52, 0x3a2c22); // a small door in each bastion
+    }
+    // the arch across the road, its underside stepping down into the bastions
+    cbox(parts, 17.4, 1.6, 2.4, 0, 9.0, 0, BRICK);
+    cbox(parts, 17.8, 0.3, 2.8, 0, 9.95, 0, STONE);
+    for (const s of [-1, 1]) {
+      cbox(parts, 0.9, 1.1, 2.4, s * 8.1, 7.7, 0, BRICK);
+      cbox(parts, 0.9, 0.5, 2.4, s * 7.2, 8.0, 0, BRICK);
+      cbox(parts, 0.9, 0.2, 2.4, s * 6.3, 8.15, 0, BRICK);
+    }
+    // the gable, and the flagpole standing on it
+    const gable = new THREE.CylinderGeometry(1.7, 1.7, 2.6, 3);
+    gable.rotateX(Math.PI / 2);
+    gable.rotateZ(Math.PI); // apex up
+    gable.scale(1, 0.75, 1);
+    cgeo(parts, gable, STONE, 0, 10.74, 0);
+    cgeo(parts, new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6), 0xffffff, 0, 13.2, 0);
+    const body = new THREE.Mesh(mergeGeometries(parts)!, vcToonMaterial());
+    body.castShadow = true;
+    this.puerta.add(body);
+    const flag = new THREE.Mesh(waveFlag(2.4, 1.5, atlas.rects), flagMaterial(atlas.tex));
+    flag.position.set(-1.25, 14.0, 0); // hoist on the pole, flying out to screen right
+    flag.rotation.y = Math.PI; // faces the rider; its hoist stays on the pole
+    this.puerta.add(flag);
+    this.puerta.visible = false;
+    scene.add(this.puerta);
+  }
+
+  // Once per lap, puertaOffsetM into the Zona stretch.
+  private schedulePuerta(): void {
+    const lap = lapLength();
+    const d = Math.max(0, this.runDistance);
+    const at = Math.floor(d / lap) * lap + TRAMO_ORDER.indexOf('zona') * CONFIG.tramoLengthM + CONFIG.puertaOffsetM;
+    this.nextPuertaAt = at > d ? at : at + lap;
+  }
+
   private buildObelisco(scene: THREE.Scene, atlas: Atlas): void {
     this.obelisco = new THREE.Group();
     const cream = toonMaterial(PALETTE.obeliscoCream);
@@ -3690,10 +3798,30 @@ export class World {
       }
     }
 
+    // La Puerta del Conde, rising ahead once per lap in the Zona
+    if (!this.puerta.visible && this.nextPuertaAt - this.runDistance < 190) {
+      this.puerta.visible = true;
+      this.puerta.position.z = this.nextPuertaAt - this.runDistance;
+    }
+    if (this.puerta.visible) {
+      this.puerta.position.z -= ds;
+      if (this.puerta.position.z < -35) {
+        this.puerta.visible = false;
+        this.schedulePuerta();
+      }
+    }
+
     this.viralata.update(ds, dt);
     this.motes.update(ds, this.lastSpeed, !attract);
     this.overhead.update(ds, this.runDistance);
-    this.walkers.update(ds, dt, this.tramoNow, attract, this.obelisco.visible ? this.obelisco.position.z : null);
+    this.walkers.update(
+      ds,
+      dt,
+      this.tramoNow,
+      attract,
+      this.obelisco.visible ? this.obelisco.position.z : null,
+      this.puerta.visible ? this.puerta.position.z : null,
+    );
     for (const k of this.chichiguas) k.update(ds, dt);
     for (const p of this.pelicans) p.update(ds, dt);
     const campoNow = this.tramoNow === 'campo';

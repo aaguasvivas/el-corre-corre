@@ -366,6 +366,10 @@ export const CONFIG = {
   // being reachable early is what makes it a landmark instead of a rumor.
   // Keep below tramoLengthM so it always lands inside the Malecon.
   obeliscoOffsetM: 500,
+  // La Puerta del Conde: the Zona's landmark, a gate the road passes
+  // through, once per lap this far into the Zona stretch. Keep below
+  // tramoLengthM so it always stands in the Zona (tested).
+  puertaOffsetM: 420,
   viralataEvery: [24, 44], // FEEL: seconds between street-dog cameos
 
   // Phase 7: Los Tramos. The world cycles Malecon -> Zona Colonial -> Campo,
