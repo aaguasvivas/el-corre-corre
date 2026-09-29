@@ -191,6 +191,7 @@ export const CONFIG = {
   // FEEL: shadowless camera-side fill. Lifts rider backs, car rears and
   // oncoming fronts out of the darkest toon step without flattening form.
   fillLight: 0.27,
+  cintaShowM: 240, // FEEL: how far ahead La Cinta's arch starts rising out of the haze
 
   // Spawning. Pressure raised after the Phase 4 feel test.
   spawnAhead: 150,

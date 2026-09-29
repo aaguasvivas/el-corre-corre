@@ -24,7 +24,49 @@ import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 const CHUNK_LEN = 30;
 const CHUNK_COUNT = 7;
 const RECYCLE_Z = -35;
-const CONFETTI_COUNT = 46;
+const CONFETTI_COUNT = 150;
+const TAPE_POST_X = 8.7; // the arch stands on the curbs, clear of every lane
+
+// The bundled display font (Lilita One, vendored through @fontsource) letters
+// every canvas sign in the world. Canvas text drawn before the face has
+// loaded silently falls back to a system font, so anything that draws text
+// draws once now and again when the font is in.
+const SIGN_FONT = "'Lilita One', 'Arial Black', sans-serif";
+const fontRedraws: Array<() => void> = [];
+let signFontReady = false;
+function whenSignFontReady(redraw: () => void): void {
+  if (!signFontReady) fontRedraws.push(redraw);
+}
+if (typeof document !== 'undefined' && document.fonts) {
+  const done = (): void => {
+    signFontReady = true;
+    for (const f of fontRedraws.splice(0)) f();
+  };
+  document.fonts.load("48px 'Lilita One'").then(done, done);
+}
+
+// La Cinta's cloth: the ribbon flutters (harder near the tape) and, once
+// burst, each half swings down from its post to hang and lie on the road.
+const TAPE_CLOTH_PARS = /* glsl */ `
+uniform float uTapeTime;
+uniform float uFlutter;
+uniform float uBreak;
+attribute float aWave;
+attribute float aPart;
+`;
+const TAPE_CLOTH_CHUNK = /* glsl */ `
+#include <begin_vertex>
+float eccPh = uTapeTime * ( aPart > 0.5 ? 9.0 : 3.0 ) + position.x * 0.9;
+transformed.z += sin( eccPh ) * 0.13 * uFlutter * aWave;
+transformed.y += sin( eccPh * 0.8 + 1.3 ) * 0.035 * uFlutter * aWave;
+if ( aPart > 0.5 && uBreak > 0.0 ) {
+  float side = position.x >= 0.0 ? 1.0 : -1.0;
+  float rel = abs( position.x ) - ${TAPE_POST_X.toFixed(2)};
+  float th = uBreak * 1.45;
+  transformed.x = side * ( ${TAPE_POST_X.toFixed(2)} + rel * cos( th ) );
+  transformed.y = max( 0.03, transformed.y + rel * sin( th ) );
+}
+`;
 const BELT_COUNT = 3;
 // Belts start slightly behind the camera so the scenery beside the player is
 // never missing. That offset also fixes their phase forever: belt starts land
@@ -1766,6 +1808,13 @@ interface Confetto {
 export class World {
   private chunks: THREE.Mesh[] = [];
   private tape!: THREE.Group;
+  private tapeCanvas!: HTMLCanvasElement;
+  private tapeTex!: THREE.CanvasTexture;
+  private tapeLabel = '';
+  private tapeAt = 0; // meters into the run; 0 = no tape this run
+  private tapeBroken = false;
+  private tapeU = { time: { value: 0 }, flutter: { value: 1 }, brk: { value: 0 } };
+  private lastSpeed: number = CONFIG.baseSpeed;
   private confetti: Confetto[] = [];
   private confettiMeshes: THREE.InstancedMesh[] = [];
   private belts: Belt[] = [];
@@ -1826,7 +1875,10 @@ export class World {
   // few seconds); belts beyond it are re-dressed for the fresh tour, so the
   // player rides out of wherever they died and into home. The announcement
   // is deliberately not fired: you did not "arrive" at the start line.
-  startRun(): void {
+  // La Cinta stands tapeAtM into the run (0 = no tape) and reads tapeLabel,
+  // for example "TU RÉCORD · 1,234 m" or "LA META".
+  startRun(tapeAtM: number, tapeLabel: string): void {
+    this.setTape(tapeAtM, tapeLabel);
     this.runOrigin = this.D;
     this.tramoNow = 'malecon';
     for (const belt of this.belts) {
@@ -2305,41 +2357,131 @@ export class World {
     }
   }
 
+  // La Cinta del Récord: a finish arch over the road (red posts with white
+  // bands, a gold beam, the banner hanging from it) and the breakable ribbon
+  // across the lanes. Readable from afar, which is the whole point: the
+  // record is a place on the road you can see coming. The banner and the
+  // ribbon share one canvas and one draw; the ribbon flutters, harder in the
+  // last 60 m, and on the burst its halves swing down from the posts while
+  // the arch stays standing for you to ride under.
   private buildTape(scene: THREE.Scene): void {
     this.tape = new THREE.Group();
-    const postGeo = new THREE.CylinderGeometry(0.07, 0.07, 1.5, 8);
+    const parts: THREE.BufferGeometry[] = [];
     for (const sx of [-1, 1]) {
-      const post = new THREE.Mesh(postGeo, toonMaterial(PALETTE.colmadoRed));
-      post.position.set(sx * 7.3, 0.75, 0);
-      this.tape.add(post);
+      const x = sx * TAPE_POST_X;
+      cgeo(parts, new THREE.CylinderGeometry(0.14, 0.17, 5.2, 10), PALETTE.colmadoRed, x, 2.6, 0);
+      for (const y of [1.3, 3.2]) cgeo(parts, new THREE.CylinderGeometry(0.175, 0.175, 0.28, 10), 0xffffff, x, y, 0);
+      cgeo(parts, new THREE.SphereGeometry(0.26, 10, 8), PALETTE.gold, x, 5.4, 0);
+      cbox(parts, 0.05, 0.42, 0.05, sx * 6.1, 4.93, 0, 0xf2e9dc); // the banner's cords
     }
-    const c = document.createElement('canvas');
-    c.width = 1024;
-    c.height = 48;
-    const g = c.getContext('2d')!;
-    // Finish-line tape, not a flag: white with gold edges (blue top + red
-    // bottom made it a horizontal tricolor at speed).
-    g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, 1024, 48);
-    g.fillStyle = hex(PALETTE.centerLine);
-    g.fillRect(0, 0, 1024, 7);
-    g.fillRect(0, 41, 1024, 7);
-    g.fillStyle = hex(PALETTE.flagRed);
-    g.font = 'bold 30px sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    for (const x of [170, 512, 854]) g.fillText('TU RÉCORD', x, 26);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const ribbon = new THREE.Mesh(
-      new THREE.PlaneGeometry(14.6, 0.46),
-      worldMaterial(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })),
+    cbox(parts, TAPE_POST_X * 2, 0.24, 0.24, 0, 5.16, 0, PALETTE.gold); // beam
+    const arch = new THREE.Mesh(
+      mergeGeometries(parts)!,
+      farFog(
+        worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+        CONFIG.cintaShowM * 1.3,
+      ),
     );
-    ribbon.position.y = 1.12;
-    ribbon.rotation.y = Math.PI; // face the approaching player
-    this.tape.add(ribbon);
+    arch.castShadow = true;
+    this.tape.add(arch);
+
+    this.tapeCanvas = document.createElement('canvas');
+    this.tapeCanvas.width = 1024;
+    this.tapeCanvas.height = 256;
+    this.tapeTex = new THREE.CanvasTexture(this.tapeCanvas);
+    this.tapeTex.colorSpace = THREE.SRGBColorSpace;
+    this.tapeTex.anisotropy = 4;
+
+    // part 0 = banner, 1 = ribbon; wave = how far each vertex may move
+    const cloth = (w: number, h: number, segs: number, y: number, v0: number, v1: number, part: number): THREE.BufferGeometry => {
+      const g = new THREE.PlaneGeometry(w, h, segs, 1);
+      const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+      const pos = g.getAttribute('position') as THREE.BufferAttribute;
+      const wave = new Float32Array(pos.count);
+      const partA = new Float32Array(pos.count).fill(part);
+      for (let i = 0; i < pos.count; i++) {
+        uv.setY(i, v0 + uv.getY(i) * (v1 - v0));
+        wave[i] = part === 0 ? 0.25 : Math.sin((Math.PI * (pos.getX(i) + w / 2)) / w);
+      }
+      g.setAttribute('aWave', new THREE.BufferAttribute(wave, 1));
+      g.setAttribute('aPart', new THREE.BufferAttribute(partA, 1));
+      g.rotateY(Math.PI); // face the approaching rider; the canvas's left stays screen left
+      g.translate(0, y, 0);
+      return g;
+    };
+    const clothGeo = mergeGeometries([
+      cloth(12.4, 1.45, 16, 4.05, 1 - 120 / 256, 1, 0),
+      cloth(TAPE_POST_X * 2, 0.46, 32, 1.1, 1 - 184 / 256, 1 - 136 / 256, 1),
+    ])!;
+    const tapeU = this.tapeU;
+    const clothMat = extendPatch(
+      farFog(
+        worldMaterial(new THREE.MeshBasicMaterial({ map: this.tapeTex, side: THREE.DoubleSide })),
+        CONFIG.cintaShowM * 1.3,
+      ),
+      'cloth',
+      (shader) => {
+        shader.uniforms.uTapeTime = tapeU.time;
+        shader.uniforms.uFlutter = tapeU.flutter;
+        shader.uniforms.uBreak = tapeU.brk;
+        shader.vertexShader =
+          TAPE_CLOTH_PARS + shader.vertexShader.replace('#include <begin_vertex>', TAPE_CLOTH_CHUNK);
+      },
+    );
+    const clothMesh = new THREE.Mesh(clothGeo, clothMat);
+    clothMesh.frustumCulled = false;
+    this.tape.add(clothMesh);
     this.tape.visible = false;
     scene.add(this.tape);
+    this.drawTape();
+    whenSignFontReady(() => this.drawTape());
+  }
+
+  // The banner reads the full label (TU RÉCORD · 1,234 m, or LA META); the
+  // ribbon repeats its first part. Flags flank the banner text.
+  private drawTape(): void {
+    const g = this.tapeCanvas.getContext('2d')!;
+    const label = this.tapeLabel;
+    g.clearRect(0, 0, 1024, 256);
+    // banner
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 1024, 120);
+    g.fillStyle = hex(PALETTE.centerLine);
+    g.fillRect(0, 0, 1024, 10);
+    g.fillRect(0, 110, 1024, 10);
+    const fw = 84;
+    drawDominicanFlag(g, 22, 60 - fw / FLAG_ASPECT / 2, fw);
+    drawDominicanFlag(g, 1024 - 22 - fw, 60 - fw / FLAG_ASPECT / 2, fw);
+    g.fillStyle = hex(PALETTE.flagRed);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    let size = 80;
+    g.font = `${size}px ${SIGN_FONT}`;
+    const room = 1024 - 2 * (fw + 44);
+    const wText = g.measureText(label).width;
+    if (wText > room) {
+      size = Math.floor((size * room) / wText);
+      g.font = `${size}px ${SIGN_FONT}`;
+    }
+    g.fillText(label, 512, 64);
+    // ribbon: white with gold edges (not a flag: blue over red at speed read
+    // as a tricolor), the short label stretched to undo the strip's squash
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 136, 1024, 48);
+    g.fillStyle = hex(PALETTE.centerLine);
+    g.fillRect(0, 136, 1024, 7);
+    g.fillRect(0, 177, 1024, 7);
+    const short = label.split(' · ')[0];
+    g.fillStyle = hex(PALETTE.flagRed);
+    g.font = `26px ${SIGN_FONT}`;
+    for (const x of [170, 512, 854]) {
+      g.save();
+      g.translate(x, 161);
+      g.scale(1.75, 1);
+      g.fillText(short, 0, 0);
+      g.restore();
+    }
+    this.tapeTex.needsUpdate = true;
   }
 
   // One InstancedMesh per flag color: three draw calls instead of 46, and the
@@ -2414,32 +2556,39 @@ export class World {
     scene.add(this.obelisco);
   }
 
-  updateTape(remain: number | null): void {
-    if (remain === null || remain > 165) {
-      this.tape.visible = false;
-      return;
+  // Where this run's tape stands (meters into the run; 0 or less = no tape)
+  // and what it says. startRun sets it; the test rig moves it mid-run.
+  setTape(atM: number, label: string): void {
+    this.tapeAt = atM;
+    this.tapeBroken = false;
+    this.tapeU.brk.value = 0;
+    if (label !== this.tapeLabel) {
+      this.tapeLabel = label;
+      this.drawTape();
     }
-    this.tape.visible = true;
-    this.tape.position.z = remain;
   }
 
+  // The rider burst through: the ribbon's halves swing down from the posts,
+  // the arch stays, and flag-color confetti fills the air ahead of the rider
+  // and rides along with them, so it hangs in the frame instead of whipping
+  // past the camera.
   burstTape(): void {
-    const z = this.tape.visible ? this.tape.position.z : 2;
+    this.tapeBroken = true;
+    const v = this.lastSpeed;
     for (const f of this.confetti) {
-      f.life = 1.5 + Math.random() * 0.6;
+      f.life = 2.2 + Math.random() * 0.6;
       f.x = (Math.random() - 0.5) * 14;
-      f.y = 1 + Math.random() * 1.6;
-      f.z = z;
-      f.vx = (Math.random() - 0.5) * 3;
-      f.vy = 2.5 + Math.random() * 3.5;
-      f.vz = -(1 + Math.random() * 3);
-      f.rx = (Math.random() - 0.5) * 12;
-      f.ry = (Math.random() - 0.5) * 12;
+      f.y = 1.5 + Math.random() * 3.5;
+      f.z = 4 + Math.random() * 14;
+      f.vx = (Math.random() - 0.5) * 2.4;
+      f.vy = 1 + Math.random() * 2;
+      f.vz = v * (0.8 + Math.random() * 0.2);
+      f.rx = (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 6);
+      f.ry = (Math.random() - 0.5) * 6;
       f.rotX = Math.random() * 3;
       f.rotY = Math.random() * 3;
     }
     for (const im of this.confettiMeshes) im.visible = true;
-    this.tape.visible = false;
   }
 
   // Test probe: confetti is instanced, so "is it on screen" is not something a
@@ -2502,6 +2651,7 @@ export class World {
     this.D += ds;
     if (attract) this.runOrigin += ds;
     this.t += dt;
+    if (dt > 0) this.lastSpeed = ds / dt;
     CURVE_U.dist.value = this.D;
     CURVE_U.off.value = curveOffset(this.D);
     CURVE_U.slope.value = curveSlope(this.D);
@@ -2615,11 +2765,24 @@ export class World {
     this.shimmerA.offset.x = (this.shimmerA.offset.x + dt * 0.01) % 1;
     this.glintMat.opacity = 0.38 + Math.sin(this.t * 1.9) * 0.1;
 
+    // La Cinta: stands where this run's record is, rises out of the haze from
+    // cintaShowM away, stays up (broken ribbon and all) until it is behind
+    // the camera. Hidden on the title screen.
+    const tz = this.tapeAt - this.runDistance;
+    this.tape.visible = !attract && this.tapeAt > 0 && tz < CONFIG.cintaShowM && tz > -25;
+    if (this.tape.visible) {
+      this.tape.position.z = tz;
+      this.tapeU.time.value = this.t;
+      const flutter = tz < 60 ? 2 : 1; // the last stretch: the tape is shaking
+      this.tapeU.flutter.value += (flutter - this.tapeU.flutter.value) * Math.min(1, dt * 3);
+      if (this.tapeBroken) this.tapeU.brk.value = Math.min(1, this.tapeU.brk.value + dt * 2.2);
+    }
+
     let anyConfetti = false;
     for (const f of this.confetti) {
       if (f.life <= 0) continue;
       f.life -= dt;
-      f.vy -= 6 * dt;
+      f.vy = Math.max(-1.4, f.vy - 3.5 * dt); // paper flutters down, it never plummets
       f.x += f.vx * dt;
       f.y += f.vy * dt;
       f.z += f.vz * dt - ds;
