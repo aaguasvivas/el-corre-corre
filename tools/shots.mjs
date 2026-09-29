@@ -492,7 +492,7 @@ const SCENES = [
       await s.tick(2);
       await s.ecc('clearTraffic');
       await s.ecc('setPiece', 'camionPlatanos');
-      await s.tick(9);
+      await s.tick(13);
     },
   },
   {
