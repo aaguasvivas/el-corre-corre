@@ -46,8 +46,8 @@ describe('traffic fairness', () => {
     }
     sim.throttle = 1;
     expect(tierSeen, 'the runs must reach the escalated tiers').toBe(CONFIG.escalation.length - 1);
-    expect(walls).toBe(0);
-    expect(maxOverlap).toBe(0);
+    expect(walls, 'unavoidable walls').toBe(0);
+    expect(maxOverlap, 'vehicles ghosting through each other').toBe(0);
   }, 30000);
 
   it('the corridor check refuses the car that would close the road', () => {
@@ -289,8 +289,8 @@ describe('traffic rewards', () => {
           scan.update(sim.traffic);
           maxOverlap = Math.max(maxOverlap, sim.traffic.overlapCount);
         }
-        expect(scan.walls, `${kind} seed ${s}`).toBe(0);
-        expect(maxOverlap, `${kind} seed ${s}`).toBe(0);
+        expect(scan.walls, `walls: ${kind} seed ${s}`).toBe(0);
+        expect(maxOverlap, `ghosting: ${kind} seed ${s}`).toBe(0);
       }
       expect(placedRuns, `${kind} placed`).toBe(3);
     }
