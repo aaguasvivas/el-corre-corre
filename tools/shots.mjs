@@ -486,6 +486,28 @@ const SCENES = [
     },
   },
   {
+    id: 'overhead-fade',
+    what: 'A pasacalle 18 m ahead, halfway through its fade as it climbs toward the HUD',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(3);
+      await s.ecc('overhead', 18, 'pasacalle');
+      await s.tick(1 / 60);
+    },
+  },
+  {
+    id: 'overhead-pass',
+    what: 'A pasacalle 10 m ahead, where it used to cover the score and the pause button: gone',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(3);
+      await s.ecc('overhead', 10, 'pasacalle');
+      await s.tick(1 / 60);
+    },
+  },
+  {
     id: 'zona',
     what: 'La Zona Colonial, 300 m past the border',
     settle: 'finish',

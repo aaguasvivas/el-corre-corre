@@ -1135,6 +1135,7 @@ let testGod = false;
   runDist: () => Math.round(world.runDistance),
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
   dog: () => world.debugViralata(),
+  overhead: (z: number, kind: 'pasacalle' | 'banderitas' | 'laundry') => world.debugOverhead(z, kind),
   confetti: () => world.confettiState,
   burstTape: () => world.burstTape(),
   audio: () => ({
