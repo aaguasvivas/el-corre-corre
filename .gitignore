@@ -4,3 +4,4 @@ dist/
 *.local
 docs/audit/raw/
 docs/shots/
+.claude/worktrees/
