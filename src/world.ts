@@ -27,6 +27,10 @@ const ROAD_SLICES = 5; // 30 m chunk / 6 m lane-dash period
 const RECYCLE_Z = -35;
 const CONFETTI_COUNT = 150;
 const TAPE_POST_X = 8.7; // the arch stands on the curbs, clear of every lane
+// The banner hangs high: at the moment the rider bursts the ribbon the arch
+// is about 6 m ahead of the camera, and anything lower than this fills the
+// top of the frame (and covers the HUD) right when ¡NUEVO RÉCORD! lands.
+const TAPE_BEAM_Y = 8.2;
 
 // The bundled display font (Lilita One, vendored through @fontsource) letters
 // every canvas sign in the world. Canvas text drawn before the face has
@@ -2247,6 +2251,7 @@ class Overhead {
   private iVar: THREE.InstancedBufferAttribute;
   private iBan: THREE.InstancedBufferAttribute;
   private z = new Float32Array(OVERHEAD_COUNT);
+  private hushed = new Uint8Array(OVERHEAD_COUNT); // cleared away for La Cinta or the gate
   private rects: Record<string, AtlasRect>;
 
   constructor(scene: THREE.Scene, atlas: Atlas) {
@@ -2307,7 +2312,10 @@ class Overhead {
 
   // runDistance: where the run is, so a recycled span dresses for the tramo
   // it will stand in. Leapfrogs ahead once it is behind the camera.
-  update(ds: number, runDistance: number): void {
+  // tapeZ, gateZ: where La Cinta and La Puerta del Conde stand (NaN when
+  // they do not). A span never hangs in front of the record banner or
+  // inside the gate: those moments belong to them.
+  update(ds: number, runDistance: number, tapeZ: number, gateZ: number): void {
     let far = -Infinity;
     for (let i = 0; i < OVERHEAD_COUNT; i++) far = Math.max(far, this.z[i]);
     for (let i = 0; i < OVERHEAD_COUNT; i++) {
@@ -2316,10 +2324,14 @@ class Overhead {
         far += 34 + Math.random() * 18;
         this.z[i] = far;
         this.dress(i, tramoFor(runDistance + far));
+        this.hushed[i] = 0;
       }
+      // once cleared away it stays away until it recycles, so nothing pops
+      // back in over the rider after the tape is burst
+      if (Math.abs(this.z[i] - tapeZ) < 30 || Math.abs(this.z[i] - gateZ) < 12) this.hushed[i] = 1;
       _dummy.position.set(0, 0, this.z[i]);
       _dummy.rotation.set(0, 0, 0);
-      _dummy.scale.set(1, 1, 1);
+      _dummy.scale.setScalar(this.hushed[i] ? 0 : 1);
       _dummy.updateMatrix();
       this.im.setMatrixAt(i, _dummy.matrix);
     }
@@ -3240,7 +3252,7 @@ export class World {
       // seams every 7.5 m, the small things that stream past the rider.
       for (let i = 0; i < 4; i++) {
         patch(laneX(Math.floor(Math.random() * 4)) + (Math.random() - 0.5) * 1.2, Math.random() * CHUNK_LEN,
-          1.4 + Math.random() * 1.6, 1.5 + Math.random() * 1.5, 'rgba(44,40,38,0.7)', 'rgba(0,0,0,0.3)', 4);
+          1.4 + Math.random() * 1.6, 1.5 + Math.random() * 1.5, 'rgba(120,112,104,0.24)', 'rgba(0,0,0,0.28)', 4);
       }
       for (let i = 0; i < 5; i++) crack(2 + Math.random() * 12.8, Math.random() * CHUNK_LEN, 0.25);
       manhole(laneX(Math.floor(Math.random() * 4)), 4 + Math.random() * 22);
@@ -3364,12 +3376,12 @@ export class World {
     const parts: THREE.BufferGeometry[] = [];
     for (const sx of [-1, 1]) {
       const x = sx * TAPE_POST_X;
-      cgeo(parts, new THREE.CylinderGeometry(0.14, 0.17, 5.2, 10), PALETTE.colmadoRed, x, 2.6, 0);
-      for (const y of [1.3, 3.2]) cgeo(parts, new THREE.CylinderGeometry(0.175, 0.175, 0.28, 10), 0xffffff, x, y, 0);
-      cgeo(parts, new THREE.SphereGeometry(0.26, 10, 8), PALETTE.gold, x, 5.4, 0);
-      cbox(parts, 0.05, 0.42, 0.05, sx * 6.1, 4.93, 0, 0xf2e9dc); // the banner's cords
+      cgeo(parts, new THREE.CylinderGeometry(0.15, 0.18, TAPE_BEAM_Y, 10), PALETTE.colmadoRed, x, TAPE_BEAM_Y / 2, 0);
+      for (const y of [1.3, 3.3, 5.3]) cgeo(parts, new THREE.CylinderGeometry(0.185, 0.185, 0.3, 10), 0xffffff, x, y, 0);
+      cgeo(parts, new THREE.SphereGeometry(0.28, 10, 8), PALETTE.gold, x, TAPE_BEAM_Y + 0.25, 0);
+      cbox(parts, 0.05, 0.36, 0.05, sx * 6.1, TAPE_BEAM_Y - 0.2, 0, 0xf2e9dc); // the banner's cords
     }
-    cbox(parts, TAPE_POST_X * 2, 0.24, 0.24, 0, 5.16, 0, PALETTE.gold); // beam
+    cbox(parts, TAPE_POST_X * 2, 0.26, 0.26, 0, TAPE_BEAM_Y, 0, PALETTE.gold); // beam
     const arch = new THREE.Mesh(
       mergeGeometries(parts)!,
       farFog(
@@ -3405,7 +3417,7 @@ export class World {
       return g;
     };
     const clothGeo = mergeGeometries([
-      cloth(12.4, 1.45, 16, 4.05, 1 - 120 / 256, 1, 0),
+      cloth(12.4, 1.45, 16, TAPE_BEAM_Y - 1.1, 1 - 120 / 256, 1, 0),
       cloth(TAPE_POST_X * 2, 0.46, 32, 1.1, 1 - 184 / 256, 1 - 136 / 256, 1),
     ])!;
     const tapeU = this.tapeU;
@@ -3813,7 +3825,12 @@ export class World {
 
     this.viralata.update(ds, dt);
     this.motes.update(ds, this.lastSpeed, !attract);
-    this.overhead.update(ds, this.runDistance);
+    this.overhead.update(
+      ds,
+      this.runDistance,
+      this.tape.visible ? this.tape.position.z : NaN,
+      this.puerta.visible ? this.puerta.position.z : NaN,
+    );
     this.walkers.update(
       ds,
       dt,
