@@ -118,9 +118,9 @@ Pages live in `site/` (bilingual, game palette) and are published at:
 - Support and marketing URL: `https://aaguasvivas.github.io/el-corre-corre-site/`
 
 The pages are live (GitHub Pages repo `el-corre-corre-site`). Changes to
-`site/` go live only after a push to that repo, with Adelson's go. Before
-build 10 goes to review, the privacy page needs the update in RELEASE.md
-"Before build 10", step 5 (pinturas, mandaos, the streak, and sharing).
+`site/` go live only after a push to that repo, with Adelson's go. The
+privacy page update for build 10 (pinturas, mandaos, the streak, and
+sharing) is in `site/privacy.html` and must be pushed before review.
 
 ## Screenshots
 

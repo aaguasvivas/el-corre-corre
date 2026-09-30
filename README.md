@@ -60,7 +60,7 @@ other, swipe up and hold for the trick.
 ## Test it
 
 ```bash
-npm test           # vitest: 11 files, 105 tests
+npm test           # vitest: 11 files, 108 tests
 npm run check      # typecheck + tests
 ```
 
@@ -70,9 +70,10 @@ near-miss for a parked rider) and the game systems (scoring, records, the
 brake heat, Los Mandaos, the save backup, the share path, the HUD lane and
 copy parity in ES and EN).
 
-Everything else is verified live: the game exposes `window.__ecc` with
-state probes, deterministic spawns and a `tick(sec)` that advances the sim
-without requestAnimationFrame. HANDOFF.md section 4 lists every hook, and
+Everything else is verified live: the dev server (and `npm run build:probe`,
+never the release build) exposes `window.__ecc` with state probes,
+deterministic spawns and a `tick(sec)` that advances the sim without
+requestAnimationFrame. HANDOFF.md section 4 lists every hook, and
 these probes drive it in headless Chrome:
 
 ```bash

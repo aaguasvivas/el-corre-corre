@@ -19,14 +19,15 @@
 
 ## 1. Current state (2026-09-30)
 
-**Main is at `eb676ef`** ("Integrate wave 3"), 78 commits ahead of
-`origin/main` (`ad436cf`, build 9) and not pushed. `npm run check` is clean
-there: 11 test files, 105 tests.
+**Main holds wave 4** (fixes `5b5bc39` to `8a85b45`, these docs, the store
+screenshots), ahead of `origin/main` (`ad436cf`, build 9) and not pushed.
+`npm run check` is clean: 11 test files, 108 tests.
 
 **On TestFlight:** build 9 (`ad436cf`, 2026-09-01), with the internal group
 and the external group Familia (Adelson's brother Erickson). Build 9 has none
-of the next-level pass. Build 10 is not built yet; RELEASE.md has the
-prerequisites and the runbook.
+of the next-level pass. Build 10 is archived from wave 4 at
+`ios/App/build-archive/App10.xcarchive` and not uploaded yet; RELEASE.md has
+the state and the runbook.
 
 **The next-level pass** (the owner asked on 2026-09-29 for "fun, replayable,
 high quality, polished, close to delivery" with a gas pedal, using Subway
@@ -76,22 +77,14 @@ Messages and WhatsApp, the save mirror after a real eviction, the pedals under
 real multi-touch, haptics, audio by ear, frame rate, cold-launch color),
 VoiceOver, iPad compatibility mode, and a 10-minute soak of this build.
 
-**Wave 4 (ship) is in progress.** The store lens (2026-09-30) found these
-open items at `eb676ef`; RELEASE.md carries them as build-10 prerequisites:
-
-1. `NSPhotoLibraryAddUsageDescription` is missing, so "Save Image" in the
-   share sheet can terminate the app (fix: the key in Info.plist plus es and
-   en `InfoPlist.strings`).
-2. `CURRENT_PROJECT_VERSION` is still 9; build 10 needs 10.
-3. `npx cap sync ios` exits 65 because `ios/App/build` holds the old
-   archives; archives move to `ios/App/build-archive/`.
-4. The `__ecc` test rig ships in the release bundle; it should be gated to
-   dev builds or `?ecc`.
-5. Guideline 5.1.1(i) asks for a privacy policy link inside the app. The
-   game has none. Owner decision (RELEASE.md, "Open decisions").
-6. The live privacy page does not mention pinturas, mandaos, the streak or
-   sharing.
-7. The App Store screenshot set is not captured.
+**Wave 4 (ship) landed.** The store lens items at `eb676ef` are fixed:
+the photo purpose string in ES and EN (`68fc5c6`), build number 10, the old
+archives moved to `ios/App/build-archive/` so `npx cap sync ios` exits 0, the
+`__ecc` rig gated out of the release bundle (section 4.1), the privacy page
+updated in `site/` (not pushed yet), opaque RGB icons, and the 6.9-inch
+screenshot sets in `docs/store/screenshots/{es,en}`. Still open: the in-app
+privacy link (owner decision, RELEASE.md "Open decisions") and publishing
+the privacy page.
 
 ---
 
@@ -177,7 +170,14 @@ do not bump Vite to 7. `npm run dev` (port 5173), `npm run build`
   time, so any art edit reshuffles seeded scenes. Gameplay values drawn at
   construction must not come from that stream (traffic drift phases come from
   the pool slot for this reason), and screenshot scenes that stage cars pass
-  each car's speed explicitly.
+  each car's speed explicitly. Probe checks that depend on seeded traffic
+  wait for their own event (the hud-probe lane check waits for its card).
+- **Materials.** Every instanced mesh on the belt's vertex-color material
+  (`vcMat`) carries an `instanceColor`, white when untinted; the belt palms
+  have their own `palmMat`. A shared material seen with and without that
+  attribute makes three.js re-derive program parameters every frame, and a
+  shadow caster that gains it flips the shadow depth material too. Count
+  `getParameters` calls per pass after any material change.
 - **Tricks.** One shared state machine (hold to sustain, `wheelieMaxSec` 4.5,
   cooldown grows with the hold, release to re-arm, a 0.2 s input buffer).
   Bikes pitch up on the rear axle and clear ground hazards; the Civic drifts
@@ -322,7 +322,7 @@ Every save is a localStorage key under `ecc.v1.`. Every read is guarded
 | `ecc.v1.lang` | `'es'` or `'en'` | `ui.ts` |
 | `ecc.v1.muted` | `'1'` or `'0'` | `audio.ts` |
 | `ecc.v1.pedalSeen` | `'1'` once GAS was pressed, ever (stops the GAS breathe hint; counts as the gas coach bit) | `ui.ts` |
-| `ecc.v1.learned` | Coach bitmask: 1 steer, 2 contra vía, 4 trick, 8 gas | `coach.ts` |
+| `ecc.v1.learned` | Coach bitmask: 1 steer, 2 contra vía, 4 trick, 8 gas, 16 el freno caliente | `coach.ts` |
 
 Legacy unsuffixed `ecc.v1.record` and `ecc.v1.recordDist` migrate to the
 Motor once, in `score.ts`.
@@ -330,7 +330,8 @@ Motor once, in `score.ts`.
 **The Preferences mirror** (`src/storage.ts`, native only). One Capacitor
 Preferences entry, `ecc.backup`, holds JSON `{v: 1, saves: {...}}` with every
 `ecc.v1.*` key. It is written at game over, on pause, on the menu, when the
-app goes to the background outside a run, and once at boot when saves
+app goes to the background outside a run (during the crash slow-mo it first
+persists the run's records and mandaos), and once at boot when saves
 already exist. At boot, if localStorage has no `ecc.v1.*` key, the mirror
 refills it before the game reads anything. Saves already in localStorage
 always win. If the bridge does not answer in 1.5 s the game boots anyway and
@@ -348,6 +349,11 @@ HUD clock per step, updates audio and renders once. All headless tests are
 `dispatch input -> tick -> assert`.
 
 ### 4.1 `__ecc` hooks (all of them, at `eb676ef`)
+
+`window.__ecc` exists only in the dev server and in `npm run build:probe`
+(which writes `dist-probe/`, ignored). The release bundle has none of it:
+`grep -c __ecc dist/assets/index-*.js` prints 0. A probe that needs a
+production-like bundle serves `dist-probe/`.
 
 - **State:** `state() score() record() x() y() speed() effSpeed() throttle()
   cars() combo() platanos() cv() wheelie() airborne() powerups() worldDist()
@@ -404,7 +410,7 @@ HUD clock per step, updates audio and renders once. All headless tests are
   and shoulders get parked guaguas and carts. Design tests to restart on
   `state() !== 'playing'`, or use `god(true)`.
 - Screenshot scenes start with every coach move learned (`ecc.v1.learned` =
-  15). A scene passes `coach: <bits>` (`?coach=n`) to show a first launch.
+  31). A scene passes `coach: <bits>` (`?coach=n`) to show a first launch.
 
 ### 4.3 Tools
 

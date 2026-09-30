@@ -60,6 +60,12 @@ of your saves. The decisions are in `docs/audit/PLAN.md`.
     permission in Spanish and the card lands in Fotos. Close the sheet
     without choosing: nothing breaks. Force-quit and reopen: plátanos, paints
     and records are still there.
+13. **Wave 4 polish.** On the title, pick the Civic and tap to start: does
+    the camera push-in at run start feel good? Hold FRENO until it overheats
+    once on a fresh install: does the one-time hot-brake hint help, and does
+    it leave once the brake cools? Are the ¡HECHO! thump and tap satisfying
+    and not buzzy? Do popups beside the rider still read at a glance? On a
+    big record, is the shrunk points number still the hero of the card?
 
 ## El acelerador + art round 3 (build 9; the finger-height throttle is gone since build 10)
 

@@ -12,12 +12,14 @@ the Xcode Organizer. Run every command here from the main checkout,
   `dev.elcorrecorre.app`, SKU `elcorrecorre-ios-v1`, primary language
   Spanish (Mexico). Builds 1 to 9 are uploaded.
 - Site: live at https://aaguasvivas.github.io/el-corre-corre-site/ (public
-  repo `el-corre-corre-site`, GitHub Pages). It matches `site/` byte for
-  byte.
+  repo `el-corre-corre-site`, GitHub Pages). `site/privacy.html` has the
+  build-10 update (`59b540e`) and is not pushed, so the live privacy page is
+  behind `site/` until Adelson publishes it.
 - TestFlight: internal group (Adelson) and external group Familia
   (Erickson).
-- Next: build 10 to TestFlight and the iPhone, then App Store review for
-  version 1.0 with build 10.
+- Build 10 is archived at `ios/App/build-archive/App10.xcarchive` and not
+  uploaded. Next: upload it, run "Device checks for build 10", then App
+  Store review for version 1.0 with build 10.
 
 ## Builds (version 1.0)
 
@@ -26,7 +28,7 @@ the Xcode Organizer. Run every command here from the main checkout,
 | 4 | `4103cd2` | 2026-08-05 | Approved for external testing (Familia) |
 | 5 to 8 | `515411a` to `929ee3e` | 2026-08-08 to 2026-09-01 | Superseded |
 | 9 | `ad436cf` | 2026-09-01 | On TestFlight. Superseded by build 10: no pedals, no Los Mandaos, the old records, no native share, no save backup. Never select build 9 for App Store review. |
-| 10 | not built yet | | Build from a commit that meets "Before build 10". Upload, test on the iPhone, then submit this build. |
+| 10 | `b5b9019` (app code as of `8a85b45`) | 2026-09-30 | Archived at `ios/App/build-archive/App10.xcarchive`: CFBundleVersion 10, MinimumOSVersion 15.0, main JS identical to `dist/`, PrivacyInfo.xcprivacy in the app. Installed on Adelson's iPhone from the archive; the launch check did not run because the iPhone was locked. Not uploaded. Upload, test on the iPhone, then submit this build. |
 
 Rule: any change to `src/`, `index.html`, `public/` or `ios/` after a build is
 uploaded makes that build stale. The commit that bumps
@@ -34,63 +36,34 @@ uploaded makes that build stale. The commit that bumps
 
 ## Before build 10
 
-The store audit of `eb676ef` (2026-09-30) found these. Each one lands in a
-commit before the archive, with the check that proves it.
+The store audit of `eb676ef` (2026-09-30) found these. Items 1 to 4 and 7
+are done in wave 4; 5 and 6 are still open.
 
-1. **Photo-library purpose string.** COMPARTIR opens the iOS share sheet with
-   an image, and its "Save Image" action writes to Photos. Without
-   `NSPhotoLibraryAddUsageDescription`, iOS terminates the app on that tap.
-   - `ios/App/App/Info.plist`: add the key with the ES string
-     `El juego guarda en Fotos la tarjeta de tu corrida solo cuando tú lo pides.`
-   - New `ios/App/App/es.lproj/InfoPlist.strings` with the same ES string
-     and `ios/App/App/en.lproj/InfoPlist.strings` with
-     `The game saves your run card to Photos only when you ask.`
-   - `project.pbxproj`: an `InfoPlist.strings` variant group (en, es) in the
-     App target's resources, `developmentRegion = es`, and
-     `knownRegions = (es, en, Base)`. In Xcode this is InfoPlist.strings >
-     File inspector > Localize.
-   - Check in a Release build: `plutil -p App.app/Info.plist | grep NSPhotoLibraryAdd`
-     prints the ES string, and `App.app/es.lproj` and `App.app/en.lproj`
-     each hold `InfoPlist.strings`.
-   - App Privacy stays "Data Not Collected": saving an image the player
-     chose is not collection.
-2. **Build number 10.** Set `CURRENT_PROJECT_VERSION = 10` in both the Debug
-   and Release blocks of `ios/App/App.xcodeproj/project.pbxproj`.
-   `MARKETING_VERSION` stays 1.0. App Store Connect refuses a second upload
-   of 1.0 (9).
-3. **Archive folder (one time).** `npx cap sync ios` ends with
-   `xcodebuild clean`, which fails with exit 65 while `ios/App/build` holds
-   archives Xcode did not create. Move them (ignored files, nothing is
-   deleted):
-   ```bash
-   cd ~/Desktop/personal/el-corre-corre/ios/App
-   mkdir -p build-archive
-   mv build/App.xcarchive build-archive/App7.xcarchive
-   mv build/App8.xcarchive build/App9.xcarchive build-archive/
-   rmdir build
-   ```
-   The existing ignore rule `App/build-*/` in `ios/.gitignore` covers
-   `build-archive/`. Check: `npx cap sync ios; echo $?` prints 0 and the log
-   ends with "Sync finished".
-4. **Gate the test rig.** `window.__ecc` (god mode, score and record
-   setters) ships in the release bundle. Wrap the block in `src/main.ts` in
-   `if (import.meta.env.DEV || new URLSearchParams(location.search).has('ecc'))`.
-   `tools/shots.mjs` uses the dev server, so it keeps working; probes against
-   `vite preview` add `?ecc`. Check: after `npm run build`,
+1. **Photo-library purpose string.** Done (`68fc5c6`).
+   `NSPhotoLibraryAddUsageDescription` is in `Info.plist` (ES), with
+   `es.lproj` and `en.lproj` `InfoPlist.strings`; `developmentRegion = es`,
+   `knownRegions = (es, en, Base)`. Checked in the build 10 archive. The
+   prompt follows the device language, not the in-game EN toggle.
+2. **Build number 10.** Done: `CURRENT_PROJECT_VERSION = 10` in Debug and
+   Release, `MARKETING_VERSION` 1.0.
+3. **Archive folder.** Done: builds 7, 8 and 9 are
+   `ios/App/build-archive/App7.xcarchive`, `App8` and `App9` (ignored by
+   `App/build-*/` in `ios/.gitignore`). `npx cap sync ios` exits 0. Archive
+   only into `build-archive/`: an archive in `ios/App/build` makes the
+   sync's `xcodebuild clean` exit 65 again.
+4. **Test rig gate.** Done: `window.__ecc` exists only when
+   `import.meta.env.DEV` or the `probe` mode is set (`npm run build:probe`,
+   into the ignored `dist-probe/`). Check: after `npm run build`,
    `grep -c __ecc dist/assets/index-*.js` prints 0.
-5. **Privacy page.** `site/privacy.html` still describes the August game.
-   Add pinturas, mandaos and the streak to "Lo que se queda en tu teléfono" /
-   "What stays on your phone", add a "Compartir" / "Sharing" section (the
-   card goes only to the app the player picks; saving to Fotos only adds that
-   image and never reads photos), and update both dates. Publishing is a push
-   to the public `el-corre-corre-site` repo: ask Adelson first, then fetch
-   the live URL and diff it against `site/privacy.html`.
+5. **Privacy page.** Updated in `site/privacy.html` (`59b540e`: pinturas,
+   mandaos, the streak, a Compartir / Sharing section, dated September 30,
+   2026). Not published. Publishing is a push to the public
+   `el-corre-corre-site` repo: ask Adelson first, then fetch the live URL and
+   diff it against `site/privacy.html`.
 6. **In-app privacy link.** Owner decision, needed before App Store review
    (not before TestFlight). See "Open decisions".
-7. Optional: the app icon PNGs are RGBA with every pixel opaque. Nine
-   uploads accepted them. To remove the alpha channel, make
-   `tools/make-icons.mjs` write color type 2 (RGB), run it, and check that
-   `sips -g hasAlpha` prints no for all three icons.
+7. **Icon alpha.** Done: `tools/make-icons.mjs` writes RGB and stops on any
+   non-opaque pixel; `sips -g hasAlpha` prints no for the icons and splash.
 
 ## Assets and values (copy from here)
 
@@ -186,7 +159,8 @@ device test covers them. On Adelson's iPhone:
 3. **COMPARTIR:** share to WhatsApp and to Messages, then Guardar imagen
    (Spanish permission prompt, the image lands in Fotos), then Copiar and
    Guardar en Archivos. Close the sheet without a choice: nothing happens.
-   Switch to EN and repeat Save Image: English prompt.
+   The photo prompt follows the device language, not the in-game EN toggle:
+   to see the English prompt, set the iPhone language to English.
 4. **Save mirror:** play 2 runs, buy a paint, force-quit, reopen. The
    plátanos, the paint and the records are still there.
 5. **Pedals near the bottom edge:** slide up from the FRENO/¡DALE! area. The
@@ -196,6 +170,8 @@ device test covers them. On Adelson's iPhone:
    and the countdown resumes it.
 7. **App Store Connect:** no ITMS-91053 or ITMS-91061 email. Check whether
    the build page lists Spanish and English.
+8. **VoiceOver:** double-tap MANDAOS, EN, a ride tab, a paint, SEGUIR, MENÚ
+   and COMPARTIR; each acts once.
 
 ## App Store submission (version 1.0)
 
@@ -217,7 +193,8 @@ privacy link decided, the screenshots made.
 5. Business > Digital Services Act: declare trader or non-trader status.
    Without it the app is not offered in EU storefronts. A trader's address,
    phone and email show on the EU product page.
-6. iOS App 1.0, es-MX then en-US: screenshots, Promotional Text,
+6. iOS App 1.0, es-MX then en-US: screenshots (the 8 PNGs in
+   `docs/store/screenshots/es` and `/en`, in the STORE.md order), Promotional Text,
    Description, Keywords, Support URL, Marketing URL. Save each
    localization.
 7. Same page: Copyright `2026 Adelson Aguasvivas`. Build > + > build 10
