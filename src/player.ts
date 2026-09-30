@@ -1514,7 +1514,12 @@ export class Player {
       this.riderProxy.geometry = rig.riderGeo;
     }
     this.riderProxy.position.set(0, -py, -pz);
-    this.riderPivot.position.set(this.x, this.root.position.y + py, pz);
+    // The pivot starts where the rider really is: through the lean group,
+    // so a crash mid-caballito (the rig pitched up on its rear axle) does
+    // not pop the rider back to an upright seat.
+    this.root.updateMatrixWorld(true);
+    this.leanGroup.localToWorld(_v3.set(0, py, pz));
+    this.riderPivot.position.copy(_v3);
     this.riderPivot.rotation.set(this.leanGroup.rotation.x, this.root.rotation.y, this.leanGroup.rotation.z);
     this.riderPivot.visible = true;
     this.tumbleVy = CONFIG.tumbleLaunchVy;
@@ -1587,6 +1592,7 @@ export class Player {
     }
     this.leanGroup.rotation.x += -this.leanGroup.rotation.x * lk;
     this.leanGroup.position.y += -this.leanGroup.position.y * lk;
+    this.leanGroup.position.z += -this.leanGroup.position.z * lk; // the caballito's rear-axle pivot settles too
     this.placeStars();
   }
 

@@ -1089,9 +1089,10 @@ export class UI {
     this.setPedalLive(false);
   }
 
+  // The pedals stay hidden through the resume countdown; main shows them
+  // at GO, so a thumb resting on the pedal area never acts on a frozen world.
   hidePause(): void {
     this.pause.classList.add('hidden');
-    this.setPedalLive(true);
   }
 
   setScore(n: number): void {

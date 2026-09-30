@@ -531,8 +531,8 @@ function tryRestart(): void {
 }
 
 // SEGUIR (or the key) never drops you straight into live traffic: the world
-// stays frozen through a 3, 2, 1 first. The pedals come back live, but a
-// finger still resting on one needs a fresh press (ui.releasePedal).
+// stays frozen through a 3, 2, 1 first. The pedals stay hidden until GO,
+// and a finger still resting on one needs a fresh press (ui.releasePedal).
 function resume(): void {
   if (state !== 'paused') return;
   state = 'countdown';
@@ -548,6 +548,7 @@ function stepCountdown(dt: number): void {
   if (countdownT <= 0) {
     state = 'playing';
     ui.countdownGo();
+    ui.setPedalLive(true); // the pedals come back only at GO
     audio.resumeRun(); // same run, same tramo: the groove keeps its place
     audio.click();
     haptics.light();
@@ -873,7 +874,8 @@ function runMoments(h: number): void {
     ui.bannerNewRecord();
     world.confettiBurst();
     audio.recordStinger();
-    haptics.heavy();
+    haptics.success();
+    triggerDip(CONFIG.dipRecordHoldMs);
   }
   momentT += h;
   if (momentT < CONFIG.mandaoSampleSec) return;
@@ -909,9 +911,9 @@ function onNearMiss(x: number, z: number, clearance: number): void {
   missions.sample(score);
 }
 
-// A razor pass (¡Por un pelito!). One call site for its feel, so a time-dip
-// or a bigger cue plugs in here.
+// A razor pass (¡Por un pelito!): a blink of hit-stop and a firmer tap.
 function razorPass(): void {
+  triggerDip();
   haptics.medium();
 }
 
@@ -922,14 +924,12 @@ function onMandaoDone(c: Completion): void {
   score.addToBank(c.reward + c.setBonus);
   if (state !== 'playing') return;
   ui.toastMandao(c);
-  mandaoSound();
+  // DECISION: the mandao that finishes a set plays only the level-up
+  // fanfare (it opens with the same rising marimba), so two stingers never
+  // pile up on one frame.
+  if (c.levelUp) audio.levelUp();
+  else audio.mandao();
   haptics.medium();
-}
-
-// The mandao sound, in one place for the audio pass to replace.
-function mandaoSound(): void {
-  audio.bell();
-  audio.platano();
 }
 
 // The run is over: mandaos take their last read (and pay) first, so the
