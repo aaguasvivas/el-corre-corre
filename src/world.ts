@@ -2495,7 +2495,10 @@ class Walkers {
 
 // El cobrador: hanging off the back step of a parked guagua, one hand on
 // the rail, waving people on and shouting ¡SÚBETE! at the sidewalk. Call once
-// on a stopped guagua's group (the guagua's addExtras in traffic.ts). The
+// on a stopped guagua's group (the guagua's addExtras in traffic.ts), with
+// the material wrap the guagua itself uses (traffic.ts hazardMaterial), so he
+// and his bubble fade on the hazard fog curve with the bus instead of
+// melting into the scenery haze before it. The
 // geometry holds him on both sides; the shader keeps only the sidewalk side
 // (the guagua's x says which shoulder it is parked on), so he never hangs
 // into a lane and the rider can never ride through him. He rides the rear
@@ -2508,7 +2511,7 @@ const COBRADOR_Z = -3.3;
 const SIDEWALK_SIDE = /* glsl */ `
 float eccSide = modelMatrix[3][0] > 0.0 ? 1.0 : -1.0;
 `;
-export function addCobrador(guagua: THREE.Object3D): void {
+export function addCobrador(guagua: THREE.Object3D, fog: <T extends THREE.Material>(m: T) => T): void {
   if (!_cobradorGeo) {
     const figure = (s: number): THREE.BufferGeometry => {
       const parts: THREE.BufferGeometry[] = [];
@@ -2526,7 +2529,7 @@ export function addCobrador(guagua: THREE.Object3D): void {
     };
     _cobradorGeo = mergeGeometries([figure(-1), figure(1)])!;
     _cobradorMat = extendPatch(
-      worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+      fog(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
       'cobrador',
       (shader) => {
         shader.vertexShader =
@@ -2573,7 +2576,7 @@ export function addCobrador(guagua: THREE.Object3D): void {
     draw();
     whenSignFontReady(draw);
     _bubbleMat = extendPatch(
-      worldMaterial(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
+      fog(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
       'bubble',
       (shader) => {
         // hops to his side of the guagua by translation, never by a mirror,

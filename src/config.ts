@@ -379,6 +379,13 @@ export const CONFIG = {
   wheelieSteerFactorStart: 0.68, // FEEL: steering authority at wheelie start...
   wheelieSteerFactorEnd: 0.38, // FEEL: ...decaying to this at max hold. The risk.
   wheelieWobble: 0.09, // FEEL: how shaky the bike gets deep into a hold
+  // FEEL: how far the bikes rear up on the model (radians, pivoting on the
+  // rear axle). Looks only: timing and hitbox never read it. At 0.5 the raised
+  // portrait camera saw little more than a shorter bike; from about 0.7 the
+  // front wheel and the headlight clear the rider's gorra and the rider
+  // visibly sits back.
+  wheeliePitchRad: 0.74,
+  wheelieDustEverySec: 0.06, // FEEL: the rear tire kicks up a puff this often while the front is up
   wheelieCooldownBase: 1.1, // FEEL: cooldown = base + held seconds * perSec
   wheelieCooldownPerSec: 0.65,
   wheeliePointsPerSec: 5,
