@@ -883,6 +883,20 @@ const SCENES = [
     },
   },
   {
+    id: 'coach-hot',
+    what: 'El freno caliente the first time: the hint over FRENO while the pads cook',
+    coach: 15,
+    settle: 400,
+    run: async (s) => {
+      await s.start();
+      await s.tick(4);
+      const p = await s.pedalAt('brake');
+      await s.down(p.x, p.y);
+      if (!(await s.tickUntil('e.brakeHeat().hot', 4, 1 / 20))) throw new Error('the pads never cooked');
+      await s.tick(0.4);
+    },
+  },
+  {
     id: 'cafecito',
     what: 'El cafecito on the pedals: the gold ring draining, CAFECITO, FRENO dimmed',
     settle: 'finish',
@@ -943,6 +957,81 @@ const SCENES = [
       // camera in about a third of a second, so the sim stops early while the
       // settle lets the banner finish popping in on the wall clock.
       await s.play(0.12);
+    },
+  },
+  {
+    id: 'store-gas-cv',
+    what: 'Store: a fondo en contra vía, ¡DALE! held, the ×2 pill and the ×1.5 tag up, a near-miss popping',
+    only: ['iphone69'],
+    settle: 120,
+    run: async (s) => {
+      await s.start();
+      await s.tick(2);
+      await s.ecc('clearTraffic');
+      await s.steerTo(2.3);
+      const p = await s.pedalAt('gas');
+      await s.down(p.x, p.y); // the thumb stays on ¡DALE! through the shot
+      await s.tick(1.5);
+      await s.ecc('clearTraffic');
+      const zs = [40, 70, 100, 130, 160];
+      for (let i = 0; i < zs.length; i++) {
+        const lane = i % 2 ? 3 : 2;
+        await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, zs[i], -1, lane === 2 ? 1.7 : 5.1, i === 2 ? 11 : 14);
+      }
+      const onLine = 'ax < 3.4 ? ax + 0.6 : ax - 0.6';
+      const dodge = 'ax < 3.4 ? ax + 1.8 : ax - 1.8';
+      if (!(await s.dodgeChain(onLine, dodge, 8, 'e.combo() >= 3'))) throw new Error('combo 3 never reached');
+    },
+  },
+  {
+    id: 'store-leyenda',
+    what: 'Store: a real dodge chain up to ×15, ¡LEYENDA DEL MALECÓN! on the ladder',
+    only: ['iphone69'],
+    settle: 160,
+    run: async (s) => {
+      await s.start();
+      await s.tick(2);
+      await s.ecc('clearTraffic');
+      await s.steerTo(2.3);
+      const onLine = 'ax < 3.4 ? ax + 0.6 : ax - 0.6';
+      const dodge = 'ax < 3.4 ? ax + 1.8 : ax - 1.8';
+      // Two waves of oncoming cars, alternating the contra vía lanes; the
+      // second is spawned while the chain is still alive.
+      for (const [goal, n] of [[8, 9], [15, 9]]) {
+        for (let i = 0; i < n; i++) {
+          const lane = i % 2 ? 3 : 2;
+          await s.spawn(i % 4 === 2 ? 'guagua' : 'sedan', lane, 30 + i * 24, -1, lane === 2 ? 1.7 : 5.1, i % 4 === 2 ? 11 : 14);
+        }
+        if (!(await s.dodgeChain(onLine, dodge, 14, `e.combo() >= ${goal}`))) throw new Error(`combo ${goal} never reached`);
+      }
+    },
+  },
+  {
+    id: 'store-puerta',
+    what: 'Store: a caballito through La Zona Colonial toward La Puerta del Conde',
+    only: ['iphone69'],
+    settle: 150,
+    run: async (s, vp) => {
+      await s.start();
+      await s.rideTo(1300);
+      // A Bendición picked up on the way would wrap the rider in its bubble:
+      // spend it on a car (the shield takes the hit), then ride on.
+      if ((await s.ecc('powerups')).shielded) {
+        await s.ecc('god', false);
+        await s.ecc('clearTraffic');
+        await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+        if (!(await s.tickUntil('!e.powerups().shielded', 5, 1 / 60))) throw new Error('the shield never took the hit');
+        await s.ecc('god', true);
+      }
+      // the gate stands puertaOffsetM into La Zona: stop about 40 m short
+      await s.rideTo(1380);
+      await s.unghost();
+      await s.clearFx();
+      const x = vp.width / 2;
+      const y = vp.height * 0.72;
+      await s.down(x, y);
+      await s.move(x, y - 80);
+      await s.play(0.4);
     },
   },
   {
@@ -1095,14 +1184,14 @@ function bootScript(seed, lang) {
     // storage (s.seed), which marks the reload in sessionStorage and keeps
     // what the first load wrote. A coach scene (coach: <learned bits>, as
     // ?coach=n) names what is already known: 1 steer, 2 contra vía, 4 the
-    // trick, 8 the gas.
+    // trick, 8 the gas, 16 el freno caliente.
     if (sessionStorage.getItem('__shotKeep')) {
       sessionStorage.removeItem('__shotKeep');
     } else {
       localStorage.clear();
       if (lang === 'en') localStorage.setItem('ecc.v1.lang', 'en');
       const coach = /[?&]coach=(\d+)/.exec(location.search);
-      localStorage.setItem('ecc.v1.learned', coach ? coach[1] : '15');
+      localStorage.setItem('ecc.v1.learned', coach ? coach[1] : '31');
     }
   } catch {
     // fine

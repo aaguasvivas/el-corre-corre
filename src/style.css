@@ -565,7 +565,8 @@ body {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 12px);
   right: calc(env(safe-area-inset-right, 0px) + 12px);
-  background: rgba(0, 45, 98, 0.55);
+  /* 0.65: white text keeps 4.5:1 even over a white cloud */
+  background: rgba(0, 45, 98, 0.65);
   color: var(--white);
   border: 2px solid rgba(255, 255, 255, 0.7);
   border-radius: 999px;
@@ -1290,10 +1291,12 @@ body {
 
 /* ¡HECHO!: a rubber stamp slammed onto a row this run finished, with a
    ring of flag-blue dust; staggered row by row (--i). */
+/* It lands on the row's check column (the check already says done), so the
+   sentence it certifies stays readable; a stamped row's text keeps clear. */
 .md-stamp {
   position: absolute;
-  top: -3px;
-  right: 30px;
+  top: -1px;
+  right: -4px;
   padding: 0 6px;
   border: 2px solid var(--red);
   border-radius: 6px;
@@ -1305,7 +1308,8 @@ body {
   pointer-events: none;
   transform: rotate(-9deg);
   animation: stamp-slam 0.3s var(--ease-pop) both;
-  animation-delay: calc(0.5s + var(--i, 0) * 0.14s);
+  /* the timing comes from CONFIG (stampFirstSec and the rest), set on #ui */
+  animation-delay: calc(var(--stamp-first) + var(--i, 0) * var(--stamp-step));
 }
 
 .md-stamp::after {
@@ -1316,7 +1320,7 @@ body {
   border: 2px dashed var(--blue);
   opacity: 0;
   animation: stamp-dust 0.4s ease-out both;
-  animation-delay: calc(0.62s + var(--i, 0) * 0.14s);
+  animation-delay: calc(var(--stamp-first) + var(--stamp-land) + var(--i, 0) * var(--stamp-step));
 }
 
 @keyframes stamp-slam {
@@ -1354,6 +1358,10 @@ body {
 /* The card and the pause keep their rows compact. */
 .md-card-rows .md-row {
   font-size: 12.5px;
+}
+
+.md-card-rows .md-row.just .md-text {
+  padding-right: 32px;
 }
 
 .md-card-rows .md-prog {

@@ -185,7 +185,10 @@ const PROBES = {
       const e = window.__ecc;
       for (let i = 0; i < 400 && (e.hud().kind !== null || e.hud().queued > 0); i++) e.tick(1 / 20);
       e.setPiece('camionPlatanos');
-      e.tick(1 / 60);
+      // The lane keeps a short gap after the card before it: wait for this
+      // one to show rather than assume a free lane (the seeded traffic,
+      // and so the lane's last card, moves with every build-time draw).
+      for (let i = 0; i < 300 && e.hud().kind !== 'setPiece'; i++) e.tick(1 / 60);
     });
     const lane = await sampleRects(page, ['#an-card', '#hud-cv', '#hud-cab', '#combo-tier'], 420);
     const lines = await page.evaluate(() => {
@@ -649,7 +652,7 @@ async function main() {
         try {
           await page.setViewport(vp);
           await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: name === 'motion' ? 'reduce' : 'no-preference' }]);
-          await page.evaluateOnNewDocument(bootScript, 7, lang, name === 'coach' ? null : 15);
+          await page.evaluateOnNewDocument(bootScript, 7, lang, name === 'coach' ? null : 31);
           await page.goto(url, { waitUntil: 'load', timeout: 300000 });
           await page.waitForFunction(() => window.__ecc !== undefined, { timeout: 300000 });
           await page.evaluate(() => document.fonts.ready.then(() => undefined));

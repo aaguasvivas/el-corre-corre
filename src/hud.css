@@ -229,6 +229,9 @@
 #combo-tier[data-tier='4'] { --tier-scale: 1.09; color: var(--hud-sun); -webkit-text-stroke-color: var(--hud-red); }
 #combo-tier[data-tier='5'] { --tier-scale: 1.12; color: var(--hud-sun); -webkit-text-stroke-color: var(--hud-red); }
 #combo-tier[data-tier='6'] { --tier-scale: 1.15; color: var(--hud-gold); -webkit-text-stroke-color: var(--hud-red); }
+/* the top tier's red edge is dark enough against gold but not against the
+   sky (2.9:1), so a thin navy ring outlines the red */
+#combo-tier[data-tier='6'] { filter: drop-shadow(0 0 1px var(--hud-blue)) drop-shadow(0 0 1px var(--hud-blue)); }
 
 /* a ladder hit: the tier slams in, tilted, and lands square
    (0.4 -> 1.16 -> 1) */
@@ -703,6 +706,17 @@
   border-top-color: var(--hud-white);
 }
 
+/* el freno caliente's hint points down at FRENO */
+#coach[data-cue='hot']::after {
+  content: '';
+  position: absolute;
+  left: 18px;
+  bottom: -9px;
+  border: 8px solid transparent;
+  border-bottom: none;
+  border-top-color: var(--hud-white);
+}
+
 /* ---------- el pedal ----------
    Bottom left, laid out like a car: FRENO (small) on the left, ¡DALE! (big)
    on the right, for the thumb that is not steering. The cluster box is the
@@ -972,7 +986,7 @@
 
 .pedal-speed span {
   margin-left: 2px;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.5px;
 }
 

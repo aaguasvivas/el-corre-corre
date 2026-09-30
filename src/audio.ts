@@ -1062,6 +1062,15 @@ export class AudioEngine {
     this.musicDuck(600);
   }
 
+  // A ¡HECHO! stamp landing on the game-over card: a soft rubber thump, a
+  // step higher for each stamp down the card.
+  stamp(i: number): void {
+    if (!this.ready()) return;
+    const t = this.ctx!.currentTime;
+    this.noiseHit(t, this.sfxBus, 0.16, 0.06, 'lowpass', 700, 0.7, 0.002);
+    this.tone(t, this.sfxBus, 'sine', 170 * (1 + 0.12 * Math.min(i, 4)), 80, 0.22, 0.09, 0.002);
+  }
+
   // A mandao level up: a longer marimba run into a held brass chord, a
   // bell and a cymbal. Bigger than a single mandao on purpose.
   levelUp(): void {

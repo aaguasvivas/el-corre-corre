@@ -59,17 +59,20 @@ export const STRINGS = {
     pastRecord: (n: number) => `¡${fmtN(n)} m más lejos que tu récord!`,
     distEnd: (label: string, m: number) => `${label} ${fmtN(m)} m`,
     bdCombo: 'mejor combo',
+    bdNoCombo: 'sin combo', // a run with no chain of two
     bdNear: (n: number) => (n === 1 ? 'cerquita' : 'cerquitas'),
     bdCv: 'en contra vía',
     stamp: '¡HECHO!',
     pinturaAll: '¡Tienes todas las pinturas!',
-    inVehicle: (v: string) => `en ${v} por el Malecón`,
-    inVehicleReached: (v: string, place: string) => `en ${v} hasta ${place}`,
+    inVehicle: (v: string, _car: boolean) => `en ${v} por el Malecón`,
+    inVehicleReached: (v: string, place: string, _car: boolean) => `en ${v} hasta ${place}`,
     shareText: (n: number) => `${fmtN(n)} puntos por el Malecón.`,
     shareAsk: '¿Me puedes ganar?',
-    shareLevel: (name: string, mult: string) => `Nivel ${name} ${mult}`,
+    shareLevel: (name: string, mult: string) => (mult ? `Nivel ${name} ${mult}` : `Nivel ${name}`),
     shareStats: (m: number, p: number) => `${fmtN(m)} m · ${p === 1 ? '1 plátano' : `${fmtN(p)} plátanos`}`,
-    ariaSound: 'Sonido',
+    ariaMute: 'Silenciar', // the mute chips are toggles: pressed = muted
+    ariaFlag: 'Bandera dominicana',
+    ariaLang: 'English', // the chip switches to the other language, named in it
     ariaPause: 'Pausa',
     gameOverTitles: ['¡Te dieron, loco!', '¡Diache!', '¡Eso tuvo feo!'],
     cvPill: '¡EN CONTRA VÍA! ×2',
@@ -110,8 +113,8 @@ export const STRINGS = {
     farRecord: '¡MÁS LEJOS QUE NUNCA!',
     goalTape: 'LA META',
     goalReached: '¡LLEGASTE A LA META!',
-    recordNear: '¡Ya casi el récord!',
-    toGo: (n: number) => `FALTAN ${fmtN(n)}`,
+    recordNear: '¡Ya casi rompes el récord!',
+    toGo: (n: number) => (n === 1 ? 'FALTA 1' : `FALTAN ${fmtN(n)}`),
     tapeToGo: (m: number) => `Faltan ${fmtN(m)} m`, // La Cinta ahead
     // Coach chips: first-time hints, touch and keyboard
     coachSteer: 'Arrastra el dedo pa’ esquivar',
@@ -119,8 +122,10 @@ export const STRINGS = {
     coachCv: (m: string) => `Métete en contra vía: ¡todo paga ${m}!`, // the chip draws the ← arrow
     coachTrick: (trick: string) => `Desliza arriba y aguanta: ${trick}`,
     coachTrickKey: (trick: string) => `Aguanta W: ${trick}`,
-    coachGas: (m: string) => `Aguanta ¡DALE! pa’ acelerar: ${m}`,
-    coachGasKey: (m: string) => `Aguanta ↑ pa’ acelerar: ${m}`,
+    coachGas: (m: string) => `Aprieta ¡DALE! pa’ acelerar: ${m}`,
+    coachGasKey: (m: string) => `Aprieta ↑ pa’ acelerar: ${m}`,
+    coachHot: '¡Freno caliente! Suéltalo pa’ que se enfríe',
+    coachHotKey: '¡Freno caliente! Suelta ↓ pa’ que se enfríe',
     // Los Mandaos
     mandaos: 'LOS MANDAOS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
@@ -149,9 +154,9 @@ export const STRINGS = {
       cvMetersRun: (n: number) => `Corre ${fmtN(n)} m en contra vía`,
       cvNearMissRun: (n: number) => (n === 1 ? 'Haz una cerquita en contra vía' : `Haz ${n} cerquitas en contra vía`),
       trickSecRun: (n: number, trick: string) => `Aguanta ${n} s de ${trick}`,
-      trickHold: (n: number, trick: string) => `Echa un ${trick} de ${n} s`,
-      gasSecRun: (n: number) => `Ve a fondo ${n} s`,
-      airRun: (n: number) => (n === 1 ? 'Vuela un policía acostao' : `Vuela ${n} policías acostaos`),
+      trickHold: (n: number, trick: string) => `Tira un ${trick} de ${n} s`,
+      gasSecRun: (n: number) => `Métele a fondo ${n} s`,
+      airRun: (n: number) => (n === 1 ? 'Brinca un policía acostao' : `Brinca ${n} policías acostaos`),
       distRun: (n: number) => `Llega a ${fmtN(n)} m`,
       reachTramo: (n: number) =>
         n === TRAMO_M ? 'Llega a La Zona Colonial' : n === 2 * TRAMO_M ? 'Llega a El Campo' : n === 3 * TRAMO_M ? 'Dale la vuelta al país' : `Llega a ${fmtN(n)} m`,
@@ -191,7 +196,7 @@ export const STRINGS = {
     paintNeed: (n: number) => (n === 1 ? '1 more plantain' : `${fmtN(n)} more plantains`),
     paintLocked: (name: string, price: number) => `${name}, costs ${fmtN(price)} plantains`,
     paintOwned: (name: string) => `${name}, owned`,
-    paintAfford: 'You can afford a new paint!',
+    paintAfford: 'You can afford a new paint job!',
     ariaClose: 'Close',
     bestLine: (n: number) => `Best ${fmtN(n)}`,
     overBest: (n: number) => `${fmtN(n)} over your old best!`,
@@ -199,17 +204,21 @@ export const STRINGS = {
     pastRecord: (n: number) => `${fmtN(n)} m past your best!`,
     distEnd: (label: string, m: number) => `${label} ${fmtN(m)} m`,
     bdCombo: 'best combo',
+    bdNoCombo: 'no combo',
     bdNear: (n: number) => (n === 1 ? 'near-miss' : 'near-misses'),
     bdCv: 'wrong way',
     stamp: 'DONE!',
-    pinturaAll: 'You own every paint!',
-    inVehicle: (v: string) => `on ${v} down the Malecón`,
-    inVehicleReached: (v: string, place: string) => `on ${v} all the way to ${place}`,
+    pinturaAll: 'You own every paint job!',
+    // a bike is ridden "on", the Civic driven "in"
+    inVehicle: (v: string, car: boolean) => `${car ? 'in' : 'on'} ${v} down the Malecón`,
+    inVehicleReached: (v: string, place: string, car: boolean) => `${car ? 'in' : 'on'} ${v} all the way to ${place}`,
     shareText: (n: number) => `${fmtN(n)} points down the Malecón.`,
     shareAsk: 'Can you beat me?',
-    shareLevel: (name: string, mult: string) => `Level ${name} ${mult}`,
+    shareLevel: (name: string, mult: string) => (mult ? `Level ${name} ${mult}` : `Level ${name}`),
     shareStats: (m: number, p: number) => `${fmtN(m)} m · ${p === 1 ? '1 plantain' : `${fmtN(p)} plantains`}`,
-    ariaSound: 'Sound',
+    ariaMute: 'Mute',
+    ariaFlag: 'Dominican flag',
+    ariaLang: 'Español',
     ariaPause: 'Pause',
     gameOverTitles: ['They got you!', 'Wipeout!', 'That was ugly!'],
     cvPill: 'WRONG WAY! ×2',
@@ -240,7 +249,7 @@ export const STRINGS = {
     streetWild: 'The street got wild!',
     // Places keep their names in both languages
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
-    pinturaNew: 'New paint!',
+    pinturaNew: 'New paint job!',
     tramoKicker: { malecon: 'BACK ON', zona: 'YOU REACHED', campo: 'YOU REACHED' } satisfies Record<Tramo, string>,
     nearMiss: 'So close!',
     razorMiss: 'By a hair!',
@@ -258,6 +267,8 @@ export const STRINGS = {
     coachTrickKey: (trick: string) => `Hold W: ${trick}`,
     coachGas: (m: string) => `Hold GAS to speed up: ${m}`,
     coachGasKey: (m: string) => `Hold ↑ to speed up: ${m}`,
+    coachHot: 'Hot brake! Let go so it cools down',
+    coachHotKey: 'Hot brake! Let go of ↓ so it cools down',
     mandaos: 'MISSIONS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
       level > 0 ? `MISSIONS ${done}/3 · LEVEL ${level} ${mult}` : `MISSIONS ${done}/3 · ${name.toUpperCase()}`,
@@ -292,7 +303,7 @@ export const STRINGS = {
       reachTramo: (n: number) =>
         n === TRAMO_M ? 'Reach La Zona Colonial' : n === 2 * TRAMO_M ? 'Reach El Campo' : n === 3 * TRAMO_M ? 'Ride the whole country' : `Reach ${fmtN(n)} m`,
       pointsRun: (n: number) => `Score ${fmtN(n)} points`,
-      cleanMeters: (n: number) => `Ride ${fmtN(n)} m straight without a pothole`,
+      cleanMeters: (n: number) => `Ride ${fmtN(n)} m without hitting a pothole`,
       pasolaMeters: (n: number) => `Ride ${fmtN(n)} m on LA PASOLA`,
       civicMeters: (n: number) => `Drive ${fmtN(n)} m in EL CIVIC TUNEAO`,
       platanosTotal: (n: number) => `Collect ${fmtN(n)} plantains in total`,
@@ -363,6 +374,11 @@ export interface UICallbacks {
   // A swatch was tapped: preview it on the ride, or, when it is already the
   // one previewed, equip it (owned) or buy it (locked).
   onPinturaPick(index: number): void;
+  // Writes the rider's head and shoulders on screen (px) into the band's
+  // avoid box, for popups to keep clear of.
+  riderRect(out: Band): void;
+  // A ¡HECHO! stamp landed on the game-over card (i: its order on the card).
+  onStamp(i: number): void;
 }
 
 function readLang(): Lang {
@@ -411,6 +427,37 @@ const SCORE_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 // applyLang sets it from the UI's language, which is read after main has
 // restored the saves (a module-level read would run before the restore).
 let numLocale = 'es-DO';
+// Pointers down right now, and when the last one lifted. A click is the
+// tail of a pointer press (already acted on at pointerdown) unless no
+// pointer is down and none lifted in the last CLICK_AFTER_LIFT_MS: then it
+// came from VoiceOver, Switch Control, or Enter or Space on a focused button.
+const pressing = new Set<number>();
+let lastLift = -Infinity;
+const CLICK_AFTER_LIFT_MS = 800;
+let presses = false;
+
+function trackPresses(): void {
+  if (presses) return;
+  presses = true;
+  const lift = (e: PointerEvent): void => {
+    pressing.delete(e.pointerId);
+    lastLift = performance.now();
+  };
+  const opts = { capture: true, passive: true };
+  window.addEventListener('pointerdown', (e) => pressing.add(e.pointerId), opts);
+  window.addEventListener('pointerup', lift, opts);
+  window.addEventListener('pointercancel', lift, opts);
+  // a press the page never saw end (backgrounded under the finger)
+  window.addEventListener('blur', () => pressing.clear());
+}
+
+function assistClick(): boolean {
+  return pressing.size === 0 && performance.now() - lastLift > CLICK_AFTER_LIFT_MS;
+}
+
+// The clear space the game-over title and points keep from the record seal.
+const SEAL_GAP_PX = 6;
+
 function fmtN(n: number): string {
   return Math.floor(n).toLocaleString(numLocale);
 }
@@ -514,8 +561,8 @@ export class UI {
   private coachShown: CoachId | null = null;
   private frozen = false;
   private bandDirty = true;
-  private readonly bandBox: Band = { left: 0, right: 0, top: 0, bottom: 0 };
-  private readonly bandNow: Band = { left: 0, right: 0, top: 0, bottom: 0 };
+  private readonly bandBox: Band = { left: 0, right: 0, top: 0, bottom: 0, avoidL: 0, avoidR: 0, avoidT: 0, avoidB: 0 };
+  private readonly bandNow: Band = { left: 0, right: 0, top: 0, bottom: 0, avoidL: 0, avoidR: 0, avoidT: 0, avoidB: 0 };
 
   private hud: HTMLElement;
   private title: HTMLElement;
@@ -624,6 +671,9 @@ export class UI {
 
   constructor(root: HTMLElement, cb: UICallbacks) {
     this.cb = cb;
+    root.style.setProperty('--stamp-first', `${CONFIG.stampFirstSec}s`);
+    root.style.setProperty('--stamp-step', `${CONFIG.stampStepSec}s`);
+    root.style.setProperty('--stamp-land', `${CONFIG.stampLandSec}s`);
     root.innerHTML = `
       <div id="cv-vignette"></div>
       <div id="hud" class="hidden">
@@ -661,7 +711,7 @@ export class UI {
       <div id="flash"></div>
       <div id="title" class="screen hidden">
         <button id="lang" class="chip" type="button"></button>
-        <button id="mute" class="chip chip-mute" type="button" aria-label="Sonido">
+        <button id="mute" class="chip chip-mute" type="button" aria-label="Silenciar" aria-pressed="false">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
         <div class="t-top">
@@ -741,7 +791,7 @@ export class UI {
         </div>
       </div>
       <div id="pause" class="screen hidden">
-        <button id="mute-pause" class="chip chip-mute" type="button" aria-label="Sonido">
+        <button id="mute-pause" class="chip chip-mute" type="button" aria-label="Silenciar" aria-pressed="false">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
         <div id="pause-title" class="pause-title"></div>
@@ -842,70 +892,77 @@ export class UI {
     );
     window.addEventListener('keydown', () => this.setInputMode('key'), { capture: true });
 
-    this.title.addEventListener('pointerdown', () => this.cb.onStart());
-    this.langBtn.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.toggleLang();
+    // Every control acts on pointerdown, the instant a thumb lands, and on a
+    // click that no pointer press preceded (see assistClick): VoiceOver and
+    // Switch Control activate with a click alone, as do Enter and Space on a
+    // focused button.
+    trackPresses();
+    // A mouse press does not leave focus on a button, so Space still starts
+    // and restarts on the desktop after a click on a chip.
+    root.addEventListener('mousedown', (e) => {
+      if ((e.target as Element).closest('button')) e.preventDefault();
     });
-    this.muteBtn.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.cb.onToggleMute();
-    });
+    this.press(this.title, () => this.cb.onStart(), false);
+    this.press(this.langBtn, () => this.toggleLang());
+    this.press(this.muteBtn, () => this.cb.onToggleMute());
     // Mid-run mute has to be reachable without a keyboard and without
     // throwing away the run, so it lives on the pause screen too.
-    this.mutePauseBtn.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.cb.onToggleMute();
-    });
+    this.press(this.mutePauseBtn, () => this.cb.onToggleMute());
     // The ride picker, the paint row and the footer swallow every tap, even
     // one that misses a control by a hair: a near miss never starts a run.
     for (const zone of root.querySelectorAll<HTMLElement>('#vpick, #t-paints, .title-chips')) {
       zone.addEventListener('pointerdown', (e) => e.stopPropagation());
+      zone.addEventListener('click', (e) => e.stopPropagation());
     }
     for (const tab of root.querySelectorAll<HTMLElement>('.vtab')) {
-      tab.addEventListener('pointerdown', () => {
-        if (tab.dataset.v !== this.selectedVehicle) this.cb.onSelectVehicle(tab.dataset.v as VehicleId);
-      });
+      this.press(
+        tab,
+        () => {
+          if (tab.dataset.v !== this.selectedVehicle) this.cb.onSelectVehicle(tab.dataset.v as VehicleId);
+        },
+        false,
+      );
     }
     // One listener for the swatches, which are rebuilt per ride.
-    this.paintsEl.addEventListener('pointerdown', (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLElement>('.paint');
-      if (btn) this.cb.onPinturaPick(Number(btn.dataset.i));
-    });
-    this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
-    this.btnMenu.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.cb.onMenu();
-    });
-    this.btnShare.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.cb.onShare();
-    });
-    this.btnResume.addEventListener('pointerdown', () => this.cb.onResume());
-    this.btnPauseMenu.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.cb.onMenu();
-    });
-    q('#hud-pause').addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.cb.onPause();
-    });
+    this.press(
+      this.paintsEl,
+      (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLElement>('.paint');
+        if (btn) this.cb.onPinturaPick(Number(btn.dataset.i));
+      },
+      false,
+    );
+    // Anywhere on the card is OTRA VEZ (and so is the button itself).
+    this.press(this.gameover, () => this.cb.onRestart(), false);
+    this.press(this.btnMenu, () => this.cb.onMenu());
+    this.press(this.btnShare, () => this.cb.onShare());
+    this.press(this.btnResume, () => this.cb.onResume(), false);
+    this.press(this.btnPauseMenu, () => this.cb.onMenu());
+    this.press(q('#hud-pause'), () => this.cb.onPause());
     // Los Mandaos on the title: the chip opens the list, any tap closes it,
     // and neither starts a run.
-    this.mandaoChipEl.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.openMandaos();
-    });
-    this.mandaoSheetEl.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-      this.mandaoSheetEl.classList.add('hidden');
-    });
+    this.press(this.mandaoChipEl, () => this.openMandaos());
+    this.press(this.mandaoSheetEl, () => this.mandaoSheetEl.classList.add('hidden'));
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape') this.mandaoSheetEl.classList.add('hidden');
     });
     this.bindPedals();
 
     this.applyLang();
+  }
+
+  // One control's action on its pointerdown, and on a click with no pointer
+  // press behind it. stop: the press ends here (a control over a screen
+  // that is itself a control, like the title or the game-over card).
+  private press(el: HTMLElement, act: (e: Event) => void, stop = true): void {
+    el.addEventListener('pointerdown', (e) => {
+      if (stop) e.stopPropagation();
+      act(e);
+    });
+    el.addEventListener('click', (e) => {
+      if (stop) e.stopPropagation();
+      if (assistClick()) act(e);
+    });
   }
 
   // ---------------- el pedal ----------------
@@ -1090,8 +1147,12 @@ export class UI {
     numLocale = this.lang === 'en' ? 'en-US' : 'es-DO';
     document.documentElement.lang = this.lang;
     this.langBtn.textContent = this.lang === 'es' ? 'EN' : 'ES';
-    this.muteBtn.setAttribute('aria-label', t.ariaSound);
-    this.mutePauseBtn.setAttribute('aria-label', t.ariaSound);
+    this.muteBtn.setAttribute('aria-label', t.ariaMute);
+    this.mutePauseBtn.setAttribute('aria-label', t.ariaMute);
+    // EN on the chip reads as "English", in English; ES as "Español"
+    this.langBtn.setAttribute('aria-label', t.ariaLang);
+    this.langBtn.lang = this.lang === 'es' ? 'en' : 'es';
+    for (const f of this.title.querySelectorAll('.flag-svg')) f.setAttribute('aria-label', t.ariaFlag);
     this.pauseBtn.setAttribute('aria-label', t.ariaPause);
     this.cvEl.textContent = t.cvPill;
     this.cabEl.textContent =
@@ -1218,8 +1279,16 @@ export class UI {
     }
   }
 
-  // On the title, in the open band over the ride (the ride picker ends near
-  // half the height, and the popup layer sits under the screens).
+  // The lowest the title ride may reach (px from the top): the paint tray's
+  // top minus CONFIG.titleRideGapPx. NaN while the title is hidden.
+  titleRideFloorPx(): number {
+    if (this.title.classList.contains('hidden')) return Number.NaN;
+    return this.paintsEl.getBoundingClientRect().top - CONFIG.titleRideGapPx;
+  }
+
+  // On the title, over the ride: popupBand keeps it between the hint and
+  // the paint tray for its whole rise (the popup layer sits under the
+  // screens, so it must not reach either).
   popupPintura(): void {
     this.popup(this.t().pinturaNew, 50, 56, 'pop-lg pop-gold');
   }
@@ -1371,13 +1440,14 @@ export class UI {
 
     // What paid: the brave play, in one row.
     this.goBreakEl.innerHTML =
-      `<span><b>×${fmtN(r.bestCombo)}</b> ${t.bdCombo}</span>` +
+      (r.bestCombo >= 2 ? `<span><b>×${fmtN(r.bestCombo)}</b> ${t.bdCombo}</span>` : `<span>${t.bdNoCombo}</span>`) +
       `<span><b>${fmtN(r.nearMisses)}</b> ${t.bdNear(r.nearMisses)}</span>` +
       `<span><b>${fmtN(r.cvMeters)} m</b> ${t.bdCv}</span>`;
 
     // Los Mandaos: bars fill from where the run found them; the ones this
     // run finished get the stamp.
     this.goMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, 'card');
+    this.scheduleStamps();
     this.goMandaosEl.classList.toggle('leveled', mandaos.lastSet !== null);
     this.goBreakEl.classList.toggle('hidden', mandaos.lastSet !== null); // the level-up line takes its row
     this.kickBars(this.goMandaosEl);
@@ -1402,12 +1472,45 @@ export class UI {
     this.btnMenu.classList.toggle('glow', pintura !== null && pintura.need === 0);
 
     this.gameover.classList.remove('hidden');
+    this.fitUnderSeal(r.points);
     this.hud.classList.add('hidden');
     this.setContraVia(false);
     this.setCaballito(false);
     this.setGas(false);
     this.setBrake(false);
     this.setPedalLive(false);
+  }
+
+  // The record seal sits on the card's top-right corner, over the ends of
+  // the title and the points. With the seal shown, each of the two shrinks
+  // (never grows) until its centered line clears the seal's disc by
+  // SEAL_GAP_PX. Layout boxes only (offset*), so the card's drop and the
+  // seal's slam, both transforms, do not skew the measure. The points are
+  // fitted at their final value, the widest the count-up reaches.
+  private fitUnderSeal(points: number): void {
+    const els = [this.goTitleEl, this.goPoints];
+    for (const el of els) el.style.fontSize = '';
+    const seal = this.goStampEl;
+    if (seal.classList.contains('hidden')) return;
+    const r = seal.offsetWidth / 2 + 3; // the disc and its 3 px ring
+    const cx = seal.offsetLeft + seal.offsetWidth / 2;
+    const cy = seal.offsetTop + seal.offsetHeight / 2;
+    const shown = this.goPoints.textContent;
+    this.goPoints.textContent = fmtN(points);
+    for (const el of els) {
+      for (let pass = 0; pass < 2; pass++) {
+        const top = el.offsetTop;
+        const dy = Math.max(0, top - cy, cy - (top + el.offsetHeight));
+        if (dy >= r) break;
+        const discLeft = cx - Math.sqrt(r * r - dy * dy);
+        const mid = el.offsetLeft + el.offsetWidth / 2;
+        const room = 2 * (discLeft - SEAL_GAP_PX - mid);
+        if (el.offsetWidth <= room) break;
+        const px = parseFloat(getComputedStyle(el).fontSize);
+        el.style.fontSize = `${Math.floor((px * Math.max(room, 0)) / el.offsetWidth)}px`;
+      }
+    }
+    this.goPoints.textContent = shown;
   }
 
   // 0 to the run's points over countUpMs, eased out. A timer rather than
@@ -1433,6 +1536,22 @@ export class UI {
   private stopCountUp(): void {
     if (this.countTimer) window.clearTimeout(this.countTimer);
     this.countTimer = 0;
+    // and the stamps' thumps: a card left early lands no more of them
+    for (const id of this.stampTimers) window.clearTimeout(id);
+    this.stampTimers.length = 0;
+  }
+
+  // One thump and tap per ¡HECHO! on the card, on each stamp's impact.
+  // DECISION: none under reduced motion, where the stamps are simply there.
+  private stampTimers: number[] = [];
+
+  private scheduleStamps(): void {
+    if (reducedMotion()) return;
+    const n = this.goMandaosEl.querySelectorAll('.md-stamp').length;
+    for (let i = 0; i < n; i++) {
+      const ms = (CONFIG.stampFirstSec + CONFIG.stampLandSec + i * CONFIG.stampStepSec) * 1000;
+      this.stampTimers.push(window.setTimeout(() => this.cb.onStamp(i), ms));
+    }
   }
 
   // A fill bar from one fraction to another; the CSS transition eases it.
@@ -1660,8 +1779,10 @@ export class UI {
   }
 
   setMuted(m: boolean): void {
-    this.muteBtn.classList.toggle('muted', m);
-    this.mutePauseBtn.classList.toggle('muted', m);
+    for (const b of [this.muteBtn, this.mutePauseBtn]) {
+      b.classList.toggle('muted', m);
+      b.setAttribute('aria-pressed', String(m));
+    }
   }
 
   // Every multiplier stacked into one number (Score.liveMult): ×2, ×3.8,
@@ -1750,8 +1871,8 @@ export class UI {
   // ---------------- coach chips ----------------
 
   // One live sim step: what the player did, t seconds into the run.
-  coachStep(t: number, x: number, cv: boolean, trick: boolean, gas: boolean): void {
-    const id = this.coach.step(t, x, cv, trick, gas);
+  coachStep(t: number, x: number, cv: boolean, trick: boolean, gas: boolean, hot: boolean): void {
+    const id = this.coach.step(t, x, cv, trick, gas, hot);
     if (id !== this.coachShown) this.showCoach(id);
   }
 
@@ -1783,6 +1904,8 @@ export class UI {
         return key ? t.coachTrickKey(trick) : t.coachTrick(trick);
       case 'gas':
         return key ? t.coachGasKey(gas) : t.coachGas(gas);
+      case 'hot':
+        return key ? t.coachHotKey : t.coachHot;
     }
   }
 
@@ -1872,7 +1995,17 @@ export class UI {
     now.bottom = b.bottom;
     now.top = b.top;
     const lane = this.laneShown ? this.anCard : this.tapeStep >= 0 ? this.tapeEl : null;
-    if (lane && !this.hud.classList.contains('hidden')) now.top = Math.max(b.top, lane.getBoundingClientRect().bottom + 4);
+    const inRun = !this.hud.classList.contains('hidden');
+    if (lane && inRun) now.top = Math.max(b.top, lane.getBoundingClientRect().bottom + 4);
+    // and off the rider (the title's popup celebrates the ride itself)
+    now.avoidL = 0;
+    now.avoidR = 0;
+    if (inRun) this.cb.riderRect(now);
+    // On the title: between the hint and the paint tray, over the ride.
+    if (!inRun && !this.title.classList.contains('hidden')) {
+      now.top = Math.max(now.top, this.hintEl.getBoundingClientRect().bottom + 4);
+      now.bottom = Math.min(now.bottom, this.paintsEl.getBoundingClientRect().top - 4);
+    }
     return now;
   }
 
@@ -2261,11 +2394,12 @@ export class UI {
 
     // The ride and where it got, the run, and the barrio level that
     // multiplied it: honest numbers for the group chat.
-    const where = r.tramo !== 'malecon' ? t.inVehicleReached(veh.name, t.tramoNames[r.tramo]) : t.inVehicle(veh.name);
+    const car = this.selectedVehicle === 'civic';
+    const where = r.tramo !== 'malecon' ? t.inVehicleReached(veh.name, t.tramoNames[r.tramo], car) : t.inVehicle(veh.name, car);
     stroked(where, 540, 1160, 46, '#002d62', '#002d62', 0, 980);
     stroked(t.shareStats(r.distanceM, r.platanos), 540, 1212, 38, '#0e7490', '#0e7490', 0);
     const lv = this.shareLevel;
-    plate(t.shareLevel(t.levelNames[lv.idx], fmtBarrio(lv.mult)), 540, 1264, 28, '#f4c430', '#002d62', 0);
+    plate(t.shareLevel(t.levelNames[lv.idx], lv.mult > 1 ? fmtBarrio(lv.mult) : ''), 540, 1264, 28, '#f4c430', '#002d62', 0);
     // The ask stays small: the score does the talking.
     const askY = SHARE_URL ? 1306 : 1314;
     stroked(t.shareAsk, 540, askY, 30, '#0e7490', '#0e7490', 0);

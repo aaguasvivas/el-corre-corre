@@ -14,6 +14,11 @@ export interface Band {
   right: number;
   top: number;
   bottom: number;
+  // The rider's head and shoulders (px), kept clear; none when avoidR <= avoidL.
+  avoidL: number;
+  avoidR: number;
+  avoidT: number;
+  avoidB: number;
 }
 
 interface Slot {
@@ -196,11 +201,32 @@ export class Popups {
     const xLo = b.left + halfW;
     const xHi = b.right - halfW;
     const clampX = (x: number): number => (xHi <= xLo ? (b.left + b.right) / 2 : Math.min(xHi, Math.max(xLo, x)));
-    const x0 = clampX((xPct / 100) * window.innerWidth);
     const yLo = b.top + halfH + CONFIG.popupRisePx;
     const yHi = Math.max(yLo, b.bottom - halfH);
     const clampY = (y: number): number => Math.min(yHi, Math.max(yLo, y));
-    const y0 = clampY((yPct / 100) * window.innerHeight);
+    let x0 = clampX((xPct / 100) * window.innerWidth);
+    let y0 = clampY((yPct / 100) * window.innerHeight);
+    // Never on the rider: its whole path (the pop, then the rise) must miss
+    // the head and shoulders. It moves beside the rider, to the side the
+    // event came from; on a screen too narrow for that side, the other one;
+    // failing both, above the gorra.
+    const rider = b.avoidR > b.avoidL;
+    const onRider = (px: number, py: number): boolean =>
+      rider &&
+      px + halfW - EDGE_PX > b.avoidL &&
+      px - halfW + EDGE_PX < b.avoidR &&
+      py + halfH > b.avoidT &&
+      py - halfH - CONFIG.popupRisePx < b.avoidB;
+    if (onRider(x0, y0)) {
+      const side = x0 < (b.avoidL + b.avoidR) / 2 ? -1 : 1;
+      const beside = (sd: number): number =>
+        clampX(sd < 0 ? b.avoidL - halfW + EDGE_PX - 4 : b.avoidR + halfW - EDGE_PX + 4);
+      const xa = beside(side);
+      const xb = beside(-side);
+      if (!onRider(xa, y0)) x0 = xa;
+      else if (!onRider(xb, y0)) x0 = xb;
+      else y0 = clampY(b.avoidT - halfH - 4);
+    }
     let x = x0;
     let y = y0;
     if (dodge) {
@@ -212,7 +238,7 @@ export class Popups {
       for (const [kx, ky] of DODGE) {
         const cx = clampX(x0 + kx * dx);
         const cy = clampY(y0 + ky * d);
-        if (!this.hits(s, cx, cy, w, h)) {
+        if (!this.hits(s, cx, cy, w, h) && !onRider(cx, cy)) {
           x = cx;
           y = cy;
           found = true;

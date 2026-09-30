@@ -1,15 +1,16 @@
 // coach.ts: contextual first-time hints, not a tutorial. One chip at a
 // time, in order (steer, contra vía, the trick, the gas), each only until
-// the move has been done once, ever. Learned moves persist as a bitmask in
+// the move has been done once, ever. One more is not timed: the first time
+// the brake overheats, el freno caliente is explained until the pads cool. Learned moves persist as a bitmask in
 // localStorage (ecc.v1.learned). A move done before its chip appears is
 // learned too, so a player who already knows it never sees the chip.
 
 import { CONFIG } from './config';
 
-export type CoachId = 'steer' | 'cv' | 'trick' | 'gas';
+export type CoachId = 'steer' | 'cv' | 'trick' | 'gas' | 'hot';
 
 export const COACH_ORDER: readonly CoachId[] = ['steer', 'cv', 'trick', 'gas'];
-const BIT: Record<CoachId, number> = { steer: 1, cv: 2, trick: 4, gas: 8 };
+const BIT: Record<CoachId, number> = { steer: 1, cv: 2, trick: 4, gas: 8, hot: 16 };
 export const LEARNED_KEY = 'ecc.v1.learned';
 const PEDAL_SEEN_KEY = 'ecc.v1.pedalSeen'; // a gas press from before the chips existed
 
@@ -17,7 +18,7 @@ function readLearned(): number {
   try {
     const n = Number(localStorage.getItem(LEARNED_KEY) ?? 0);
     const gas = localStorage.getItem(PEDAL_SEEN_KEY) === '1' ? BIT.gas : 0;
-    return ((Number.isInteger(n) ? n : 0) | gas) & 15;
+    return ((Number.isInteger(n) ? n : 0) | gas) & 31;
   } catch {
     return 0;
   }
@@ -44,13 +45,28 @@ export class Coach {
 
   // One live sim step, t seconds into the run, with what the player did:
   // the rider's x (m), riding en contra vía, holding the trick, holding the
-  // gas. Returns the chip to show now, or null for none.
-  step(t: number, x: number, cv: boolean, trick: boolean, gas: boolean): CoachId | null {
+  // gas, and whether the brake is overheated. Returns the chip to show now,
+  // or null for none.
+  step(t: number, x: number, cv: boolean, trick: boolean, gas: boolean, hot = false): CoachId | null {
     if (Number.isNaN(this.x0)) this.x0 = x;
     if (Math.abs(x - this.x0) > CONFIG.coachSteerM) this.learn('steer');
     if (cv) this.learn('cv');
     if (trick) this.learn('trick');
     if (gas) this.learn('gas');
+    // El freno caliente, the first time: it takes the chip from any other
+    // and stays while the pads are cooked. Once they cool it is learned.
+    if (hot && !this.isLearned('hot')) {
+      if (this.showing !== 'hot') {
+        this.showing = 'hot';
+        this.shownAt = t;
+      }
+      return this.showing;
+    }
+    if (this.showing === 'hot') {
+      this.learn('hot');
+      this.showing = null;
+      this.nextAt = Math.max(this.nextAt, t + CONFIG.coachGapSec);
+    }
     if (this.showing && (this.isLearned(this.showing) || t - this.shownAt >= CONFIG.coachShowSec)) {
       this.showing = null;
     }

@@ -207,6 +207,15 @@ export const CONFIG = {
   fovGasKick: 5, // FEEL: the stomach drop when you floor it, on top of the speed kick
   fovBrakeDip: 2, // FEEL: the frame tightens a little when you brake
   camGasPullBack: 0.45, // FEEL: metres the bike surges away from the lens a fondo
+  // The title shows the ride between the ride picker and the paint tray. On
+  // a short phone the chase framing put the Civic's tail (and a bike's rear
+  // wheel) under the tray, so on the title the camera pulls back just enough
+  // for the ride's rear edge to clear the tray; a tall phone needs little.
+  // DECISION: solved from the camera and the tray's real position, not a
+  // per-phone constant, so it holds at every size.
+  titleRideGapPx: 6, // FEEL: clear space between the title ride and the paint tray
+  titleCamPullMaxM: 2.5, // the most the title camera may pull back (m)
+  titleCamEase: 3, // FEEL: per second; the push in when a run starts, the ease out on the menu
 
   // Atmosphere
   fogNear: 60,
@@ -591,6 +600,11 @@ export const CONFIG = {
   soCloseShare: 0.3, // FEEL: higher = the "so close" line shows on more runs
   soCloseMinM: 50, // FEEL: a short record still gets the line this near
   countUpMs: 600, // FEEL: how long the card's points take to count up (OTRA VEZ is live throughout)
+  // ¡HECHO!: the stamps slam onto the card's finished mandaos one by one,
+  // each with a soft thump and a light tap on its impact.
+  stampFirstSec: 0.5, // FEEL: from the card landing to the first stamp's slam
+  stampStepSec: 0.14, // FEEL: the stagger between stamps
+  stampLandSec: 0.12, // FEEL: from a stamp's slam to its impact (the dust ring, the thump, the tap)
   shareFailedMs: 2200, // FEEL: how long COMPARTIR reads ¡NO SE PUDO! after a share nothing could take
 
   // Los Mandaos: three small goals at a time; finish all three and you level
@@ -687,6 +701,12 @@ export const CONFIG = {
   popupBigSec: 1.25, // FEEL: the same for the big ones (power-ups, the trick, airtime)
   popupRisePx: 36, // FEEL: how far a popup drifts up as it fades
   popupFloorShare: 0.7, // FEEL: popups end above this share of the screen height; lower, the steering thumb covers them
+  // The rider's head and shoulders stay clear: a popup that would land on
+  // them (a plátano grabbed at the handlebars, the crash) moves beside the
+  // rider, to the side it came from. The box around the middle of the head:
+  popupRiderHalfWM: 0.5, // FEEL: m either side of the head
+  popupRiderAboveM: 0.35, // FEEL: m above the middle of the head (the gorra)
+  popupRiderBelowM: 0.8, // FEEL: m below it (the shoulders and the chest)
   platanoAggSec: 0.35, // FEEL: plátanos closer than this in time add up into one "+N"
   scoreRollSec: 0.18, // FEEL: the score rolls up to a gain over this long instead of jumping
   scorePunchAt: 25, // FEEL: a gain this big at once also punches the score

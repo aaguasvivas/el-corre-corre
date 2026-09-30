@@ -87,13 +87,13 @@ describe('coach chips', () => {
   });
 
   // Steps a run at 120 Hz with a fixed behavior; returns [time, chip] changes.
-  function ride(c: Coach, sec: number, act: (t: number) => { x?: number; cv?: boolean; trick?: boolean; gas?: boolean }) {
+  function ride(c: Coach, sec: number, act: (t: number) => { x?: number; cv?: boolean; trick?: boolean; gas?: boolean; hot?: boolean }) {
     const seen: Array<[number, string | null]> = [];
     let last: string | null = null;
     c.startRun();
     for (let t = 0; t < sec; t += 1 / 120) {
       const a = act(t);
-      const id = c.step(t, a.x ?? -3.4, a.cv ?? false, a.trick ?? false, a.gas ?? false);
+      const id = c.step(t, a.x ?? -3.4, a.cv ?? false, a.trick ?? false, a.gas ?? false, a.hot ?? false);
       if (id !== last) {
         seen.push([+t.toFixed(3), id]);
         last = id;
@@ -137,6 +137,28 @@ describe('coach chips', () => {
     store.set('ecc.v1.pedalSeen', '1');
     expect(new Coach().isLearned('gas')).toBe(true);
   });
+
+  it('the first hot brake takes the chip until the pads cool, then never shows again', () => {
+    const c = new Coach();
+    // the steer chip is up at 2 s; the brake cooks from 3 s to 5 s
+    const seen = ride(c, 8, (t) => ({ hot: t >= 3 && t < 5 }));
+    const hot = seen.filter((s) => s[1] === 'hot');
+    expect(hot).toHaveLength(1);
+    expect(hot[0][0]).toBeCloseTo(3, 1);
+    const after = seen.find((s) => s[0] > hot[0][0]);
+    expect(after && after[1] === null && after[0]).toBeCloseTo(5, 1);
+    expect(c.isLearned('hot')).toBe(true);
+    expect(Number(store.get(LEARNED_KEY)) & 16).toBe(16);
+    const again = ride(new Coach(), 8, (t) => ({ hot: t >= 3 && t < 5 }));
+    expect(again.map((s) => s[1])).not.toContain('hot');
+  });
+
+  it('a hot brake alone never teaches the timed chips', () => {
+    const shows = ride(new Coach(), 30, (t) => ({ hot: t >= 3 && t < 5 }))
+      .filter((s) => s[1] !== null && s[1] !== 'hot')
+      .map((s) => s[1]);
+    expect(shows).toEqual(['steer', 'cv', 'trick', 'gas']);
+  });
 });
 
 describe('in-run copy', () => {
@@ -169,6 +191,16 @@ describe('in-run copy', () => {
       }
     }
     expect(STRINGS.en.ladder).toEqual(['That’s it!', 'Sick!', 'Dang!', 'You’re crazy!', 'THIS GUY’S A MANIAC!', 'LEGEND OF THE MALECÓN!']);
+  });
+
+  it('copy agrees with its numbers and its ride', () => {
+    expect(STRINGS.es.toGo(1)).toBe('FALTA 1');
+    expect(STRINGS.es.toGo(1200)).toBe('FALTAN 1,200');
+    expect(STRINGS.en.inVehicle('EL CIVIC TUNEAO', true)).toBe('in EL CIVIC TUNEAO down the Malecón');
+    expect(STRINGS.en.inVehicle('EL MOTOR', false)).toBe('on EL MOTOR down the Malecón');
+    expect(STRINGS.es.inVehicleReached('EL CIVIC TUNEAO', 'EL CAMPO', true)).toBe('en EL CIVIC TUNEAO hasta EL CAMPO');
+    expect(STRINGS.es.shareLevel('Novato', '')).toBe('Nivel Novato');
+    expect(STRINGS.en.shareLevel('Passenger', '×1.5')).toBe('Level Passenger ×1.5');
   });
 
   it('coach chips and La Cinta chip exist in both languages and group their numbers', () => {

@@ -24,6 +24,7 @@ import { Score, nextPintura, type RunResult } from './score';
 import { Missions, type Completion } from './missions';
 import { tramoFor } from './tour';
 import { UI } from './ui';
+import type { Band } from './popups';
 import { AudioEngine, type AudioUpdateCtx } from './audio';
 import { haptics } from './haptics';
 import { BrakeHeat } from './brakeHeat';
@@ -217,6 +218,35 @@ function w2s(x: number, y: number, z: number): { x: number; y: number } {
   return { x: (projV.x * 0.5 + 0.5) * 100, y: (-projV.y * 0.5 + 0.5) * 100 };
 }
 
+// The rider's head and shoulders on screen (px), for popups to keep clear
+// of (CONFIG.popupRiderHalfWM and the rest). Read per popup, not per frame.
+const headV = new THREE.Vector3();
+const edgeV = new THREE.Vector3();
+function riderRect(out: Band): void {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  player.headWorld(headV);
+  edgeV.copy(headV).project(camera);
+  const cx = (edgeV.x * 0.5 + 0.5) * W;
+  edgeV.set(headV.x + CONFIG.popupRiderHalfWM, headV.y, headV.z).project(camera);
+  const half = Math.abs((edgeV.x * 0.5 + 0.5) * W - cx);
+  edgeV.set(headV.x, headV.y + CONFIG.popupRiderAboveM, headV.z).project(camera);
+  const top = (-edgeV.y * 0.5 + 0.5) * H;
+  edgeV.set(headV.x, headV.y - CONFIG.popupRiderBelowM, headV.z).project(camera);
+  const bottom = (-edgeV.y * 0.5 + 0.5) * H;
+  out.avoidL = cx - half;
+  out.avoidR = cx + half;
+  out.avoidT = Math.min(top, bottom);
+  out.avoidB = Math.max(top, bottom);
+}
+
+// A ¡HECHO! stamp slammed onto the game-over card: a soft thump and a light
+// tap, one per stamp (the UI times them to the slam).
+function onStamp(i: number): void {
+  audio.stamp(i);
+  haptics.light();
+}
+
 // Pan by where it happened: world +x renders on screen LEFT, so it flips.
 function panOf(x: number): number {
   return Math.max(-1, Math.min(1, -(x - player.x) / 8));
@@ -261,6 +291,7 @@ function selectVehicle(id: VehicleId): void {
 let previewIdx = 0;
 
 function refreshPinturaUI(): void {
+  titleFitDirty = true; // a new ride, or a paint line that wrapped, moves the frame
   const v = selectedVehicle;
   ui.updatePinturas({
     preview: previewIdx,
@@ -370,6 +401,8 @@ const ui = new UI(document.getElementById('ui')!, {
   onMenu: goToMenu,
   onShare: doShare,
   onPinturaPick,
+  riderRect,
+  onStamp,
 });
 ui.setMuted(audio.muted);
 
@@ -650,6 +683,10 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (e.code !== 'Space' && e.code !== 'Enter') return;
+  // A button reached with Tab takes its own Enter and Space (MENÚ must not
+  // restart the run).
+  const focused = document.activeElement;
+  if (focused instanceof HTMLButtonElement && focused.closest('#ui')) return;
   if (state === 'title') startRun();
   else if (state === 'gameover') tryRestart();
   else if (state === 'paused') resume();
@@ -658,8 +695,24 @@ window.addEventListener('keydown', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
   if (state === 'playing' || state === 'countdown') pauseGame(); // it backs up the saves
-  else backupSaves(); // a pintura bought or a language switched on a menu
+  else {
+    // Home pressed inside the crash slow-mo: the records bank on the first
+    // frame after it, and an app killed while suspended never gets that
+    // frame. Bank them now; the card still compares against the run-start
+    // snapshot, so it reads the same when the app comes back.
+    if (state === 'crashing') {
+      score.persist();
+      missions.persist(score);
+    }
+    backupSaves(); // a pintura bought or a language switched on a menu
+  }
 });
+
+// The title framing (see CONFIG.titleRideGapPx): how far the camera pulls
+// back on the title, solved when the ride or the layout changes.
+let titlePull = 0; // m, eased toward titlePullGoal on the title and 0 in a run
+let titlePullGoal = 0;
+let titleFitDirty = true;
 
 // Portrait framing: a tall frame gets a higher, steeper camera and follows
 // the rider further toward the kerbs.
@@ -679,6 +732,7 @@ function resize(): void {
   camLookY = portrait ? CONFIG.camLookYPortrait : CONFIG.camLookY;
   camera.fov = baseFov;
   camera.updateProjectionMatrix();
+  titleFitDirty = true;
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);
@@ -800,7 +854,7 @@ function stepSim(h: number): void {
   gasInPrev = gasIn;
   brakeInPrev = brakeIn;
   // First-time hints: each shows until its move has been done once, ever.
-  if (live) ui.coachStep(elapsed, player.x, cv, player.isWheelie, gasIn);
+  if (live) ui.coachStep(elapsed, player.x, cv, player.isWheelie, gasIn, brakeHeat.hot);
   // The pads cook: ¡CALIENTE! on FRENO, smoke off the rear wheel, a sizzle.
   if (brakeHeat.hot !== brakeHotPrev) {
     brakeHotPrev = brakeHeat.hot;
@@ -982,14 +1036,47 @@ function shakeNoise(t: number, axis: number): number {
   return 0.6 * Math.sin(t * 17.3 + axis * 1.7) + 0.4 * Math.sin(t * 23.9 + axis * 4.1);
 }
 
+// Where the ride's rear edge lands on screen (px from the top) with the
+// camera pulled back `pull` m from its title pose.
+const rearV = new THREE.Vector3();
+function titleRearPx(pull: number): number {
+  camera.position.set(camX, camUp, -(CONFIG.camBack + pull));
+  lookTarget.set((camX + player.x) / 2, camLookY, CONFIG.camLookAhead);
+  camera.lookAt(lookTarget);
+  camera.updateMatrixWorld();
+  player.rideRearWorld(rearV).project(camera);
+  return (-rearV.y * 0.5 + 0.5) * window.innerHeight;
+}
+
+// The least pull-back that keeps the ride's rear edge above the paint tray,
+// by bisection (the edge rises monotonically as the camera backs away).
+function solveTitlePull(): void {
+  titleFitDirty = false;
+  const floor = ui.titleRideFloorPx();
+  if (!(floor > 0) || titleRearPx(0) <= floor) {
+    titlePullGoal = 0;
+    return;
+  }
+  let lo = 0;
+  let hi: number = CONFIG.titleCamPullMaxM;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    if (titleRearPx(mid) <= floor) hi = mid;
+    else lo = mid;
+  }
+  titlePullGoal = hi;
+}
+
 function updateCamera(dt: number): void {
+  if (state === 'title' && titleFitDirty) solveTitlePull();
+  titlePull += ((state === 'title' ? titlePullGoal : 0) - titlePull) * Math.min(1, CONFIG.titleCamEase * dt);
   const k = 1 - Math.exp(-CONFIG.camDamping * dt);
   camX += (player.x * camFollow - camX) * k;
   camRoll += (-player.velXNorm * CONFIG.cameraRollMaxDeg * DEG * motionScale - camRoll) * k;
   camera.up.set(Math.sin(camRoll), Math.cos(camRoll), 0);
   // A fondo the bike surges away from the lens.
   camGas += (gasK - camGas) * Math.min(1, 6 * dt);
-  camera.position.set(camX, camUp, -(CONFIG.camBack + CONFIG.camGasPullBack * camGas));
+  camera.position.set(camX, camUp, -(CONFIG.camBack + CONFIG.camGasPullBack * camGas + titlePull));
   // FOV speed kick: velocity you can feel in your stomach. The pedal adds
   // its own kick (or a small dip on the brake) on top, at any speed.
   const kickNorm = state === 'playing' || state === 'crashing' ? currentNorm : 0;
@@ -1135,13 +1222,23 @@ refreshTitleMeta();
 // of all at the ¡NUEVO RÉCORD! burst.
 renderer.compile(scene, camera);
 requestAnimationFrame(frame);
+// The display font can land after the first layout and move the paint tray.
+document.fonts?.ready.then(() => {
+  titleFitDirty = true;
+});
 
 // Test rig only: lets a screenshot run ride for minutes (to reach La Zona and
 // El Campo) straight through traffic. Only __ecc.god() sets it.
 let testGod = false;
 
-// Test hook for automated checks; the game itself never reads this.
-(window as unknown as Record<string, unknown>).__ecc = {
+// Test hook for automated checks; the game itself never reads this. It
+// exists only in the dev server and in a probe build (npm run build:probe,
+// into dist-probe/). Vite folds the condition to false in a release build,
+// so the hooks (god mode, record and score setters, spawners) are not in
+// the bundle that ships.
+// DECISION: a build flag, not a URL parameter, so the release bundle holds
+// no dormant test surface at all.
+if (import.meta.env.DEV || import.meta.env.MODE === 'probe') (window as unknown as Record<string, unknown>).__ecc = {
   fps: () => Math.round(fpsAvg),
   state: () => state,
   score: () => score.points,

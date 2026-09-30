@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:probe": "vite build --mode probe --outDir dist-probe",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

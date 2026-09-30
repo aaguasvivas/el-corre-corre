@@ -59,6 +59,7 @@ interface Rig {
   body: THREE.Mesh;
   riderStart: number;
   riderGeo: THREE.BufferGeometry;
+  rear: THREE.Vector3; // rig space: the body's lowest rear edge, what the title camera frames
 }
 
 // Where each ride's rider tumbles from: the pivot (the body's middle) in rig
@@ -240,6 +241,20 @@ const AURA_CROWN: Record<'bike' | 'civic', CrownSpec> = {
 const HALO_TILT = 0.3; // radians the halo tips back, so the chase camera sees it open
 const HALO_LIFT = 0.36; // metres from the middle of the head up to the halo
 
+// The lowest rear edge of a rig (its merged body and its wheels), in rig
+// space. Built once per rig.
+function rearEdge(parts: THREE.Mesh[]): THREE.Vector3 {
+  const box = new THREE.Box3();
+  const one = new THREE.Box3();
+  for (const m of parts) {
+    const g = m.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    m.updateMatrix();
+    box.union(one.copy(g.boundingBox!).applyMatrix4(m.matrix));
+  }
+  return new THREE.Vector3(0, box.min.y, box.min.z);
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -411,6 +426,29 @@ export class Player {
 
   get y(): number {
     return this.airY;
+  }
+
+  // The middle of the rider's head in world space, into out: on the ride, or
+  // tumbling off it after a crash. Popups keep clear of it.
+  headWorld(out: THREE.Vector3): THREE.Vector3 {
+    const c = AURA_CROWN[this.vehicle === 'civic' ? 'civic' : 'bike'];
+    const hy = c.haloY - HALO_LIFT;
+    if (this.riderPivot.visible) {
+      const [py, pz] = RIDER_PIVOT[this.vehicle];
+      this.riderPivot.updateMatrixWorld();
+      return this.riderPivot.localToWorld(out.set(0, hy - py, c.haloZ - pz));
+    }
+    this.root.updateMatrixWorld(true);
+    return this.leanGroup.localToWorld(out.set(0, hy, c.haloZ));
+  }
+
+  // The selected ride's lowest rear edge (the part nearest the chase camera)
+  // in world space, into out. The title camera keeps it above the paint tray.
+  rideRearWorld(out: THREE.Vector3): THREE.Vector3 {
+    const rig = this.rigs[this.vehicle];
+    if (!rig) return out.set(this.x, 0, -1);
+    this.root.updateMatrixWorld(true);
+    return rig.group.localToWorld(out.copy(rig.rear));
   }
 
   get isAirborne(): boolean {
@@ -602,6 +640,7 @@ export class Player {
         body: this.lastBody,
         riderStart: this.lastRiderStart,
         riderGeo,
+        rear: rearEdge([this.lastBody, ...this.wheels]),
       };
       this.rigs[id] = rig;
       this.leanGroup.add(group);
