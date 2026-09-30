@@ -223,7 +223,12 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
       target = best + (p.noise ? (Math.random() - 0.5) * 2 * p.noise : 0);
     }
     const speed = rideSpeed(ride, el);
-    throttleMult += (thTarget - throttleMult) * Math.min(1, CONFIG.throttleResponse * H);
+    // mirrors main.ts: gas is capped by the sacred gasMaxMps ceiling, and the
+    // brake bites faster than the gas rises
+    const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
+    const tgt = Math.min(thTarget, ceiling);
+    const rate = tgt < throttleMult ? CONFIG.brakeResponse : CONFIG.gasResponse;
+    throttleMult += (tgt - throttleMult) * Math.min(1, rate * H);
     if (scrapeT > 0) scrapeT = Math.max(0, scrapeT - H);
     if (hoyoT > 0) hoyoT = Math.max(0, hoyoT - H);
     if (invT > 0) invT = Math.max(0, invT - H);
@@ -241,7 +246,7 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
       scrapeT > 0 ? CONFIG.scrapeSpeedLoss * (scrapeT / CONFIG.scrapeSlowSec) : 0,
       hoyoT > 0 ? CONFIG.potholeSpeedLoss * (hoyoT / CONFIG.hoyoRecoverSec) : 0,
     );
-    eff = speed * (1 - slow) * (easeSec ? Math.max(cafMult, throttleMult) : cafT > 0 ? CONFIG.cafecitoBoost : throttleMult);
+    eff = speed * (1 - slow) * Math.max(Math.min(easeSec ? cafMult : cafT > 0 ? CONFIG.cafecitoBoost : 1, ceiling), throttleMult);
     res.dist += eff * H;
     fill(eff, el, x, r, res.dist);
     ctx.playerY = airY;
@@ -652,7 +657,7 @@ if (want('brake')) {
       if (Math.abs(el - 0.5) < H / 2) {
         if (T.debugSpawnVehicle(s % 2 ? 'sedan' : 'motoconcho', 1, -4, 1, START_X)) spawned++;
       }
-      if (el >= 0.5) tm += (CONFIG.brakeSpeedMult - tm) * Math.min(1, CONFIG.throttleResponse * H);
+      if (el >= 0.5) tm += (CONFIG.brakeSpeedMult - tm) * Math.min(1, CONFIG.brakeResponse * H);
       const eff = rideSpeed('motor', el) * tm;
       dist += eff * H;
       fill(eff, el, START_X, 0.5, dist);
@@ -697,7 +702,7 @@ if (want('cafecito')) {
           invT = graceSec;
         }
       }
-      tm += ((cafT > 0 ? CONFIG.cafecitoBoost : 1) - tm) * Math.min(1, CONFIG.throttleResponse * H);
+      tm += ((cafT > 0 ? CONFIG.cafecitoBoost : 1) - tm) * Math.min(1, (3 / CONFIG.cafecitoEaseSec) * H);
       const eff = rideSpeed('motor', el) * (graceSec > 0 ? tm : cafT > 0 ? CONFIG.cafecitoBoost : 1);
       dist += eff * H;
       fill(eff, el, x, 0.5, dist);
