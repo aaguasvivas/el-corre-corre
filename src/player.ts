@@ -172,20 +172,23 @@ void main() {
 }
 `;
 
-// La Bendicion's halo and glints per ride: halo radius and height (over the
-// rider's head; the Civic's tiguere stands lower, out of the sunroof), and
-// the glints' orbit radius and heights around the ride.
+// La Bendicion's halo and glints per ride: halo radius, height and z (over
+// the rider's head; the Civic's tiguere stands lower, out of the sunroof, a
+// little behind the middle), and the glints' orbit radius and heights
+// around the ride.
 interface CrownSpec {
   haloR: number;
   haloY: number;
+  haloZ: number;
   orbitR: number;
   glintYs: number[];
 }
 const AURA_CROWN: Record<'bike' | 'civic', CrownSpec> = {
-  bike: { haloR: 0.22, haloY: 1.98, orbitR: 0.9, glintYs: [0.55, 1.05, 1.5] },
-  civic: { haloR: 0.2, haloY: 1.72, orbitR: 1.35, glintYs: [1.15, 1.45, 1.75] },
+  bike: { haloR: 0.22, haloY: 1.98, haloZ: 0, orbitR: 0.9, glintYs: [0.55, 1.05, 1.5] },
+  civic: { haloR: 0.2, haloY: 1.72, haloZ: -0.15, orbitR: 1.35, glintYs: [1.15, 1.45, 1.75] },
 };
 const HALO_TILT = 0.3; // radians the halo tips back, so the chase camera sees it open
+const HALO_LIFT = 0.36; // metres from the middle of the head up to the halo
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -245,6 +248,7 @@ export class Player {
   private auraCrown!: THREE.Mesh;
   private auraCrownGeo!: Record<'bike' | 'civic', THREE.BufferGeometry>;
   private auraHaloY = AURA_CROWN.bike.haloY;
+  private auraHaloZ = AURA_CROWN.bike.haloZ;
   private auraSize = new THREE.Vector3(1, 1, 1);
   private auraU = { value: 0 };
   private auraIn = 0; // 0..1, the pop when it is earned
@@ -504,16 +508,15 @@ export class Player {
     if (id === 'civic') {
       this.auraSize.set(1.45, 0.95, 2.35);
       this.auraBubble.position.set(0, 0.72, -0.1);
-      this.auraCrown.position.z = -0.15;
     } else {
       this.auraSize.set(1.05, 1.08, 1.2);
       this.auraBubble.position.set(0, 0.95, 0.05);
-      this.auraCrown.position.z = 0;
     }
     this.auraBubble.scale.copy(this.auraSize);
     this.auraCrown.geometry = this.auraCrownGeo[crown];
     this.auraHaloY = AURA_CROWN[crown].haloY;
-    this.auraCrown.position.y = this.auraHaloY;
+    this.auraHaloZ = AURA_CROWN[crown].haloZ;
+    this.auraCrown.position.set(0, this.auraHaloY, this.auraHaloZ);
     for (const key of Object.keys(this.rigs) as VehicleId[]) {
       const r = this.rigs[key];
       if (r) r.group.visible = key === id;
@@ -1193,7 +1196,14 @@ export class Player {
       this.auraBubble.scale.copy(this.auraSize).multiplyScalar(breathe);
       this.auraCrown.scale.setScalar(pop);
       this.auraCrown.rotation.y = (this.auraCrown.rotation.y + dt * 1.9) % (Math.PI * 2);
-      this.auraCrown.position.y = this.auraHaloY + Math.sin(this.time * 3.2) * 0.035;
+      // The halo floats level over the head through the caballito: its lift
+      // off the head and its tilt cancel the ride's pitch. Pitched with the
+      // rider, it stood up behind the gorra and read as a ring around it.
+      const pitch = this.wheelieVis - this.pedalPitchVis; // the lean group's nose-up pitch
+      const lift = HALO_LIFT + Math.sin(this.time * 3.2) * 0.035;
+      this.auraCrown.position.y = this.auraHaloY - HALO_LIFT + lift * Math.cos(pitch);
+      this.auraCrown.position.z = this.auraHaloZ + lift * Math.sin(pitch);
+      this.auraCrown.rotation.x = pitch - HALO_TILT;
       this.auraU.value = this.time;
     }
 
