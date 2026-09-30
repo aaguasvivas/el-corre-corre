@@ -208,13 +208,25 @@ export class Popups {
       // short screen with no rows to spare, a step to either side
       const d = h + 6;
       const dx = w * PEAK_SCALE + 10;
+      let found = false;
       for (const [kx, ky] of DODGE) {
         const cx = clampX(x0 + kx * dx);
         const cy = clampY(y0 + ky * d);
         if (!this.hits(s, cx, cy, w, h)) {
           x = cx;
           y = cy;
+          found = true;
           break;
+        }
+      }
+      // Nowhere free: the newest news wins its own spot, and whatever older
+      // popup is in the way leaves now rather than sit under it.
+      if (!found) {
+        for (const o of this.slots) {
+          if (o !== s && this.alive(o) && this.hitsOne(o, x, y, w, h)) {
+            o.anim!.finish();
+            if (o === this.chain) this.chain = null;
+          }
         }
       }
     }
@@ -226,17 +238,21 @@ export class Popups {
     s.el.style.top = `${y}px`;
   }
 
-  // Does a popup at (x, y) overlap one still up? A live popup claims its
-  // whole path, from where it popped to where it rises.
+  // Does a popup at (x, y) overlap one still up? Every popup rises the same
+  // way, so one that pops below an older one only has to clear where the
+  // older one popped (the older one rises away first); one that pops above
+  // has to clear the older one's whole path up.
   private hits(self: Slot, x: number, y: number, w: number, h: number): boolean {
     for (const o of this.slots) {
-      if (o === self || !this.alive(o)) continue;
-      const dx = Math.abs(o.x - x) < ((o.w + w) * PEAK_SCALE) / 2 + 4;
-      const top = o.y - o.h / 2 - CONFIG.popupRisePx;
-      const bottom = o.y + o.h / 2;
-      const dy = y + h / 2 > top - 4 && y - h / 2 < bottom + 4;
-      if (dx && dy) return true;
+      if (o !== self && this.alive(o) && this.hitsOne(o, x, y, w, h)) return true;
     }
     return false;
+  }
+
+  private hitsOne(o: Slot, x: number, y: number, w: number, h: number): boolean {
+    const dx = Math.abs(o.x - x) < ((o.w + w) * PEAK_SCALE) / 2 + 4;
+    const top = o.y - o.h / 2 - (y >= o.y ? 0 : CONFIG.popupRisePx);
+    const bottom = o.y + o.h / 2;
+    return dx && y + h / 2 > top - 4 && y - h / 2 < bottom + 4;
   }
 }

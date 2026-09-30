@@ -355,6 +355,11 @@
   box-shadow: 0 1px 0 rgba(0, 24, 52, 0.45);
 }
 
+#hud-pause:focus-visible {
+  outline: 3px solid var(--hud-gold);
+  outline-offset: 2px;
+}
+
 #hud-pause i {
   display: block;
   width: 5px;

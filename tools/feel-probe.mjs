@@ -245,7 +245,7 @@ const PROBES = {
       const pedals = document.querySelector('#pedal-brake').parentElement;
       const b = P.center('#pedal-brake');
       const btn = document.getElementById('pedal-brake');
-      const label = btn.querySelector('.pedal-label');
+      const label = document.getElementById('pedal-hot-text'); // the ¡CALIENTE! tag above FRENO
       const cruise = e.effSpeed();
       const rows = [];
       P.fire(pedals, 'pointerdown', b.x, b.y, 31);
@@ -262,7 +262,7 @@ const PROBES = {
         if (hotAt < 0 && h.hot) {
           hotAt = t + 0.05;
           hotLabel = label.textContent;
-          hotClass = btn.classList.contains('hot');
+          hotClass = btn.classList.contains('hot') && pedals.classList.contains('brake-hot');
         }
         if (deadAt < 0 && h.hot && h.auth === 0) deadAt = t + 0.05;
         if (Math.round((t + 0.05) * 20) % 5 === 0) rows.push(`${(t + 0.05).toFixed(2)}s heat ${h.heat} auth ${h.auth} v ${e.effSpeed()} x0.5 ${g.brakeOn ? 'on' : 'off'}`);
@@ -279,7 +279,7 @@ const PROBES = {
       checks.push(['a full hold bites first', minEff < cruise * 0.85, `cruise ${cruise} m/s, low ${minEff.toFixed(2)} m/s`]);
       checks.push(['the pads cook at about brakeHeatMaxSec', hotAt > 1.85 && hotAt < 2.2, `hot at ${hotAt.toFixed(2)} s`]);
       checks.push(['the brake fades to nothing in about 0.25 s', deadAt > 0 && deadAt - hotAt <= 0.3, `dead ${(deadAt - hotAt).toFixed(2)} s after`]);
-      checks.push(['FRENO says ¡CALIENTE! while cooked', hotLabel === '¡CALIENTE!' && hotClass, `label "${hotLabel}", hot class ${hotClass}`]);
+      checks.push(['FRENO says ¡CALIENTE! while cooked', hotLabel === '¡CALIENTE!' && hotClass, `tag "${hotLabel}", hot class ${hotClass}`]);
       checks.push(['a dead brake stops charging x0.5 and the ride runs at cruise', !endBrakeOn && endEff > cruise * 0.97, `x0.5 ${endBrakeOn}, v ${endEff} (held, heat ${endHot.heat})`]);
       checks.push(['letting go cools the pads to biting again', coolAt > 0 && coolAt < 2.5, `cool after ${coolAt.toFixed(2)} s`]);
       // taps: 0.3 s down, 0.5 s up, 12 times
@@ -463,8 +463,9 @@ const PROBES = {
       g = 0;
       while (e.powerups().shielded && e.state() === 'playing' && g++ < 240) e.tick(1 / 60);
       checks.push(['the shield takes the hit', !e.powerups().shielded && e.state() === 'playing', e.state()]);
-      const pop = [...document.querySelectorAll('#popup-layer *')].some((n) => /BENDICI/.test(n.textContent));
-      checks.push(['¡TE SALVÓ LA BENDICIÓN! pops', pop, '']);
+      // (in the announcement lane since the HUD pass)
+      const pop = /BENDICI/.test(e.hud().lane ?? '');
+      checks.push(['¡TE SALVÓ LA BENDICIÓN! shows', pop, e.hud().lane ?? 'lane empty']);
       e.tick(0.5);
       checks.push(['the hit car is off the rider’s line', !e.touching(0.3), '']);
       e.tick(2);

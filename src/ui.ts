@@ -562,7 +562,7 @@ export class UI {
           <div id="hud-combo" class="off"><b id="combo-n"></b><span id="combo-tier"></span><i id="combo-bar"></i></div>
           <div id="hud-pills"><div id="hud-cv" class="hud-pill"></div><div id="hud-cab" class="hud-pill"></div></div>
           <div id="announce">
-            <div id="an-card" class="an-card"><span class="an-kicker"></span><span class="an-text"></span></div>
+            <div id="an-card" class="an-card" role="status" aria-live="polite"><span class="an-kicker"></span><span class="an-text"></span></div>
             <div id="hud-tape" class="off">${TAPE_SVG}<span id="tape-n"></span></div>
           </div>
         </div>
@@ -574,7 +574,7 @@ export class UI {
           <div id="hud-mult" class="off"></div>
         </div>
         <div id="hud-record"></div>
-        <div id="coach" class="off">${ARROW_SVG}<span id="coach-text"></span></div>
+        <div id="coach" class="off" role="status" aria-live="polite">${ARROW_SVG}<span id="coach-text"></span></div>
         <div id="pedals" class="hidden">
           <div id="pedal-speed" class="pedal-speed"><b id="pedal-kmh">0</b><span>km/h</span></div>
           <div class="pedal-mult pedal-mult-brake"><span>${multTag(CONFIG.brakeScoreMult)}</span></div>
@@ -584,7 +584,7 @@ export class UI {
           <button id="pedal-gas" class="pedal pedal-gas" type="button"><i class="pedal-ring"></i><i class="pedal-tread"></i><span class="pedal-label"></span></button>
         </div>
       </div>
-      <div id="popup-layer"></div>
+      <div id="popup-layer" aria-hidden="true"></div>
       <div id="countdown" class="hidden"></div>
       <div id="flash"></div>
       <div id="title" class="screen hidden">
