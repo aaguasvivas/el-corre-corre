@@ -270,6 +270,21 @@ function trafficMaterial(): THREE.MeshToonMaterial {
   return _trafficMat;
 }
 
+// The same look for the instanced users (ramas, plátanos). A material shared
+// by plain and instanced meshes flips three.js's instancing state at every
+// switch in the draw list and re-derives the program parameters each time,
+// so the instanced ones get their own copy.
+let _trafficInstMat: THREE.MeshToonMaterial | null = null;
+function trafficInstancedMaterial(): THREE.MeshToonMaterial {
+  if (!_trafficInstMat) {
+    _trafficInstMat = hazardMaterial(
+      new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() }),
+      true,
+    );
+  }
+  return _trafficInstMat;
+}
+
 // Collects painted parts for one merged, vertex-colored geometry.
 class Kit {
   private parts: THREE.BufferGeometry[] = [];
@@ -1139,7 +1154,7 @@ export class Traffic {
       scene.add(mesh);
       this.obstacles.push({ kind: 'hoyo', mesh, active: false, x: 0, z: 0, armed: true });
     }
-    this.ramas = new THREE.InstancedMesh(ramaGeometry(), trafficMaterial(), 8);
+    this.ramas = new THREE.InstancedMesh(ramaGeometry(), trafficInstancedMaterial(), 8);
     this.ramas.count = 0;
     this.ramas.visible = false;
     this.ramas.frustumCulled = false;
@@ -1223,7 +1238,7 @@ export class Traffic {
     fruit.scale(1.35, 1.35, 1.35);
     fruit.translate(0, 0.27, 0);
     const PLATANOS = 40;
-    this.platanoMesh = new THREE.InstancedMesh(fruit, trafficMaterial(), PLATANOS);
+    this.platanoMesh = new THREE.InstancedMesh(fruit, trafficInstancedMaterial(), PLATANOS);
     this.platanoRim = new THREE.InstancedMesh(
       shell(fruit, 0.045),
       hazardMaterial(new THREE.MeshBasicMaterial({ color: 0xffe082, side: THREE.BackSide })),

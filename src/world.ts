@@ -1118,6 +1118,7 @@ function makeStreetSign(rects: Record<string, AtlasRect>): THREE.BufferGeometry 
 
 interface BeltAssets {
   vcMat: THREE.MeshToonMaterial;
+  palmMat: THREE.MeshToonMaterial; // the same look, for the palms alone (see Belt)
   atlasMat: THREE.MeshBasicMaterial;
   facades: Sized[];
   colmados: Sized[];
@@ -1149,8 +1150,12 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
   const atlasMat = worldMaterial(
     new THREE.MeshBasicMaterial({ map: atlas.tex, side: THREE.DoubleSide }),
   );
+  const palmMat = worldMaterial(
+    new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() }),
+  );
   return {
     vcMat,
+    palmMat,
     atlasMat,
     facades: [
       makeFacade(9, 1, 3, false),
@@ -1267,6 +1272,15 @@ class Belt {
       m.frustumCulled = false;
       m.castShadow = shadow;
       m.count = 0;
+      // Every mesh on the shared vertex-color material carries a color
+      // attribute (white = untinted), so all of them compile to the same
+      // program variant. A mix of meshes with and without instanceColor
+      // made three.js re-derive the program parameters at every switch in
+      // the draw list, about 20 times a frame, allocating each time.
+      if (mat === assets.vcMat) {
+        m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
+        m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      }
       this.group.add(m);
       return m;
     };
@@ -1280,7 +1294,11 @@ class Belt {
     signGeo.setAttribute('aSignOff', this.signOff);
     signGeo.setAttribute('aAwnOff', this.awnOff);
     this.signIM = im(signGeo, assets.signMat, SIGN_CAP);
-    for (const p of assets.palms) this.palmIMs.push(im(p, assets.vcMat, 8, true));
+    // The palms cast shadows and are never tinted: on their own material
+    // with no color attribute, the shadow pass sees every instanced caster
+    // alike (a color attribute on some of them flips the one depth material
+    // there too).
+    for (const p of assets.palms) this.palmIMs.push(im(p, assets.palmMat, 8, true));
     this.postIM = im(assets.post, assets.vcMat, 21);
     this.poleIM = im(assets.pole, assets.vcMat, 5);
     this.flagIM = im(assets.flag, assets.flagMat, 3, true);
