@@ -45,6 +45,11 @@ request and the decision taken.
    x0.5 while braking, so braking is safe and slow to score, never dominant.
    Same-direction traffic behind a braking rider follows the rider and honks
    instead of rear-ending them.
+   Added after wave 1 (bots that brake all the time survived about 50%
+   longer than cruise once the brake really worked): **freno caliente**.
+   About 2 s of full brake overheats the pads; the brake fades and stays off
+   until it cools. Taps and short holds work fully, so braking stays a
+   tactical tool, not a way to ride slow all run.
 3. **Los Mandaos.** Mission sets of three with levels and a points-only
    "multiplicador del barrio" (+0.25 per level, cap x3), plus one daily
    mandao with a streak. The brief's "no meta-systems in v1" rule is lifted
@@ -137,6 +142,11 @@ Findings: feel[6] (resume countdown: state and a minimal element), feel[7]
 (real-time tumble, hit flash; card anchoring goes to WP-E), feel[8], [9],
 [11], [13], [14]; ui[6], ui[14]; art[6]; critique[21];
 research-juice[0], [2], [3], [7]; research-subway[8] (Bendición shove).
+
+**WP-C3: Art touch-ups after wave 1.** The Bendición aura (it read as a flat
+lasso), a compact plátano rack, a caballito that reads from the raised
+camera, the cobrador's fog, a thinner rama, plus defects found in the wave-1
+gallery.
 
 ### Wave 3 (parallel)
 
