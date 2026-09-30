@@ -29,8 +29,8 @@ function rgeo(w: number, h: number, d: number, r: number): THREE.BufferGeometry 
 }
 const START_X = -3.4; // middle of your half of the road
 
-// Tail light: a dim lens at cruise, full red while braking.
-const TAIL_DARK = new THREE.Color(0x5a0a0e);
+// Tail light: the rig's own red lamp at cruise, full red while braking.
+const TAIL_DARK = new THREE.Color(PALETTE.flagRed);
 const TAIL_LIT = new THREE.Color(0xff2a2a);
 
 export interface PlayerCallbacks {
@@ -403,11 +403,14 @@ export class Player {
   // El pedal's in-world half: a tail light that glows while you brake. It is
   // its own mesh on the lean group (so it follows lean, caballito and pedal
   // pitch) instead of a part of any rig, so the ride builders and a pintura
-  // rebuild never touch it. One mesh, one geometry per ride: +1 draw call.
+  // rebuild never touch it. It sits a hair behind each rig's own tail lamp
+  // (addTail, buildCivic) and a hair larger, and it only draws while the
+  // brake glows: at cruise the rig's lamp shows and it costs no draw call.
   private attachBrakeLight(id: VehicleId): void {
     if (!this.brakeLight) {
       this.brakeLightMat = worldMaterial(new THREE.MeshBasicMaterial({ color: TAIL_DARK }));
       this.brakeLight = new THREE.Mesh(new THREE.BufferGeometry(), this.brakeLightMat);
+      this.brakeLight.visible = false;
       this.leanGroup.add(this.brakeLight);
     }
     let geo = this.brakeLightGeo[id];
@@ -415,13 +418,13 @@ export class Player {
       if (id === 'civic') {
         // two lamps on the trunk face, either side of the racing stripe
         geo = mergeGeometries([
-          new THREE.BoxGeometry(0.34, 0.09, 0.04).translate(-0.55, 0.52, -1.965),
-          new THREE.BoxGeometry(0.34, 0.09, 0.04).translate(0.55, 0.52, -1.965),
+          new THREE.BoxGeometry(0.41, 0.08, 0.02).translate(-0.45, 0.58, -1.995),
+          new THREE.BoxGeometry(0.41, 0.08, 0.02).translate(0.45, 0.58, -1.995),
         ])!;
       } else if (id === 'pasola') {
-        geo = new THREE.BoxGeometry(0.18, 0.08, 0.04).translate(0, 0.62, -0.685);
+        geo = new THREE.BoxGeometry(0.17, 0.08, 0.02).translate(0, 0.66, -0.71);
       } else {
-        geo = new THREE.BoxGeometry(0.16, 0.07, 0.04).translate(0, 0.72, -0.655);
+        geo = new THREE.BoxGeometry(0.15, 0.08, 0.02).translate(0, 0.74, -0.675);
       }
       this.brakeLightGeo[id] = geo;
     }
@@ -1056,6 +1059,7 @@ export class Player {
     this.leanGroup.rotation.x = -this.wheelieVis + this.pedalPitchVis;
     this.brakeGlow += ((th <= -CONFIG.gasEngageAt ? 1 : 0) - this.brakeGlow) * Math.min(1, 2 * kp);
     this.brakeLightMat.color.lerpColors(TAIL_DARK, TAIL_LIT, this.brakeGlow);
+    this.brakeLight.visible = this.brakeGlow > 0.02;
     this.leanGroup.position.y = Math.sin(this.wheelieVis) * this.wheelieLift;
     if (Math.abs(this.velX) > 0.6) this.driftSign = this.velX > 0 ? 1 : -1;
     const driftTarget = drifting ? this.driftSign * CONFIG.driftYaw : 0;
@@ -1201,6 +1205,7 @@ export class Player {
     this.pedalPitchVis = 0;
     this.brakeGlow = 0;
     this.brakeLightMat.color.copy(TAIL_DARK);
+    this.brakeLight.visible = false;
     this.wheelieKeys.clear();
     this.tumbling = false;
     this.settling = false;
