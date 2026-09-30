@@ -24,9 +24,23 @@ export interface Announcement {
   at: number; // queue clock when it was pushed
 }
 
-export function announcement(kind: AnnounceKind, style: AnnounceStyle, text: string, kicker = ''): Omit<Announcement, 'at'> {
+// Each kind's plate.
+const STYLE: Record<AnnounceKind, AnnounceStyle> = {
+  record: 'record',
+  shield: 'gold',
+  tramo: 'sign',
+  mult: 'blue',
+  levelUp: 'gold',
+  mandao: 'gold',
+  setPiece: 'red',
+  streetWild: 'red',
+  nudge: 'cream',
+  landmark: 'cream',
+};
+
+export function announcement(kind: AnnounceKind, text: string, kicker = ''): Omit<Announcement, 'at'> {
   const [priority, minSec, showSec, ttlSec] = CONFIG.announce[kind];
-  return { kind, style, kicker, text, priority, minSec, showSec, ttlSec };
+  return { kind, style: STYLE[kind], kicker, text, priority, minSec, showSec, ttlSec };
 }
 
 export class AnnounceQueue {

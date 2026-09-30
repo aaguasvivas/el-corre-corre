@@ -680,6 +680,7 @@ export const CONFIG = {
   popupSec: 1.0, // FEEL: a popup's life: pop in, hold, rise and fade
   popupBigSec: 1.25, // FEEL: the same for the big ones (power-ups, the trick, airtime)
   popupRisePx: 36, // FEEL: how far a popup drifts up as it fades
+  popupFloorShare: 0.7, // FEEL: popups end above this share of the screen height; lower, the steering thumb covers them
   platanoAggSec: 0.35, // FEEL: plátanos closer than this in time add up into one "+N"
   scoreRollSec: 0.18, // FEEL: the score rolls up to a gain over this long instead of jumping
   scorePunchAt: 25, // FEEL: a gain this big at once also punches the score
@@ -700,6 +701,9 @@ export const CONFIG = {
     landmark: [1, 0.9, 1.6, 3],
   } satisfies Record<string, readonly [number, number, number, number]>,
   announceOutSec: 0.18, // FEEL: the gap between two announcements, for the exit
+  // The horizon: the lane's cards end above this share of the screen height
+  // (a long one shrinks to), so a card never hides traffic as it first shows.
+  laneHorizonShare: 0.335,
   tapeApproachM: 200, // FEEL: La Cinta's "Faltan n m" chip shows this close to the tape...
   tapeApproachStepM: 10, // ...counting down in steps this big, with a punch on each
   // Coach chips: one contextual hint at a time, only until the move has been

@@ -268,7 +268,11 @@
   to { transform: scale(1.06); }
 }
 
-/* contra vía and the caballito: one centred row */
+/* contra vía and the caballito: one centred row.
+   DECISION: side by side, not stacked. A second row would push the
+   announcement lane down onto the horizon, where traffic first shows and
+   the 1.5 s telegraph lives. Both pills fit one row on a 375 pt phone in
+   Spanish and English. */
 #hud-pills {
   display: flex;
   justify-content: center;
@@ -445,7 +449,7 @@
   display: flex;
   justify-content: center;
   width: 100%;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .an-card {
@@ -482,7 +486,7 @@
 .an-kicker {
   font-size: clamp(11px, 3.2vw, 13px);
   letter-spacing: 2px;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
 .an-kicker:empty {
@@ -490,14 +494,24 @@
 }
 
 .an-text {
-  font-size: calc(clamp(22px, 6.6vw, 30px) * var(--an-fit));
+  font-size: calc(clamp(20px, 6.2vw, 28px) * var(--an-fit));
   line-height: 1.08;
   white-space: nowrap;
-  text-wrap: balance;
+}
+
+/* two lines at most, balanced, in a tighter plate so the card still ends
+   above the horizon (text-wrap is a shorthand that would reset nowrap, so
+   it lives here) */
+.an-card.wrap {
+  padding-top: 3px;
+  padding-bottom: 4px;
 }
 
 .an-card.wrap .an-text {
+  max-width: var(--an-max, 100%);
   white-space: normal;
+  text-wrap: balance;
+  line-height: 1.05;
 }
 
 /* plates: solid, bordered, a hard drop shadow; the card identity */
@@ -506,7 +520,7 @@
 .an-red,
 .an-blue,
 .an-cream {
-  padding: 6px 16px 8px;
+  padding: 5px 16px 6px;
   border-radius: 14px;
   border: 3px solid var(--hud-blue);
   box-shadow: 0 5px 0 rgba(0, 24, 52, 0.45);
@@ -515,7 +529,7 @@
 /* the tramo: a Dominican road sign */
 .an-sign {
   --an-rot: -1.5deg;
-  padding: 7px 20px 9px;
+  padding: 6px 20px 8px;
   border: none;
   border-radius: 10px;
   background: var(--hud-sign);
@@ -555,8 +569,8 @@
 
 /* a sentence (a mandao) reads smaller than a shout */
 .an-card.sentence .an-text {
-  font-size: calc(clamp(15px, 4.4vw, 19px) * var(--an-fit));
-  line-height: 1.15;
+  font-size: calc(clamp(14px, 4.2vw, 18px) * var(--an-fit));
+  line-height: 1.12;
 }
 
 /* the records: no plate, the heaviest stroke in the game */
@@ -1011,7 +1025,7 @@
 #countdown {
   position: absolute;
   left: 50%;
-  top: calc(var(--hud-top) + (100% - var(--hud-top) - var(--hud-bottom)) * 0.45);
+  top: calc(var(--hud-top) + (100% - var(--hud-top) - var(--hud-bottom)) * 0.43);
   transform: translate(-50%, -50%);
   font-size: clamp(76px, 15vh, 128px);
   line-height: 1;

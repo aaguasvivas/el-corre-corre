@@ -8,7 +8,7 @@ import { barrioMultFor, mandaoPerRun, type Completion, type Mandao, type MandaoK
 import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
 import type { SetPieceKind } from './traffic';
-import { AnnounceQueue, announcement, type Announcement, type AnnounceKind, type AnnounceStyle } from './announce';
+import { AnnounceQueue, announcement, type Announcement, type AnnounceKind } from './announce';
 import { Coach, type CoachId } from './coach';
 import { Popups, type Band } from './popups';
 
@@ -355,6 +355,9 @@ function multTag(m: number): string {
 // The widest side column in the top band (the plátano pill), which the
 // score must stay clear of.
 const HUD_SIDE_PX = 92;
+
+// The smallest a lane card's big line may shrink to (px) to fit.
+const LANE_MIN_PX = 12.5;
 
 // Restart a CSS animation class (the reflow is what restarts it).
 function restart(el: HTMLElement, cls: string): void {
@@ -1220,7 +1223,7 @@ export class UI {
     // An escalation no multiplier came to claim this step speaks alone.
     if (this.streetWildAt >= 0) {
       this.streetWildAt = -1;
-      this.announce('streetWild', 'red', this.t().streetWild);
+      this.announce('streetWild', this.t().streetWild);
     }
     if (this.lane.step(dt)) this.renderLane();
     else if (!this.laneShown && this.lane.now >= this.lane.freeAt && this.anCard.classList.contains('out')) {
@@ -1474,15 +1477,15 @@ export class UI {
   }
 
   popupRecordNear(): void {
-    this.announce('nudge', 'cream', this.t().recordNear);
+    this.announce('nudge', this.t().recordNear);
   }
 
   bannerFarthest(): void {
-    this.announce('record', 'record', this.t().farRecord);
+    this.announce('record', this.t().farRecord);
   }
 
   bannerGoal(): void {
-    this.announce('record', 'record', this.t().goalReached);
+    this.announce('record', this.t().goalReached);
   }
 
   // ---------------- coach chips ----------------
@@ -1526,8 +1529,9 @@ export class UI {
 
   // ---------------- the announcement lane ----------------
 
-  private announce(kind: AnnounceKind, style: AnnounceStyle, text: string, kicker = ''): void {
-    this.lane.push(announcement(kind, style, text, kicker));
+  // Public for probes (__ecc.announce); the game calls the named methods.
+  announce(kind: AnnounceKind, text: string, kicker = ''): void {
+    this.lane.push(announcement(kind, text, kicker));
     if (this.lane.step(0)) this.renderLane(); // a free lane shows it this frame
   }
 
@@ -1549,6 +1553,7 @@ export class UI {
     this.laneShown = a;
     // Laid out (shown) before it is measured; restart() then replays the entry.
     c.className = `an-card an-${a.style}${a.kind === 'mandao' || a.kind === 'levelUp' ? ' sentence' : ''} show`;
+    c.style.removeProperty('--an-max');
     c.style.setProperty('--an-out-at', `${Math.max(0, a.showSec - CONFIG.announceOutSec)}s`);
     this.anKicker.textContent = a.kicker;
     this.anText.textContent = a.text;
@@ -1556,9 +1561,11 @@ export class UI {
     restart(c, 'show');
   }
 
-  // Auto-fit: the big line shrinks to fit one line, down to 72%; past that
-  // it wraps, balanced, onto two lines at most (shrinking more if it must).
-  // Sized so the card still fits at the peak of its pop-in (1.08x).
+  // Auto-fit: the big line shrinks to fit one line, down to 72% (86% for a
+  // sentence); past that it wraps, balanced, onto two lines at most
+  // (shrinking more if it must, never under LANE_MIN_PX).
+  // Sized so the card still fits at the peak of its pop-in (1.08x), and so
+  // it ends above the horizon, where traffic first shows (laneHorizonShare).
   private fitLane(): void {
     const c = this.anCard;
     const text = this.anText;
@@ -1568,18 +1575,29 @@ export class UI {
       parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
     const avail = c.parentElement!.clientWidth / 1.12 - chrome - 6;
     const natural = text.scrollWidth;
-    if (natural <= avail) return;
-    if (natural * 0.72 <= avail) {
-      c.style.setProperty('--an-fit', (avail / natural).toFixed(3));
-      return;
-    }
     const oneLine = text.offsetHeight;
-    c.classList.add('wrap');
-    let fit = Math.min(1, Math.max(0.62, (2 * avail * 0.9) / natural));
-    for (let i = 0; i < 5; i++) {
+    const minFit = LANE_MIN_PX / parseFloat(getComputedStyle(text).fontSize);
+    let fit = 1;
+    // A shout shrinks to stay on one line; a sentence would rather wrap.
+    const oneLineFloor = c.classList.contains('sentence') ? 0.86 : 0.72;
+    if (natural > avail && natural * oneLineFloor <= avail) {
+      fit = avail / natural;
+    } else if (natural > avail) {
+      c.classList.add('wrap');
+      c.style.setProperty('--an-max', `${Math.floor(avail)}px`);
+      fit = Math.min(1, Math.max(minFit, (2 * avail * 0.9) / natural));
+      for (let i = 0; i < 5 && fit > minFit; i++) {
+        c.style.setProperty('--an-fit', fit.toFixed(3));
+        if (text.offsetHeight <= oneLine * fit * 2.3) break;
+        fit = Math.max(minFit, fit * 0.9);
+      }
+    }
+    c.style.setProperty('--an-fit', fit.toFixed(3));
+    // (the lane's own top: the card itself is mid-transform at this point)
+    const maxBottom = window.innerHeight * CONFIG.laneHorizonShare - c.parentElement!.getBoundingClientRect().top;
+    for (let i = 0; i < 6 && fit > minFit && c.offsetHeight > maxBottom; i++) {
+      fit = Math.max(minFit, fit * 0.94);
       c.style.setProperty('--an-fit', fit.toFixed(3));
-      if (text.offsetHeight <= oneLine * fit * 2.3) break;
-      fit *= 0.9;
     }
   }
 
@@ -1606,7 +1624,8 @@ export class UI {
     let bottom = this.pedalsEl.getBoundingClientRect().top;
     if (bottom <= 0) bottom = H - 16;
     if (this.coachShown) bottom = Math.min(bottom, this.coachEl.getBoundingClientRect().top);
-    b.bottom = bottom - 6;
+    // and out from under the steering thumb, which rests low on the screen
+    b.bottom = Math.min(bottom - 6, H * CONFIG.popupFloorShare);
     this.bandDirty = false;
     return b;
   }
@@ -1681,10 +1700,12 @@ export class UI {
   // level up, and never on top of a tramo sign or a record.
   toastMandao(c: Completion): void {
     const t = this.t();
-    this.announce('mandao', 'gold', `${this.mandaoText(c.mandao)} · ${t.reward(c.reward)}`, c.daily ? t.dailyDone : t.mandaoDone);
+    // (no "en una corrida" tail here: the run it happened in is this one)
+    const what = t.mandao[c.mandao.kind](c.mandao.target, this.trickNoun());
+    this.announce('mandao', `${what} · ${t.reward(c.reward)}`, c.daily ? t.dailyDone : t.mandaoDone);
     if (c.levelUp) {
       const name = t.levelNames[Math.min(c.level, t.levelNames.length - 1)];
-      this.announce('levelUp', 'gold', `${name} ${fmtBarrio(barrioMultFor(c.level))} · ${t.reward(c.setBonus)}`, t.levelUpKicker);
+      this.announce('levelUp', `${name} ${fmtBarrio(barrioMultFor(c.level))} · ${t.reward(c.setBonus)}`, t.levelUpKicker);
     }
   }
 
@@ -1712,12 +1733,12 @@ export class UI {
   }
 
   popupObelisco(): void {
-    this.announce('landmark', 'cream', this.t().obelisco);
+    this.announce('landmark', this.t().obelisco);
   }
 
   // A set piece calls its name, on a red street-warning plate.
   popupSetPiece(kind: SetPieceKind): void {
-    this.announce('setPiece', 'red', this.t().setPieces[kind]);
+    this.announce('setPiece', this.t().setPieces[kind]);
   }
 
   // Escalation fires on the same step as the multiplier tier, just before
@@ -1730,23 +1751,23 @@ export class UI {
     const t = this.t();
     const kicker = this.streetWildAt >= 0 ? t.streetWild : '';
     this.streetWildAt = -1;
-    this.announce('mult', 'blue', t.multUp(n), kicker);
+    this.announce('mult', t.multUp(n), kicker);
   }
 
   // Arriving somewhere new is the payoff for a long run: a green road sign,
   // DE VUELTA EN EL MALECÓN / LLEGASTE A LA ZONA COLONIAL / YA ESTÁS EN EL CAMPO.
   popupTramo(tr: Tramo): void {
     const t = this.t();
-    this.announce('tramo', 'sign', t.tramoNames[tr], t.tramoKicker[tr]);
+    this.announce('tramo', t.tramoNames[tr], t.tramoKicker[tr]);
   }
 
   bannerNewRecord(): void {
-    this.announce('record', 'record', this.t().newRecord);
+    this.announce('record', this.t().newRecord);
   }
 
   // The Bendición took the hit for you.
   popupShieldSaved(): void {
-    this.announce('shield', 'gold', this.t().shieldSaved);
+    this.announce('shield', this.t().shieldSaved);
   }
 
   // The resume countdown: 3, 2, 1, then ¡DALE! as the world moves again.

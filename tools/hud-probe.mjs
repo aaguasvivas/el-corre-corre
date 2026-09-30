@@ -9,7 +9,7 @@
 //   sh tools/heavy.sh node tools/hud-probe.mjs              # every probe
 //   sh tools/heavy.sh node tools/hud-probe.mjs band popups  # a subset
 //
-// Probes: band, popups, lane, coach, contrast, motion, freeze, ids.
+// Probes: band, popups, lane, cards, coach, contrast, motion, freeze, ids.
 // Exit code 1 when any check fails.
 
 import { createServer } from 'vite';
@@ -199,9 +199,9 @@ const PROBES = {
       `${lines.text} ${lines.fs}px, ${lines.lines} line(s), ${fmt(lane['#an-card'])}`,
     ]);
     checks.push([
-      'the lane card sits below the pills and ends above the horizon (34% of the height)',
-      !!lane['#an-card'] && lane['#an-card'].t >= (lane['#hud-cv']?.b ?? 0) && lane['#an-card'].b <= vp.height * 0.34,
-      `card ${fmt(lane['#an-card'])}, pills bottom ${Math.round(lane['#hud-cv']?.b ?? 0)}, horizon ${Math.round(vp.height * 0.34)}`,
+      'the lane card sits below the pills and ends above the horizon (33.5% of the height)',
+      !!lane['#an-card'] && lane['#an-card'].t >= (lane['#hud-cv']?.b ?? 0) && lane['#an-card'].b <= vp.height * 0.335,
+      `card ${fmt(lane['#an-card'])}, pills bottom ${Math.round(lane['#hud-cv']?.b ?? 0)}, horizon ${Math.round(vp.height * 0.335)}`,
     ]);
     // Then La Cinta's chip takes the free lane.
     await page.evaluate(() => {
@@ -344,6 +344,68 @@ const PROBES = {
     checks.push(['the record waited out the set piece minimum (0.9 s)', at('record') >= 0.9, `record at ${at('record')} s`]);
     const cards = await page.evaluate(() => document.querySelectorAll('.an-card').length);
     checks.push(['the lane is one element', cards === 1, `${cards} card element(s)`]);
+    return { checks };
+  },
+
+  // Every kind of card with its longest real copy: inside the edges at the
+  // peak of its pop, at most two lines, below the pills, above the horizon.
+  cards: async (page, vp, lang) => {
+    const checks = [];
+    const copy = {
+      es: [
+        ['tramo', 'LA ZONA COLONIAL', 'LLEGASTE A'],
+        ['record', '¡MÁS LEJOS QUE NUNCA!', ''],
+        ['shield', '¡TE SALVÓ LA BENDICIÓN!', ''],
+        ['mult', '¡MULTIPLICADOR ×4!', '¡La calle se puso brava!'],
+        ['setPiece', '¡SE LE CAEN LOS PLÁTANOS!', ''],
+        ['mandao', 'Corre 1,500 m seguidos sin caer en un hoyo · +200 plátanos', '¡MANDAO HECHO!'],
+        ['mandao', 'Haz 3 cerquitas en contra vía en una corrida · +150 plátanos', '¡MANDAO DEL DÍA!'],
+        ['levelUp', 'Leyenda del Malecón ×3 · +500 plátanos', '¡SUBISTE DE NIVEL!'],
+        ['nudge', '¡Ya casi el récord!', ''],
+      ],
+      en: [
+        ['tramo', 'LA ZONA COLONIAL', 'YOU REACHED'],
+        ['record', 'FARTHEST EVER!', ''],
+        ['shield', 'LA BENDICIÓN SAVED YOU!', ''],
+        ['mult', 'MULTIPLIER ×4!', 'The street got wild!'],
+        ['setPiece', 'SPILLED PLANTAINS!', ''],
+        ['mandao', 'Ride 1,500 m straight without a pothole · +200 plantains', 'MISSION DONE!'],
+        ['mandao', 'Pull 3 wrong-way near-misses in one run · +150 plantains', 'DAILY DONE!'],
+        ['levelUp', 'Legend of the Malecón ×3 · +500 plantains', 'LEVEL UP!'],
+        ['nudge', 'Record in reach!', ''],
+      ],
+    }[lang];
+    await page.evaluate(() => {
+      window.__ecc.start();
+      window.__ecc.god(true);
+      window.__ecc.tick(1);
+    });
+    const pillsBottom = await page.evaluate(() => document.getElementById('hud-pills').getBoundingClientRect().bottom);
+    for (const [kind, text, kicker] of copy) {
+      await page.evaluate(
+        (k, t, kk) => {
+          const e = window.__ecc;
+          for (let i = 0; i < 400 && (e.hud().kind !== null || e.hud().queued > 0); i++) e.tick(1 / 20);
+          e.tick(0.25);
+          e.announce(k, t, kk);
+          e.tick(1 / 60);
+        },
+        kind,
+        text,
+        kicker,
+      );
+      const r = (await sampleRects(page, ['#an-card'], 380))['#an-card'];
+      const m = await page.evaluate(() => {
+        const t = document.querySelector('#an-card .an-text');
+        const fs = parseFloat(getComputedStyle(t).fontSize);
+        const c = document.getElementById('an-card');
+        const dbg = `${c.className} ws=${getComputedStyle(t).whiteSpace} h=${t.offsetHeight} sw=${t.scrollWidth} cw=${c.clientWidth} fit=${c.style.getPropertyValue('--an-fit')}`;
+        return { lines: Math.round(t.offsetHeight / (fs * 1.1)), fs: Math.round(fs * 10) / 10, dbg };
+      });
+      // (a tilted card's corner may rise a few px into the gap under the pills)
+      const ok = !!r && r.l >= 8 && r.r <= vp.width - 8 && r.t >= pillsBottom - 4 && r.b <= vp.height * 0.345 && m.lines <= 2 && m.fs >= 12;
+      checks.push([`${kind}: "${text}"`, ok, `${m.fs}px, ${m.lines} line(s), ${fmt(r)}, pills ${Math.round(pillsBottom)}, horizon ${Math.round(vp.height * 0.335)}; ${m.dbg}`]);
+    }
     return { checks };
   },
 
@@ -541,6 +603,7 @@ const MATRIX = {
   band: [['se', 'es'], ['se', 'en'], ['iphone69', 'es'], ['iphone69', 'en']],
   popups: [['se', 'es'], ['iphone69', 'en']],
   lane: [['se', 'es']],
+  cards: [['se', 'es'], ['se', 'en'], ['iphone69', 'es'], ['iphone69', 'en']],
   coach: [['se', 'es'], ['se', 'en']],
   contrast: [['se', 'es']],
   motion: [['se', 'es']],
@@ -592,7 +655,7 @@ async function main() {
           await page.evaluate(() => document.fonts.ready.then(() => undefined));
           await page.evaluate(() => window.__ecc.tick(1 / 60));
           console.log(`\n[${name} ${vpName} ${lang}]`);
-          const r = await PROBES[name](page, vp);
+          const r = await PROBES[name](page, vp, lang);
           for (const [what, ok, detail] of r.checks) {
             if (!ok) failed++;
             console.log(`  ${ok ? 'PASS' : 'FAIL'} ${what}${detail ? `  (${detail})` : ''}`);

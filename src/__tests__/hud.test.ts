@@ -32,8 +32,8 @@ function run(q: AnnounceQueue, sec: number): string[] {
 describe('the announcement lane', () => {
   it('shows one at a time, each for its full time, in order', () => {
     const q = new AnnounceQueue();
-    q.push(announcement('tramo', 'sign', 'LA ZONA COLONIAL', 'LLEGASTE A'));
-    q.push(announcement('mandao', 'gold', 'Recoge 10 plátanos'));
+    q.push(announcement('tramo', 'LA ZONA COLONIAL', 'LLEGASTE A'));
+    q.push(announcement('mandao', 'Recoge 10 plátanos'));
     const shown: Array<[string, number]> = [];
     for (let t = 0; t < 8; t += 1 / 60) {
       if (q.step(1 / 60) && q.current) shown.push([q.current.text, q.now]);
@@ -45,10 +45,10 @@ describe('the announcement lane', () => {
 
   it('a record cuts a lower one short, but only after its minimum time', () => {
     const q = new AnnounceQueue();
-    q.push(announcement('tramo', 'sign', 'EL CAMPO', 'YA ESTÁS EN'));
+    q.push(announcement('tramo', 'EL CAMPO', 'YA ESTÁS EN'));
     q.step(1 / 60);
     run(q, 0.5); // the sign has been up half a second
-    q.push(announcement('record', 'record', '¡NUEVO RÉCORD!'));
+    q.push(announcement('record', '¡NUEVO RÉCORD!'));
     let cutAt = -1;
     for (let t = 0; t < 3 && cutAt < 0; t += 1 / 60) {
       q.step(1 / 60);
@@ -62,20 +62,20 @@ describe('the announcement lane', () => {
 
   it('a queued set-piece name that waited past its ttl is dropped', () => {
     const q = new AnnounceQueue();
-    q.push(announcement('tramo', 'sign', 'LA ZONA COLONIAL', 'LLEGASTE A'));
+    q.push(announcement('tramo', 'LA ZONA COLONIAL', 'LLEGASTE A'));
     q.step(1 / 60);
-    q.push(announcement('setPiece', 'red', '¡TAPÓN!'));
+    q.push(announcement('setPiece', '¡TAPÓN!'));
     const shown = run(q, 6);
     expect(shown).not.toContain('¡TAPÓN!');
   });
 
   it('equal priorities keep their order; a higher one jumps the queue', () => {
     const q = new AnnounceQueue();
-    q.push(announcement('landmark', 'cream', 'A'));
+    q.push(announcement('landmark', 'A'));
     q.step(0);
-    q.push(announcement('mandao', 'gold', 'B'));
-    q.push(announcement('mandao', 'gold', 'C'));
-    q.push(announcement('shield', 'gold', 'S'));
+    q.push(announcement('mandao', 'B'));
+    q.push(announcement('mandao', 'C'));
+    q.push(announcement('shield', 'S'));
     expect(run(q, 12)).toEqual(['S', 'B', 'C']);
   });
 });

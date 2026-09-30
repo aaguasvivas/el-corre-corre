@@ -1271,6 +1271,8 @@ let testGod = false;
     audio.update(1 / 60, audioCtxNow());
     renderer.render(scene, camera);
   },
-  // HUD probes: the announcement lane, the coach chip and what is learned.
+  // HUD probes: the announcement lane, the coach chip and what is learned;
+  // and any announcement, to measure the lane with the longest copy.
   hud: () => ui.hudState(),
+  announce: (kind: Parameters<UI['announce']>[0], text: string, kicker?: string) => ui.announce(kind, text, kicker),
 };

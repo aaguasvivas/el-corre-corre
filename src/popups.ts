@@ -62,12 +62,15 @@ const FRAMES = frames(LIFE_MS, false);
 const FRAMES_BIG = frames(BIG_MS, false);
 const FRAMES_CALM = frames(LIFE_MS, true);
 const FRAMES_CALM_BIG = frames(BIG_MS, true);
-const OPTS: KeyframeAnimationOptions = { duration: LIFE_MS, fill: 'forwards' };
-const OPTS_BIG: KeyframeAnimationOptions = { duration: BIG_MS, fill: 'forwards' };
+const OPTS: KeyframeAnimationOptions = { duration: LIFE_MS, fill: 'forwards', delay: 0 };
+const OPTS_BIG: KeyframeAnimationOptions = { duration: BIG_MS, fill: 'forwards', delay: 0 };
+const STAGGER_MS = 120; // popups born together pop one after another...
+const STAGGER_MAX_MS = 240; // ...but never later than this after their event
 
 export class Popups {
   private readonly slots: Slot[] = [];
   private seq = 0;
+  private nextPopAt = 0; // performance.now() before which a new popup waits its turn
   private now = 0; // seconds, the UI clock (so the plátano window follows the sim in tests)
   private chain: Slot | null = null;
   private chainSum = 0;
@@ -169,9 +172,16 @@ export class Popups {
     return s;
   }
 
+  // Popups born in the same instant cascade STAGGER_MS apart instead of
+  // landing as one clump.
   private play(s: Slot, big: boolean): void {
     const calm = this.reduced.matches;
-    s.anim = s.el.animate(big ? (calm ? FRAMES_CALM_BIG : FRAMES_BIG) : calm ? FRAMES_CALM : FRAMES, big ? OPTS_BIG : OPTS);
+    const now = performance.now();
+    const delay = Math.min(STAGGER_MAX_MS, Math.max(0, this.nextPopAt - now));
+    this.nextPopAt = now + delay + STAGGER_MS;
+    const opts = big ? OPTS_BIG : OPTS;
+    opts.delay = delay;
+    s.anim = s.el.animate(big ? (calm ? FRAMES_CALM_BIG : FRAMES_BIG) : calm ? FRAMES_CALM : FRAMES, opts);
   }
 
   // Measure, clamp into the band (with room for the pop and the rise), and
