@@ -520,11 +520,11 @@ function stepSim(h: number): void {
   // El pedal: speed chases the throttle. Gas is a target SPEED under the
   // sacred ceiling (gasMaxMps, or the ride's own cruise if that is higher),
   // so the telegraph rule holds a fondo at the speed cap. The brake bites
-  // faster than the gas rises. The cafecito overrides the pedal (they never
-  // stack) and obeys the same ceiling: while it burns the pedal reads as
-  // released, so throttleMult settles at 1 and the boost hands back to the
-  // pedal without a jump when it ends.
-  const th = state === 'playing' && cafecitoT <= 0 ? player.throttle : 0;
+  // faster than the gas rises. The cafecito overrides the brake and never
+  // stacks with the gas (see effSpeed below), and obeys the same ceiling.
+  // While it burns the brake reads as released but a held gas stays primed,
+  // so the speed hands back to the pedal without a dip when it ends.
+  const th = state === 'playing' ? (cafecitoT > 0 ? Math.max(0, player.throttle) : player.throttle) : 0;
   const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
   const gasRatio = Math.min(CONFIG.gasSpeedMult, ceiling);
   const thTarget = th >= 0 ? 1 + th * (gasRatio - 1) : 1 - -th * (1 - CONFIG.brakeSpeedMult);

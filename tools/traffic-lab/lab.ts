@@ -226,7 +226,7 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
     // mirrors main.ts: gas is capped by the sacred gasMaxMps ceiling, and the
     // brake bites faster than the gas rises
     const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
-    const tgt = cafT > 0 ? 1 : Math.min(thTarget, ceiling); // the cafecito overrides the pedal
+    const tgt = Math.min(cafT > 0 ? Math.max(thTarget, 1) : thTarget, ceiling); // the cafecito overrides the brake
     const rate = tgt < throttleMult ? CONFIG.brakeResponse : CONFIG.gasResponse;
     throttleMult += (tgt - throttleMult) * Math.min(1, rate * H);
     if (scrapeT > 0) scrapeT = Math.max(0, scrapeT - H);
