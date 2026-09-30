@@ -382,9 +382,14 @@ export const CONFIG = {
   // FEEL: how far the bikes rear up on the model (radians, pivoting on the
   // rear axle). Looks only: timing and hitbox never read it. At 0.5 the raised
   // portrait camera saw little more than a shorter bike; from about 0.7 the
-  // front wheel and the headlight clear the rider's gorra and the rider
-  // visibly sits back.
-  wheeliePitchRad: 0.74,
+  // headlight clears the rider's gorra, and at about 0.85 the bike stands
+  // up like a real caballito with the rider sitting well back.
+  wheeliePitchRad: 0.86,
+  // FEEL: the bike angles this far (radians) toward the last carve while the
+  // front is up. Looks only. Straight from behind, the rider's back hides the
+  // raised front wheel; a small angle shows the bike in profile, front wheel
+  // in the air, from the chase camera.
+  wheelieYawRad: 0.24,
   wheelieDustEverySec: 0.06, // FEEL: the rear tire kicks up a puff this often while the front is up
   wheelieCooldownBase: 1.1, // FEEL: cooldown = base + held seconds * perSec
   wheelieCooldownPerSec: 0.65,

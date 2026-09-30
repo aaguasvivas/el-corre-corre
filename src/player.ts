@@ -172,6 +172,21 @@ void main() {
 }
 `;
 
+// La Bendicion's halo and glints per ride: halo radius and height (over the
+// rider's head; the Civic's tiguere stands lower, out of the sunroof), and
+// the glints' orbit radius and heights around the ride.
+interface CrownSpec {
+  haloR: number;
+  haloY: number;
+  orbitR: number;
+  glintYs: number[];
+}
+const AURA_CROWN: Record<'bike' | 'civic', CrownSpec> = {
+  bike: { haloR: 0.22, haloY: 1.98, orbitR: 0.9, glintYs: [0.55, 1.05, 1.5] },
+  civic: { haloR: 0.2, haloY: 1.72, orbitR: 1.35, glintYs: [1.15, 1.45, 1.75] },
+};
+const HALO_TILT = 0.3; // radians the halo tips back, so the chase camera sees it open
+
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -229,6 +244,7 @@ export class Player {
   private auraBubble!: THREE.Mesh;
   private auraCrown!: THREE.Mesh;
   private auraCrownGeo!: Record<'bike' | 'civic', THREE.BufferGeometry>;
+  private auraHaloY = AURA_CROWN.bike.haloY;
   private auraSize = new THREE.Vector3(1, 1, 1);
   private auraU = { value: 0 };
   private auraIn = 0; // 0..1, the pop when it is earned
@@ -368,13 +384,16 @@ export class Player {
       ),
     );
     this.auraCrownGeo = {
-      bike: this.crownGeometry(0.22, 1.98, 0.9, [0.55, 1.05, 1.5]),
-      civic: this.crownGeometry(0.2, 1.72, 1.35, [1.15, 1.45, 1.75]),
+      bike: this.crownGeometry(AURA_CROWN.bike),
+      civic: this.crownGeometry(AURA_CROWN.civic),
     };
     this.auraCrown = new THREE.Mesh(
       this.auraCrownGeo.bike,
       worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold })),
     );
+    // tipped back toward the camera; step() spins it about its own tipped
+    // axis, which leaves the halo exactly where it is
+    this.auraCrown.rotation.x = -HALO_TILT;
     this.aura.add(this.auraBubble, this.auraCrown);
     this.aura.visible = false;
     this.leanGroup.add(this.aura);
@@ -413,22 +432,23 @@ export class Player {
     this.root.add(this.stars);
   }
 
-  // The halo (tipped back a little, so the chase camera sees it open) at
-  // haloY over the orbit's center, and three diamond glints on a ring of
-  // radius orbitR at the given heights. One merged geometry: spinning the
-  // mesh orbits the glints and leaves the round halo where it is.
-  private crownGeometry(r: number, haloY: number, orbitR: number, glintYs: number[]): THREE.BufferGeometry {
-    const halo = new THREE.TorusGeometry(r, 0.035, 6, 28);
-    halo.rotateX(Math.PI / 2 - 0.3);
-    halo.translate(0, haloY, 0);
+  // The halo, flat around the local y axis at the origin (the mesh sits at
+  // the halo's height), and three diamond glints on a ring of radius orbitR
+  // at the given ride heights. One merged geometry: spinning the mesh about
+  // its y axis orbits the glints and leaves the round halo where it is. (A
+  // halo tipped in the geometry would precess with that spin and go edge-on
+  // to the camera once a turn: the flat lasso again.)
+  private crownGeometry(c: CrownSpec): THREE.BufferGeometry {
+    const halo = new THREE.TorusGeometry(c.haloR, 0.035, 6, 28);
+    halo.rotateX(Math.PI / 2);
     // the octahedra come non-indexed, so the halo joins them that way
     const parts: THREE.BufferGeometry[] = [halo.toNonIndexed()];
     halo.dispose();
-    glintYs.forEach((y, i) => {
-      const a = (i / glintYs.length) * Math.PI * 2;
+    c.glintYs.forEach((y, i) => {
+      const a = (i / c.glintYs.length) * Math.PI * 2;
       const g = new THREE.OctahedronGeometry(0.075, 0);
       g.scale(0.8, 1.9, 0.8);
-      g.translate(Math.cos(a) * orbitR, y, Math.sin(a) * orbitR);
+      g.translate(Math.cos(a) * c.orbitR, y - c.haloY, Math.sin(a) * c.orbitR);
       parts.push(g);
     });
     const geo = mergeGeometries(parts)!;
@@ -479,7 +499,8 @@ export class Player {
     else this.glowShell.scale.set(1, 0.9, 1);
     // la Bendicion sizes itself the same way, a hair wider than the glow,
     // and its halo sits over this ride's head (the Civic's tiguere stands
-    // lower, out of the sunroof, and a little behind the middle)
+    // a little behind the middle)
+    const crown = id === 'civic' ? 'civic' : 'bike';
     if (id === 'civic') {
       this.auraSize.set(1.45, 0.95, 2.35);
       this.auraBubble.position.set(0, 0.72, -0.1);
@@ -490,7 +511,9 @@ export class Player {
       this.auraCrown.position.z = 0;
     }
     this.auraBubble.scale.copy(this.auraSize);
-    this.auraCrown.geometry = this.auraCrownGeo[id === 'civic' ? 'civic' : 'bike'];
+    this.auraCrown.geometry = this.auraCrownGeo[crown];
+    this.auraHaloY = AURA_CROWN[crown].haloY;
+    this.auraCrown.position.y = this.auraHaloY;
     for (const key of Object.keys(this.rigs) as VehicleId[]) {
       const r = this.rigs[key];
       if (r) r.group.visible = key === id;
@@ -1169,8 +1192,8 @@ export class Player {
       const breathe = pop * (1 + Math.sin(this.time * 2.4) * 0.025);
       this.auraBubble.scale.copy(this.auraSize).multiplyScalar(breathe);
       this.auraCrown.scale.setScalar(pop);
-      this.auraCrown.rotation.y += dt * 1.9;
-      this.auraCrown.position.y = Math.sin(this.time * 3.2) * 0.035;
+      this.auraCrown.rotation.y = (this.auraCrown.rotation.y + dt * 1.9) % (Math.PI * 2);
+      this.auraCrown.position.y = this.auraHaloY + Math.sin(this.time * 3.2) * 0.035;
       this.auraU.value = this.time;
     }
 
@@ -1205,7 +1228,13 @@ export class Player {
     this.leanGroup.position.y = this.wheelRadius * wc - this.rearAxleZ * ws;
     this.leanGroup.position.z = this.wheelRadius * ws + this.rearAxleZ * wc;
     if (Math.abs(this.velX) > 0.6) this.driftSign = this.velX > 0 ? 1 : -1;
-    const driftTarget = drifting ? this.driftSign * CONFIG.driftYaw : 0;
+    // the derrape swings the car's tail out; the caballito angles the bike a
+    // little so its raised front shows past the rider's back
+    const driftTarget = drifting
+      ? this.driftSign * CONFIG.driftYaw
+      : this.wheelieActive
+        ? this.driftSign * CONFIG.wheelieYawRad
+        : 0;
     this.driftYawVis += (driftTarget - this.driftYawVis) * Math.min(1, 9 * dt);
     this.root.rotation.y = this.velXNorm * 0.16 + this.driftYawVis; // nose into the carve, tail out in the derrape
     this.root.position.x = this.x;
