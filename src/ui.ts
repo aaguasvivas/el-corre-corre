@@ -2,10 +2,9 @@
 // the share card. Spanish-first with an EN flip. The slang stays Dominican in
 // both languages.
 
-import { CONFIG, VEHICLES, type VehicleId } from './config';
+import { CONFIG, PINTURAS, VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type PinturaGoal, type RunResult } from './score';
 import { barrioMultFor, mandaoPerRun, type Completion, type Mandao, type MandaoKind, type MandaosView } from './missions';
-import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
 import type { SetPieceKind } from './traffic';
 import { shareImage, type ShareResult } from './share';
@@ -21,16 +20,13 @@ const TRAMO_M = CONFIG.tramoLengthM;
 const STRINGS = {
   es: {
     subtitle: '¡Dale, que vamo’ tarde!',
-    startTouch: "TOCA PA' EMPEZAR",
+    startTouch: 'TOCA PA’ EMPEZAR',
     startKey: 'DALE A ESPACIO',
-    ctrlSteerTouch: 'Arrastra pa’ esquivar',
-    ctrlSteerKey: 'A / D pa’ esquivar',
-    ctrlTrickTouch: (trick: string) => `Desliza arriba y aguanta: ${trick}`,
-    ctrlTrickKey: (trick: string) => `Aguanta W: ${trick}`,
+    // One hint line under the ride picker; the pedals label themselves.
+    hintTouch: (trick: string) => `Arrastra pa’ esquivar · Desliza arriba: ${trick}`,
+    hintKey: (trick: string) => `A / D pa’ esquivar · W: ${trick} · Flechas: pedales`,
     record: 'Récord',
     points: 'Puntos',
-    distance: 'Distancia',
-    platanos: 'Plátanos',
     again: 'OTRA VEZ',
     menu: 'MENÚ',
     share: 'COMPARTIR',
@@ -38,22 +34,43 @@ const STRINGS = {
     newRecord: '¡NUEVO RÉCORD!',
     tapeRecord: 'TU RÉCORD',
     pause: 'PAUSA',
-    resume: 'Toca pa’ seguir',
-    closeCall: (n: number) => `¡Te quedaste a ${n}!`,
+    // The ride picker: stat bars, the ride's own récord, the paints.
+    statVel: 'Velocidad',
+    statMan: 'Manejo',
+    statAgu: 'Aguante',
+    rideRecord: (n: number) => `Récord ${fmtN(n)}`,
+    rideNoRecord: 'Sin récord todavía',
+    paintWearing: (name: string) => `Llevas ${name}`,
+    paintUse: (name: string) => `Toca otra vez pa’ poner ${name}`,
+    paintBuy: (name: string) => `Toca otra vez pa’ comprar ${name}`,
+    paintNeed: (n: number) => (n === 1 ? 'Te falta 1 plátano' : `Te faltan ${fmtN(n)} plátanos`),
+    paintLocked: (name: string, price: number) => `${name}, cuesta ${fmtN(price)} plátanos`,
+    paintOwned: (name: string) => `${name}, ya es tuya`,
+    paintAfford: '¡Ya te alcanza pa’ una pintura nueva!',
+    ariaClose: 'Cerrar',
+    // The game-over card
+    bestLine: (n: number) => `Récord ${fmtN(n)}`,
+    overBest: (n: number) => `¡${fmtN(n)} más que tu récord!`,
+    closeCall: (n: number) => `¡Te quedaste a ${fmtN(n)} m!`,
+    pastRecord: (n: number) => `¡${fmtN(n)} m más lejos que tu récord!`,
+    distEnd: (label: string, m: number) => `${label} ${fmtN(m)} m`,
+    bdCombo: 'mejor combo',
+    bdNear: (n: number) => (n === 1 ? 'cerquita' : 'cerquitas'),
+    bdCv: 'en contra vía',
+    stamp: '¡HECHO!',
+    pinturaAll: '¡Tienes todas las pinturas!',
     inVehicle: (v: string) => `en ${v} por el Malecón`,
     inVehicleReached: (v: string, place: string) => `en ${v} hasta ${place}`,
-    reachedTramo: (place: string) => `Llegaste hasta ${place}`,
-    nextTramoIn: (place: string, m: number) => `${place} a ${m} m`,
-    shareText: (n: number) => `${n} puntos por el Malecón.`,
+    shareText: (n: number) => `${fmtN(n)} puntos por el Malecón.`,
     shareAsk: '¿Me puedes ganar?',
+    shareLevel: (name: string, mult: string) => `Nivel ${name} ${mult}`,
+    shareStats: (m: number, p: number) => `${fmtN(m)} m · ${p === 1 ? '1 plátano' : `${fmtN(p)} plátanos`}`,
     ariaSound: 'Sonido',
     ariaPause: 'Pausa',
     gameOverTitles: ['¡Te dieron, loco!', '¡Diache!', '¡Eso tuvo feo!'],
     cvPill: '¡EN CONTRA VÍA! ×2',
     trickPillBike: '¡CABALLITO! ×1.5',
     trickPillCar: '¡DERRAPE! ×1.5',
-    ctrlThrottleTouch: 'Aguanta ¡DALE! pa’ acelerar · FRENO pa’ frenar',
-    ctrlThrottleKey: '↑ acelera · ↓ frena',
     pedalGas: '¡DALE!',
     pedalBrake: 'FRENO',
     pedalBrakeHot: '¡CALIENTE!', // el freno caliente: overheated pads, no brake
@@ -80,13 +97,11 @@ const STRINGS = {
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: '¡Pintura nueva!',
     tramoKicker: 'LLEGASTE A',
-    pinturaEquip: 'PONER',
     nearMiss: '¡Cerquita!',
     razorMiss: '¡Por un pelito!',
     ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
     // Records: ¡NUEVO RÉCORD! is points, La Cinta is distance.
     farRecord: '¡MÁS LEJOS QUE NUNCA!',
-    farLine: (m: number) => `¡Más lejos que nunca! ${fmtN(m)} m`,
     goalTape: 'LA META',
     goalReached: '¡LLEGASTE A LA META!',
     recordNear: '¡Ya casi el récord!',
@@ -95,7 +110,8 @@ const STRINGS = {
     mandaos: 'LOS MANDAOS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
       level > 0 ? `MANDAOS ${done}/3 · NIVEL ${level} ${mult}` : `MANDAOS ${done}/3 · ${name.toUpperCase()}`,
-    levelLine: (level: number, name: string, mult: string) => `Nivel ${level} · ${name} · ${mult} en puntos`,
+    levelHead: (level: number, name: string) => `NIVEL ${level} · ${name.toUpperCase()}`,
+    multPill: (mult: string) => `${mult} en puntos`,
     levelNames: ['Novato', 'Pasajero', 'Motoconchista', 'Tíguere', 'Tíguere de Verdad', 'Jefe del Malecón', 'Leyenda del Malecón'],
     mandaoDone: '¡MANDAO HECHO!',
     dailyDone: '¡MANDAO DEL DÍA!',
@@ -105,10 +121,10 @@ const STRINGS = {
     dailyTag: 'HOY',
     streak: (n: number) => (n === 1 ? 'Racha: 1 día' : `Racha: ${n} días`),
     reward: (n: number) => `+${fmtN(n)} plátanos`,
-    closeHint: 'Toca pa’ cerrar',
     perRun: ' en una corrida',
-    earned: (n: number) => `+${fmtN(n)} plátanos`,
-    pinturaNeed: (n: number, name: string) => `Te faltan ${fmtN(n)} plátanos pa’ ${name}`,
+    earned: (n: number) => (n === 1 ? '+1 plátano' : `+${fmtN(n)} plátanos`),
+    pinturaNeed: (n: number, name: string) =>
+      n === 1 ? `Te falta 1 plátano pa’ ${name}` : `Te faltan ${fmtN(n)} plátanos pa’ ${name}`,
     pinturaReady: (name: string) => `¡Ya te alcanza pa’ ${name}!`,
     mandao: {
       platanosRun: (n: number) => `Recoge ${fmtN(n)} plátanos`,
@@ -134,17 +150,13 @@ const STRINGS = {
     trickNounCar: 'derrape',
   },
   en: {
-    subtitle: "Let's go, we're late!",
+    subtitle: 'Let’s go, we’re late!',
     startTouch: 'TAP TO START',
     startKey: 'PRESS SPACE',
-    ctrlSteerTouch: 'Drag to weave',
-    ctrlSteerKey: 'A / D to weave',
-    ctrlTrickTouch: (trick: string) => `Swipe up and hold: ${trick}`,
-    ctrlTrickKey: (trick: string) => `Hold W: ${trick}`,
+    hintTouch: (trick: string) => `Drag to weave · Swipe up: ${trick}`,
+    hintKey: (trick: string) => `A / D to weave · W: ${trick} · Arrows: pedals`,
     record: 'Best',
     points: 'Points',
-    distance: 'Distance',
-    platanos: 'Plantains',
     again: 'AGAIN',
     menu: 'MENU',
     share: 'SHARE',
@@ -152,22 +164,41 @@ const STRINGS = {
     newRecord: 'NEW RECORD!',
     tapeRecord: 'YOUR RECORD',
     pause: 'PAUSED',
-    resume: 'Tap to resume',
-    closeCall: (n: number) => `Only ${n} short!`,
+    statVel: 'Speed',
+    statMan: 'Handling',
+    statAgu: 'Toughness',
+    rideRecord: (n: number) => `Best ${fmtN(n)}`,
+    rideNoRecord: 'No best yet',
+    paintWearing: (name: string) => `Riding in ${name}`,
+    paintUse: (name: string) => `Tap again to use ${name}`,
+    paintBuy: (name: string) => `Tap again to buy ${name}`,
+    paintNeed: (n: number) => (n === 1 ? '1 more plantain' : `${fmtN(n)} more plantains`),
+    paintLocked: (name: string, price: number) => `${name}, costs ${fmtN(price)} plantains`,
+    paintOwned: (name: string) => `${name}, owned`,
+    paintAfford: 'You can afford a new paint!',
+    ariaClose: 'Close',
+    bestLine: (n: number) => `Best ${fmtN(n)}`,
+    overBest: (n: number) => `${fmtN(n)} over your old best!`,
+    closeCall: (n: number) => `Only ${fmtN(n)} m short!`,
+    pastRecord: (n: number) => `${fmtN(n)} m past your best!`,
+    distEnd: (label: string, m: number) => `${label} ${fmtN(m)} m`,
+    bdCombo: 'best combo',
+    bdNear: (n: number) => (n === 1 ? 'near-miss' : 'near-misses'),
+    bdCv: 'wrong way',
+    stamp: 'DONE!',
+    pinturaAll: 'You own every paint!',
     inVehicle: (v: string) => `on ${v} down the Malecón`,
     inVehicleReached: (v: string, place: string) => `on ${v} all the way to ${place}`,
-    reachedTramo: (place: string) => `You reached ${place}`,
-    nextTramoIn: (place: string, m: number) => `${place} ${m} m away`,
-    shareText: (n: number) => `${n} points down the Malecón.`,
+    shareText: (n: number) => `${fmtN(n)} points down the Malecón.`,
     shareAsk: 'Can you beat me?',
+    shareLevel: (name: string, mult: string) => `Level ${name} ${mult}`,
+    shareStats: (m: number, p: number) => `${fmtN(m)} m · ${p === 1 ? '1 plantain' : `${fmtN(p)} plantains`}`,
     ariaSound: 'Sound',
     ariaPause: 'Pause',
     gameOverTitles: ['They got you!', 'Wipeout!', 'That was ugly!'],
     cvPill: 'WRONG WAY! ×2',
     trickPillBike: 'WHEELIE! ×1.5',
     trickPillCar: 'DRIFT! ×1.5',
-    ctrlThrottleTouch: 'Hold GAS to speed up · BRAKE to slow down',
-    ctrlThrottleKey: '↑ gas · ↓ brake',
     pedalGas: 'GAS',
     pedalBrake: 'BRAKE',
     pedalBrakeHot: 'HOT!',
@@ -195,12 +226,10 @@ const STRINGS = {
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: 'New paint!',
     tramoKicker: 'YOU REACHED',
-    pinturaEquip: 'USE',
     nearMiss: 'So close!',
     razorMiss: 'By a hair!',
     ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
     farRecord: 'FARTHEST EVER!',
-    farLine: (m: number) => `Farthest ever! ${fmtN(m)} m`,
     goalTape: 'GOAL',
     goalReached: 'GOAL REACHED!',
     recordNear: 'Record in reach!',
@@ -208,7 +237,8 @@ const STRINGS = {
     mandaos: 'MISSIONS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
       level > 0 ? `MISSIONS ${done}/3 · LEVEL ${level} ${mult}` : `MISSIONS ${done}/3 · ${name.toUpperCase()}`,
-    levelLine: (level: number, name: string, mult: string) => `Level ${level} · ${name} · ${mult} on points`,
+    levelHead: (level: number, name: string) => `LEVEL ${level} · ${name.toUpperCase()}`,
+    multPill: (mult: string) => `${mult} on points`,
     levelNames: ['Rookie', 'Passenger', 'Moto-taxi Rider', 'Tíguere', 'Real Tíguere', 'Boss of the Malecón', 'Legend of the Malecón'],
     mandaoDone: 'MISSION DONE!',
     dailyDone: 'DAILY DONE!',
@@ -218,10 +248,10 @@ const STRINGS = {
     dailyTag: 'TODAY',
     streak: (n: number) => (n === 1 ? 'Streak: 1 day' : `Streak: ${n} days`),
     reward: (n: number) => `+${fmtN(n)} plantains`,
-    closeHint: 'Tap to close',
     perRun: ' in one run',
-    earned: (n: number) => `+${fmtN(n)} plantains`,
-    pinturaNeed: (n: number, name: string) => `${fmtN(n)} more plantains for ${name}`,
+    earned: (n: number) => (n === 1 ? '+1 plantain' : `+${fmtN(n)} plantains`),
+    pinturaNeed: (n: number, name: string) =>
+      n === 1 ? `1 more plantain for ${name}` : `${fmtN(n)} more plantains for ${name}`,
     pinturaReady: (name: string) => `You can afford ${name}!`,
     mandao: {
       platanosRun: (n: number) => `Grab ${fmtN(n)} plantains`,
@@ -295,8 +325,9 @@ export interface UICallbacks {
   onSelectVehicle(v: VehicleId): void;
   onMenu(): void;
   onShare(): void;
-  onPinturaCycle(dir: 1 | -1): void; // flip through paints; the bike previews live
-  onPinturaTap(): void; // equip the previewed paint, or buy it if locked
+  // A swatch was tapped: preview it on the ride, or, when it is already the
+  // one previewed, equip it (owned) or buy it (locked).
+  onPinturaPick(index: number): void;
 }
 
 function readLang(): Lang {
@@ -320,9 +351,11 @@ function multTag(m: number): string {
   return `×${m}`;
 }
 
-// 12,000: the same grouping in both languages, like the tape label.
+// 12,000: grouped in the language's own locale. es-DO groups every number
+// from 1,000 up (plain 'es' leaves 4567 bare), and both read 12,000.
+let numLocale = readLang() === 'en' ? 'en-US' : 'es-DO';
 function fmtN(n: number): string {
-  return Math.floor(n).toLocaleString('en-US');
+  return Math.floor(n).toLocaleString(numLocale);
 }
 
 // ×2, ×3.8, ×15: one decimal under ten, whole numbers above.
@@ -350,25 +383,44 @@ function shareFileName(r: RunResult): string {
   return `el-corre-corre-${r.points}pts${r.isNewRecord ? '-record' : ''}-${stamp}.png`;
 }
 
-function statBars(): string {
-  return VEHICLE_IDS.map((id) => {
-    const v = VEHICLES[id];
-    const bar = (label: string, n: number): string =>
-      `<div class="vc-stat"><span>${label}</span><div class="vc-bar"><b style="width:${n * 20}%"></b></div></div>`;
-    return `
-      <div class="vcard" data-v="${id}">
-        <div class="vc-name">${v.name}</div>
-        ${bar('VEL', v.stats.vel)}${bar('MAN', v.stats.man)}${bar('AGU', v.stats.agu)}
-        <div class="vc-tag">${v.tagline}</div>
-        <div class="vc-rec" data-rec="${id}"></div>
-        <div class="vc-pcycle">
-          <button class="pc-arrow pc-prev" type="button" aria-label="anterior">&#8249;</button>
-          <button class="pc-swatch" type="button" aria-label="pintura"></button>
-          <button class="pc-arrow pc-next" type="button" aria-label="siguiente">&#8250;</button>
-        </div>
-        <div class="pc-state"><span class="pc-label"></span></div>
-      </div>`;
-  }).join('');
+// The ride picker's tabs: one per ride, the selected one filled.
+function rideTabsHtml(): string {
+  return VEHICLE_IDS.map(
+    (id) => `<button class="vtab" type="button" role="tab" data-v="${id}" aria-selected="false">${VEHICLES[id].name}</button>`,
+  ).join('');
+}
+
+// Five pips per stat (stats run 1..5): chunky, readable at a glance.
+const PIPS = '<i></i><i></i><i></i><i></i><i></i>';
+
+// Lilita One has no check, lock or cross glyph, so these are drawn.
+const CHECK_SVG =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.6l3.1 3.1L13 4.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const LOCK_SVG =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5.2 7.2V5.4a2.8 2.8 0 0 1 5.6 0v1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><rect x="3.2" y="7" width="9.6" height="7.2" rx="1.8" fill="currentColor"/></svg>';
+const CLOSE_SVG =
+  '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
+
+// OWNER DECISION: where the share card sends people (App Store or the
+// site). Empty until Adelson picks one; the card omits its footer line and
+// the share text stays URL-free while it is empty.
+export const SHARE_URL = '';
+
+// The share photo, 3:2: wide enough for the rider, the ride and what hit them.
+const SNAP_W = 900;
+const SNAP_H = 600;
+
+function hexCss(hex: number): string {
+  return `#${hex.toString(16).padStart(6, '0')}`;
+}
+
+// Honours the OS setting live: the count-up, the bars and the stamps
+// all land in their final state when it is on.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function easeOutCubic(t: number): number {
+  const u = 1 - t;
+  return 1 - u * u * u;
 }
 
 export class UI {
@@ -427,14 +479,12 @@ export class UI {
   private pedalShown: -1 | 0 | 1 = 0;
   private kmhShown = -1;
   private pedalSeen = readPedalSeen();
-  private ctrlThrottleEl: HTMLElement;
   private platEl: HTMLElement;
   private multEl: HTMLElement;
   private hudRecordEl: HTMLElement;
   private subtitleEl: HTMLElement;
   private promptEl: HTMLElement;
-  private ctrlSteerEl: HTMLElement;
-  private ctrlTrickEl: HTMLElement;
+  private hintEl: HTMLElement;
   private readonly fontsReady: Promise<unknown> = document.fonts
     ? document.fonts.ready
     : Promise.resolve();
@@ -443,35 +493,48 @@ export class UI {
   private inputMode: 'touch' | 'key' = window.matchMedia('(pointer: coarse)').matches
     ? 'touch'
     : 'key';
-  private titleRecordEl: HTMLElement;
   private langBtn: HTMLElement;
   private muteBtn: HTMLElement;
   private mutePauseBtn: HTMLElement;
   private pauseBtn: HTMLElement;
   private lastRecords: Record<VehicleId, number> | null = null;
+  // Las Pinturas on the title: the selected ride's row, as main last sent it.
+  private paintState: { preview: number; equipped: number; owned: ReadonlySet<number>; bank: number } | null = null;
+  private paintsFor: VehicleId | null = null; // which ride the swatch buttons were built for
+  private paintsEl: HTMLElement;
+  private paintStateEl: HTMLElement;
   private goTitleEl: HTMLElement;
-  private goBadge: HTMLElement;
-  private goClose: HTMLElement;
+  private goStampEl: HTMLElement;
   private goPointsLabel: HTMLElement;
   private goPoints: HTMLElement;
-  private goDistLabel: HTMLElement;
-  private goDist: HTMLElement;
-  private goRecLabel: HTMLElement;
-  private goRec: HTMLElement;
-  private goPlatLabel: HTMLElement;
-  private goPlat: HTMLElement;
+  private goBestEl: HTMLElement;
+  private gdCaptionEl: HTMLElement;
+  private gdRunEl: HTMLElement;
+  private gdGoalEl: HTMLElement;
+  private gdFillEl: HTMLElement;
+  private goBreakEl: HTMLElement;
+  private goMandaosEl: HTMLElement;
+  private gpSwatchEl: HTMLElement;
+  private gpEarnedEl: HTMLElement;
+  private gpTextEl: HTMLElement;
+  private gpFillEl: HTMLElement;
   private btnAgain: HTMLElement;
   private btnMenu: HTMLElement;
   private btnShare: HTMLElement;
   private pauseTitle: HTMLElement;
+  private pauseLevelEl: HTMLElement;
   private btnResume: HTMLElement;
   private btnPauseMenu: HTMLElement;
   private mandaoChipEl: HTMLElement;
   private mandaoSheetEl: HTMLElement;
-  private goFarEl: HTMLElement;
-  private goMandaosEl: HTMLElement;
-  private goEarnedEl: HTMLElement;
   private pauseMandaosEl: HTMLElement;
+  // The share card's photo: the game frame at the crash, cropped around
+  // the rider. Taken by captureScene; cleared when a new run starts.
+  private snap: HTMLCanvasElement | null = null;
+  private snapReady = false;
+  // The barrio level that multiplied the run on the card (a level won this
+  // run pays from the next one), for the share card's honest level line.
+  private shareLevel = { idx: 0, mult: 1 };
   private toastEl: HTMLElement;
   private toastKickerEl: HTMLElement;
   private toastTextEl: HTMLElement;
@@ -511,50 +574,75 @@ export class UI {
         <button id="mute" class="chip chip-mute" type="button" aria-label="Sonido">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
-        <div class="logo">
-          <span class="logo-el">EL</span>
-          <span class="logo-line">CORRE</span>
-          <span class="logo-line">CORRE</span>
-          <div class="flagbar">${FLAG_SVG}</div>
+        <div class="t-top">
+          <div class="logo">
+            <span class="logo-el">EL</span>
+            <span class="logo-line">CORRE</span>
+            <span class="logo-line">CORRE</span>
+            <div class="flagbar">${FLAG_SVG}</div>
+          </div>
+          <div id="subtitle" class="subtitle"></div>
         </div>
-        <div id="subtitle" class="subtitle"></div>
-        <div id="vrow" class="vrow">${statBars()}</div>
-        <div id="prompt" class="prompt"></div>
-        <div id="controls" class="controls">
-          <span id="ctrl-steer"></span>
-          <span id="ctrl-trick"></span>
-          <span id="ctrl-throttle"></span>
+        <div id="vpick" class="vpick">
+          <div class="vtabs" role="tablist">${rideTabsHtml()}</div>
+          <div id="vdetail" class="vdetail" role="tabpanel">
+            <div class="vd-stats">
+              <div class="vd-stat"><span class="vd-label" data-stat="vel"></span><span class="vd-pips" data-pips="vel">${PIPS}</span></div>
+              <div class="vd-stat"><span class="vd-label" data-stat="man"></span><span class="vd-pips" data-pips="man">${PIPS}</span></div>
+              <div class="vd-stat"><span class="vd-label" data-stat="agu"></span><span class="vd-pips" data-pips="agu">${PIPS}</span></div>
+            </div>
+            <div class="vd-foot"><span id="vd-tag" class="vd-tag"></span><span id="vd-rec" class="vd-rec"></span></div>
+          </div>
+          <div id="hint" class="hint"></div>
         </div>
-        <div id="title-record" class="title-record"></div>
+        <div id="t-paints" class="t-paints">
+          <div id="paints" class="paints"></div>
+          <div id="paint-state" class="paint-state" aria-live="polite"></div>
+        </div>
+        <div class="t-cta">
+          <div id="prompt" class="prompt"></div>
+        </div>
         <div class="title-chips">
           <div id="title-bank" class="title-bank">${BANANA_SVG}<span id="bank-n">0</span></div>
-          <button id="mandao-chip" class="mandao-chip" type="button"></button>
+          <button id="mandao-chip" class="mandao-chip" type="button" aria-haspopup="dialog"></button>
         </div>
-        <div id="mandao-sheet" class="mandao-sheet hidden">
+        <div id="mandao-sheet" class="mandao-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="md-title">
           <div class="md-card">
-            <div id="md-title" class="md-title"></div>
+            <button id="md-close" class="md-x" type="button">${CLOSE_SVG}</button>
+            <div id="md-title" class="md-kicker"></div>
             <div id="md-level" class="md-level"></div>
-            <ul id="md-list" class="md-list"></ul>
-            <div id="md-close" class="md-close"></div>
+            <div id="md-mult" class="md-mult"></div>
+            <ul id="md-list" class="md-list md-sheet-rows"></ul>
           </div>
         </div>
       </div>
       <div id="gameover" class="screen hidden">
-        <div class="card">
+        <div class="go-card card">
+          <div id="go-stamp" class="go-stamp hidden"></div>
           <div id="go-title" class="go-title"></div>
-          <div id="go-new" class="badge hidden"></div>
-          <div id="go-close" class="close-call hidden"></div>
-          <div id="go-tour" class="go-tour"></div>
-          <div id="go-points-label" class="go-points-label"></div>
-          <div id="go-points" class="go-points">0</div>
-          <div id="go-far" class="go-far hidden"></div>
-          <div class="go-rows">
-            <div><span id="go-dist-label"></span><b id="go-dist"></b></div>
-            <div><span id="go-rec-label"></span><b id="go-rec"></b></div>
-            <div><span id="go-plat-label"></span><b id="go-plat"></b></div>
+          <div class="go-score">
+            <b id="go-points" class="go-points">0</b>
+            <span class="go-sub"><span id="go-points-label" class="go-points-label"></span><span id="go-best" class="go-best"></span></span>
           </div>
-          <ul id="go-mandaos" class="md-list md-compact"></ul>
-          <div id="go-earned" class="go-earned"></div>
+          <div id="go-dist" class="go-dist">
+            <div id="gd-caption" class="gd-caption"></div>
+            <div class="gd-row">
+              <span id="gd-run" class="gd-run"></span>
+              <span class="gd-bar"><b id="gd-fill"></b></span>
+              <span id="gd-goal" class="gd-goal"></span>
+            </div>
+          </div>
+          <div id="go-break" class="go-break"></div>
+          <ul id="go-mandaos" class="md-list md-card-rows"></ul>
+          <div id="go-plat" class="go-plat">
+            <i id="gp-swatch" class="gp-swatch"></i>
+            <div class="gp-body">
+              <div class="gp-top"><b id="gp-earned" class="gp-earned"></b><span class="gp-bar"><b id="gp-fill"></b></span></div>
+              <span id="gp-text" class="gp-text"></span>
+            </div>
+          </div>
+        </div>
+        <div class="go-actions">
           <button id="btn-again" class="btn-big" type="button"></button>
           <div class="btn-row">
             <button id="btn-menu" class="btn-mid" type="button"></button>
@@ -567,7 +655,10 @@ export class UI {
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
         <div id="pause-title" class="pause-title"></div>
-        <ul id="pause-mandaos" class="md-list md-pause"></ul>
+        <div class="pause-card">
+          <div id="pause-level" class="pause-level"></div>
+          <ul id="pause-mandaos" class="md-list md-card-rows"></ul>
+        </div>
         <div class="pause-btns">
           <button id="btn-resume" class="btn-big" type="button"></button>
           <button id="btn-pause-menu" class="btn-mid" type="button"></button>
@@ -593,41 +684,42 @@ export class UI {
     this.pedalSpeedEl = q('#pedal-speed');
     this.pedalKmhEl = q('#pedal-kmh');
     this.pedalGasEl.classList.toggle('hint', !this.pedalSeen);
-    this.ctrlThrottleEl = q('#ctrl-throttle');
     this.platEl = q('#plat-n');
     this.multEl = q('#hud-mult');
     this.hudRecordEl = q('#hud-record');
     this.subtitleEl = q('#subtitle');
     this.promptEl = q('#prompt');
-    this.ctrlSteerEl = q('#ctrl-steer');
-    this.ctrlTrickEl = q('#ctrl-trick');
-    this.titleRecordEl = q('#title-record');
+    this.hintEl = q('#hint');
     this.langBtn = q('#lang');
     this.muteBtn = q('#mute');
     this.mutePauseBtn = q('#mute-pause');
     this.pauseBtn = q('#hud-pause');
+    this.paintsEl = q('#paints');
+    this.paintStateEl = q('#paint-state');
     this.goTitleEl = q('#go-title');
-    this.goBadge = q('#go-new');
-    this.goClose = q('#go-close');
+    this.goStampEl = q('#go-stamp');
     this.goPointsLabel = q('#go-points-label');
     this.goPoints = q('#go-points');
-    this.goDistLabel = q('#go-dist-label');
-    this.goDist = q('#go-dist');
-    this.goRecLabel = q('#go-rec-label');
-    this.goRec = q('#go-rec');
-    this.goPlatLabel = q('#go-plat-label');
-    this.goPlat = q('#go-plat');
+    this.goBestEl = q('#go-best');
+    this.gdCaptionEl = q('#gd-caption');
+    this.gdRunEl = q('#gd-run');
+    this.gdGoalEl = q('#gd-goal');
+    this.gdFillEl = q('#gd-fill');
+    this.goBreakEl = q('#go-break');
+    this.goMandaosEl = q('#go-mandaos');
+    this.gpSwatchEl = q('#gp-swatch');
+    this.gpEarnedEl = q('#gp-earned');
+    this.gpTextEl = q('#gp-text');
+    this.gpFillEl = q('#gp-fill');
     this.btnAgain = q('#btn-again');
     this.btnMenu = q('#btn-menu');
     this.btnShare = q('#btn-share');
     this.pauseTitle = q('#pause-title');
+    this.pauseLevelEl = q('#pause-level');
     this.btnResume = q('#btn-resume');
     this.btnPauseMenu = q('#btn-pause-menu');
     this.mandaoChipEl = q('#mandao-chip');
     this.mandaoSheetEl = q('#mandao-sheet');
-    this.goFarEl = q('#go-far');
-    this.goMandaosEl = q('#go-mandaos');
-    this.goEarnedEl = q('#go-earned');
     this.pauseMandaosEl = q('#pause-mandaos');
     this.toastEl = q('#mandao-toast');
     this.toastKickerEl = q('#mandao-toast-kicker');
@@ -667,25 +759,21 @@ export class UI {
       e.stopPropagation();
       this.cb.onToggleMute();
     });
-    for (const card of root.querySelectorAll<HTMLElement>('.vcard')) {
-      card.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        this.cb.onSelectVehicle(card.dataset.v as VehicleId);
-      });
-      // The pintura cycler lives inside the card but must not re-select the
-      // vehicle. On an unselected card any tap just selects that vehicle.
-      const guard = (e: Event, fn: () => void): void => {
-        e.stopPropagation();
-        if (card.dataset.v !== this.selectedVehicle) {
-          this.cb.onSelectVehicle(card.dataset.v as VehicleId);
-          return;
-        }
-        fn();
-      };
-      card.querySelector('.pc-prev')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaCycle(-1)));
-      card.querySelector('.pc-next')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaCycle(1)));
-      card.querySelector('.pc-swatch')?.addEventListener('pointerdown', (e) => guard(e, () => this.cb.onPinturaTap()));
+    // The ride picker, the paint row and the footer swallow every tap, even
+    // one that misses a control by a hair: a near miss never starts a run.
+    for (const zone of root.querySelectorAll<HTMLElement>('#vpick, #t-paints, .title-chips')) {
+      zone.addEventListener('pointerdown', (e) => e.stopPropagation());
     }
+    for (const tab of root.querySelectorAll<HTMLElement>('.vtab')) {
+      tab.addEventListener('pointerdown', () => {
+        if (tab.dataset.v !== this.selectedVehicle) this.cb.onSelectVehicle(tab.dataset.v as VehicleId);
+      });
+    }
+    // One listener for the swatches, which are rebuilt per ride.
+    this.paintsEl.addEventListener('pointerdown', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('.paint');
+      if (btn) this.cb.onPinturaPick(Number(btn.dataset.i));
+    });
     this.gameover.addEventListener('pointerdown', () => this.cb.onRestart());
     this.btnMenu.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -713,6 +801,9 @@ export class UI {
     this.mandaoSheetEl.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.mandaoSheetEl.classList.add('hidden');
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape') this.mandaoSheetEl.classList.add('hidden');
     });
     this.toastEl.addEventListener('animationend', () => {
       this.toastBusy = false;
@@ -878,6 +969,7 @@ export class UI {
 
   private toggleLang(): void {
     this.lang = this.lang === 'es' ? 'en' : 'es';
+    numLocale = this.lang === 'en' ? 'en-US' : 'es-DO';
     try {
       localStorage.setItem(LANG_KEY, this.lang);
     } catch {
@@ -901,77 +993,105 @@ export class UI {
     this.pedalGasEl.querySelector('.pedal-label')!.textContent = t.pedalGas;
     this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = this.brakeHotShown ? t.pedalBrakeHot : t.pedalBrake;
     this.subtitleEl.textContent = t.subtitle;
-    const touch = this.inputMode === 'touch';
-    this.ctrlThrottleEl.textContent = touch ? t.ctrlThrottleTouch : t.ctrlThrottleKey;
-    this.promptEl.textContent = touch ? t.startTouch : t.startKey;
-    const trick = this.selectedVehicle === 'civic' ? t.trickCar : t.trickBike;
-    this.ctrlSteerEl.textContent = touch ? t.ctrlSteerTouch : t.ctrlSteerKey;
-    this.ctrlTrickEl.textContent = touch ? t.ctrlTrickTouch(trick) : t.ctrlTrickKey(trick);
-    this.titleRecordEl.textContent =
-      this.lastRecord > 0 ? `${t.record}: ${this.lastRecord}` : '';
+    this.promptEl.textContent = this.inputMode === 'touch' ? t.startTouch : t.startKey;
     this.hudRecordEl.textContent =
       this.lastRecord > 0 ? `${t.record.toUpperCase()} ${this.lastRecord}` : '';
     this.recordKey = Number.NaN; // the run's countdown rewrites it on its next tick
     if (this.mandaoView) this.setMandaos(this.mandaoView);
+    for (const el of this.title.querySelectorAll<HTMLElement>('.vd-label')) {
+      const k = el.dataset.stat;
+      el.textContent = k === 'vel' ? t.statVel : k === 'man' ? t.statMan : t.statAgu;
+    }
+    this.renderRide();
+    if (this.paintState) this.renderPaints();
+    this.mandaoSheetEl.querySelector('#md-close')!.setAttribute('aria-label', t.ariaClose);
     this.goPointsLabel.textContent = t.points.toUpperCase();
-    this.goDistLabel.textContent = `${t.distance} `;
-    this.goRecLabel.textContent = `${t.record} `;
-    this.goPlatLabel.textContent = `${t.platanos} `;
     this.btnAgain.textContent = t.again;
     this.btnMenu.textContent = t.menu;
     this.btnShare.textContent = t.share;
-    this.goBadge.textContent = t.newRecord;
     this.pauseTitle.textContent = t.pause;
     this.btnResume.textContent = t.resumeBtn;
     this.btnPauseMenu.textContent = t.menu;
     if (this.lastResult) {
       this.goTitleEl.textContent = t.gameOverTitles[this.goTitleIdx];
     }
-    // Relabel the card records directly rather than calling updateVehicles:
-    // that also rewrites ctrlTrickEl, which this method has just set.
-    if (this.lastRecords) {
-      for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
-        const id = card.dataset.v as VehicleId;
-        const rec = card.querySelector<HTMLElement>(`[data-rec="${id}"]`);
-        if (rec) rec.textContent = this.lastRecords[id] > 0 ? `${t.record} ${this.lastRecords[id]}` : '';
-      }
-    }
   }
 
-  // Las Pinturas: the cycler on the selected card shows one paint at a
-  // time. The chip's label carries the state: nothing (equipped), PONER
-  // (owned, tap to wear it), or the price (locked, tap to buy).
-  updatePinturaCycle(state: { hex: number; owned: boolean; equipped: boolean; price: number; bank: number }): void {
-    this.setBank(state.bank);
+  // Las Pinturas: one row of swatches for the selected ride. Tap one to
+  // preview it on the bike; tap the previewed one again to wear it (owned)
+  // or buy it (locked). The line under the row speaks for the previewed one.
+  updatePinturas(state: { preview: number; equipped: number; owned: ReadonlySet<number>; bank: number }): void {
+    this.paintState = state;
+    this.renderPaints();
+  }
+
+  private renderPaints(): void {
+    const st = this.paintState;
+    if (!st) return;
     const t = this.t();
-    for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
-      const mine = card.dataset.v === this.selectedVehicle;
-      card.classList.toggle('show-paints', mine);
-      if (!mine) continue;
-      const swatch = card.querySelector<HTMLElement>('.pc-swatch');
-      const label = card.querySelector<HTMLElement>('.pc-label');
-      if (!swatch || !label) continue;
-      swatch.style.background = `#${state.hex.toString(16).padStart(6, '0')}`;
-      swatch.classList.toggle('equip', state.equipped);
-      swatch.classList.toggle('locked', !state.owned);
-      label.classList.toggle('poor', !state.owned && state.bank < state.price);
-      if (state.equipped) label.textContent = '';
-      else if (state.owned) label.textContent = t.pinturaEquip;
-      else label.innerHTML = `${state.price} ${BANANA_SVG}`;
+    const v = this.selectedVehicle;
+    const list = PINTURAS[v];
+    if (this.paintsFor !== v || this.paintsEl.children.length !== list.length) {
+      this.paintsFor = v;
+      this.paintsEl.innerHTML = list
+        .map((_, i) => `<button class="paint" type="button" data-i="${i}"><i class="paint-chip"><span class="paint-badge"></span></i><span class="paint-price"></span></button>`)
+        .join('');
     }
+    list.forEach((p, i) => {
+      const b = this.paintsEl.children[i] as HTMLElement;
+      const owned = st.owned.has(i);
+      const chip = b.querySelector<HTMLElement>('.paint-chip')!;
+      chip.style.background = hexCss(p.hex);
+      b.querySelector<HTMLElement>('.paint-badge')!.innerHTML = !owned ? LOCK_SVG : i === st.equipped ? CHECK_SVG : '';
+      b.classList.toggle('locked', !owned);
+      b.classList.toggle('afford', !owned && st.bank >= p.price);
+      b.classList.toggle('equipped', i === st.equipped);
+      b.classList.toggle('preview', i === st.preview);
+      b.setAttribute('aria-pressed', String(i === st.preview));
+      b.setAttribute('aria-label', owned ? t.paintOwned(p.name) : t.paintLocked(p.name, p.price));
+      b.querySelector<HTMLElement>('.paint-price')!.innerHTML = owned ? '' : `${fmtN(p.price)}${BANANA_SVG}`;
+    });
+    const p = list[st.preview];
+    const owned = st.owned.has(st.preview);
+    let text: string;
+    let cls = '';
+    // Wearing the equipped paint while the wallet already covers another:
+    // say so, since that is the reason to look at the row at all.
+    const afford = list.some((q, i) => !st.owned.has(i) && st.bank >= q.price);
+    if (st.preview === st.equipped && afford) {
+      text = t.paintAfford;
+      cls = 'act';
+    } else if (st.preview === st.equipped) {
+      text = t.paintWearing(p.name);
+    } else if (owned) {
+      text = t.paintUse(p.name);
+      cls = 'act';
+    } else if (st.bank >= p.price) {
+      text = t.paintBuy(p.name);
+      cls = 'act';
+    } else {
+      text = `${p.name} · ${t.paintNeed(p.price - st.bank)}`;
+      cls = 'poor';
+    }
+    this.paintStateEl.textContent = text;
+    this.paintStateEl.className = `paint-state ${cls}`;
+    this.setBank(st.bank);
   }
 
   setBank(n: number): void {
     const el = document.getElementById('bank-n');
-    if (el) el.textContent = String(n);
+    if (el) el.textContent = fmtN(n);
   }
 
+  // A buy the bank cannot cover: the reason is already on the line under the
+  // swatches, so that line and the wallet shake together.
   flashBank(): void {
-    const chip = document.getElementById('title-bank');
-    if (!chip) return;
-    chip.classList.remove('deny');
-    void chip.offsetWidth; // restart the animation
-    chip.classList.add('deny');
+    for (const el of [document.getElementById('title-bank'), this.paintStateEl]) {
+      if (!el) continue;
+      el.classList.remove('deny');
+      void el.offsetWidth; // restart the animation
+      el.classList.add('deny');
+    }
   }
 
   popupPintura(): void {
@@ -983,20 +1103,37 @@ export class UI {
     this.lastRecords = records;
     const t = this.t();
     this.cabEl.textContent = selected === 'civic' ? t.trickPillCar : t.trickPillBike;
-    const trick = selected === 'civic' ? t.trickCar : t.trickBike;
-    this.ctrlTrickEl.textContent =
-      this.inputMode === 'touch' ? t.ctrlTrickTouch(trick) : t.ctrlTrickKey(trick);
-    for (const card of document.querySelectorAll<HTMLElement>('.vcard')) {
-      const id = card.dataset.v as VehicleId;
-      card.classList.toggle('sel', id === selected);
-      const rec = card.querySelector<HTMLElement>(`[data-rec="${id}"]`)!;
-      // empty when no record yet; .vc-rec min-height keeps the card from shifting
-      rec.textContent = records[id] > 0 ? `${t.record} ${records[id]}` : '';
+    this.renderRide();
+  }
+
+  // The selected ride: its tab filled, its stats, tagline, own récord, and
+  // the hint line (caballito or derrape).
+  private renderRide(): void {
+    const t = this.t();
+    const id = this.selectedVehicle;
+    const v = VEHICLES[id];
+    for (const tab of this.title.querySelectorAll<HTMLElement>('.vtab')) {
+      const on = tab.dataset.v === id;
+      tab.classList.toggle('sel', on);
+      tab.setAttribute('aria-selected', String(on));
     }
+    for (const pips of this.title.querySelectorAll<HTMLElement>('.vd-pips')) {
+      const k = pips.dataset.pips as keyof typeof v.stats;
+      const n = v.stats[k];
+      pips.querySelectorAll('i').forEach((el, i) => el.classList.toggle('on', i < n));
+      pips.setAttribute('role', 'img');
+      pips.setAttribute('aria-label', `${n} / 5`);
+    }
+    this.title.querySelector('#vd-tag')!.textContent = v.tagline;
+    const rec = this.lastRecords?.[id] ?? 0;
+    this.title.querySelector('#vd-rec')!.textContent = rec > 0 ? t.rideRecord(rec) : t.rideNoRecord;
+    const trick = id === 'civic' ? t.trickCar : t.trickBike;
+    this.hintEl.textContent = this.inputMode === 'touch' ? t.hintTouch(trick) : t.hintKey(trick);
   }
 
   showTitle(record: number): void {
     this.lastRecord = record;
+    this.stopCountUp();
     this.mandaoSheetEl.classList.add('hidden');
     this.hideCountdown();
     this.applyLang();
@@ -1013,6 +1150,8 @@ export class UI {
 
   showPlaying(record: number): void {
     this.lastRecord = record;
+    this.stopCountUp();
+    this.snapReady = false; // the share photo belongs to the run that just ended
     this.setBrakeHeat(0, false);
     this.hideCountdown();
     this.applyLang();
@@ -1041,39 +1180,82 @@ export class UI {
     this.pause.classList.add('hidden');
   }
 
-  // The card: the run, the records it chased, the mandaos it moved and the
-  // plátanos it earned toward the next pintura. Every line is plain text a
-  // restyle can move around; the data comes in whole.
+  // The game-over card, top of the screen so the tumble below it stays in
+  // view, with OTRA VEZ on its own in the thumb zone. Top to bottom: the
+  // title, the points (counting up), the record stamp, the distance bar
+  // toward La Cinta (or LA META), what paid, the mandaos (stamped when this
+  // run finished them), and the plátanos toward the next pintura.
   showGameOver(r: RunResult, mandaos: MandaosView, pintura: PinturaGoal | null): void {
     const t = this.t();
+    this.stopCountUp();
     this.lastResult = r;
     this.lastRecord = r.record;
     this.goTitleIdx = Math.floor(Math.random() * t.gameOverTitles.length);
     this.goTitleEl.textContent = t.gameOverTitles[this.goTitleIdx];
-    this.goPoints.textContent = String(r.points);
-    this.goDist.textContent = `${r.distanceM} m`;
-    this.goRec.textContent = String(r.record);
-    this.goPlat.textContent = String(r.platanos);
-    this.goBadge.classList.toggle('hidden', !r.isNewRecord);
-    this.goClose.classList.toggle('hidden', r.closeCall === null);
-    if (r.closeCall !== null) this.goClose.textContent = t.closeCall(r.closeCall);
-    // La Cinta fell but the points record did not: say so, in meters.
+
+    // ¡NUEVO RÉCORD! is points; ¡MÁS LEJOS QUE NUNCA! is La Cinta alone.
     const far = r.isNewDistRecord && !r.isNewRecord;
-    this.goFarEl.classList.toggle('hidden', !far);
-    if (far) this.goFarEl.textContent = t.farLine(r.distanceM);
-    this.goMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, true);
-    this.goEarnedEl.innerHTML =
-      `<b>${t.earned(r.platanosEarned)}</b>` +
-      (pintura ? `<span>${pintura.need > 0 ? t.pinturaNeed(pintura.need, pintura.name) : t.pinturaReady(pintura.name)}</span>` : '');
-    // The tour's own close-call: how far you got, or how close the next
-    // stretch was. Runs that stayed home get a target, not a shrug.
-    const tour = document.getElementById('go-tour');
-    if (tour) {
-      tour.textContent =
-        r.tramo !== 'malecon'
-          ? t.reachedTramo(t.tramoNames[r.tramo])
-          : t.nextTramoIn(t.tramoNames[nextTramoAfter(r.distanceM)], Math.round(nextBorderIn(r.distanceM)));
+    this.goStampEl.classList.toggle('hidden', !r.isNewRecord && !far);
+    this.goStampEl.classList.toggle('far', far);
+    this.goStampEl.textContent = r.isNewRecord ? t.newRecord : far ? t.farRecord : '';
+    this.goBestEl.textContent =
+      r.isNewRecord ? (r.prevRecord > 0 ? t.overBest(r.points - r.prevRecord) : '') : t.bestLine(r.record);
+    this.countUp(r.points);
+    const runLevel = mandaos.lastSet ? Math.max(0, mandaos.level - 1) : mandaos.level;
+    this.shareLevel = { idx: Math.min(runLevel, t.levelNames.length - 1), mult: barrioMultFor(runLevel) };
+
+    // The distance bar, in meters, toward the tape this run chased.
+    const goalM = r.prevRecordDist > 0 ? r.prevRecordDist : CONFIG.goalTapeM;
+    const reached = r.distanceM >= goalM;
+    const short = goalM - r.distanceM;
+    const close = !reached && short <= Math.max(CONFIG.soCloseMinM, goalM * CONFIG.soCloseShare);
+    this.gdRunEl.textContent = `${fmtN(r.distanceM)} m`;
+    this.gdGoalEl.textContent = t.distEnd(r.prevRecordDist > 0 ? t.tapeRecord : t.goalTape, goalM);
+    this.gdCaptionEl.textContent = reached
+      ? r.prevRecordDist > 0
+        ? t.pastRecord(r.distanceM - goalM)
+        : t.goalReached
+      : close
+        ? t.closeCall(short)
+        : '';
+    this.gdCaptionEl.className = `gd-caption${reached ? ' won' : close ? ' close' : ''}`;
+    const dist = this.gdFillEl.parentElement!.parentElement!.parentElement!;
+    dist.classList.toggle('reached', reached);
+    dist.classList.toggle('near', !reached && r.distanceM >= goalM * 0.95);
+    this.animateBar(this.gdFillEl, 0, Math.min(1, r.distanceM / goalM));
+
+    // What paid: the brave play, in one row.
+    this.goBreakEl.innerHTML =
+      `<span><b>×${fmtN(r.bestCombo)}</b> ${t.bdCombo}</span>` +
+      `<span><b>${fmtN(r.nearMisses)}</b> ${t.bdNear(r.nearMisses)}</span>` +
+      `<span><b>${fmtN(r.cvMeters)} m</b> ${t.bdCv}</span>`;
+
+    // Los Mandaos: bars fill from where the run found them; the ones this
+    // run finished get the stamp.
+    this.goMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, 'card');
+    this.goMandaosEl.classList.toggle('leveled', mandaos.lastSet !== null);
+    this.goBreakEl.classList.toggle('hidden', mandaos.lastSet !== null); // the level-up line takes its row
+    this.kickBars(this.goMandaosEl);
+
+    // Plátanos: what this run put in the bank, and how far that is toward
+    // the next pintura for this ride.
+    this.gpEarnedEl.textContent = t.earned(r.platanosEarned);
+    this.gpSwatchEl.parentElement!.classList.toggle('all', !pintura);
+    this.gpSwatchEl.classList.toggle('hidden', !pintura);
+    if (pintura) {
+      // need is what the bank still lacks, so the bank is price - need
+      // (or the full price and more once it is 0: the bar is full then).
+      const bank = pintura.price - pintura.need;
+      this.gpSwatchEl.style.background = hexCss(PINTURAS[this.selectedVehicle][pintura.index].hex);
+      this.gpTextEl.textContent = pintura.need > 0 ? t.pinturaNeed(pintura.need, pintura.name) : t.pinturaReady(pintura.name);
+      this.animateBar(this.gpFillEl, (bank - r.platanosEarned) / pintura.price, bank / pintura.price);
+    } else {
+      this.gpTextEl.textContent = t.pinturaAll;
+      this.animateBar(this.gpFillEl, 1, 1);
     }
+    // A paint is waiting on the title: MENÚ glows.
+    this.btnMenu.classList.toggle('glow', pintura !== null && pintura.need === 0);
+
     this.gameover.classList.remove('hidden');
     this.hud.classList.add('hidden');
     this.setContraVia(false);
@@ -1083,8 +1265,52 @@ export class UI {
     this.setPedalLive(false);
   }
 
+  // 0 to the run's points over countUpMs, eased out. A timer rather than
+  // requestAnimationFrame: it must land even where frames are held (a
+  // backgrounded tab, the screenshot rig). Reduced motion shows the total.
+  private countTimer = 0;
+
+  private countUp(to: number): void {
+    const el = this.goPoints;
+    if (reducedMotion.matches || to <= 0) {
+      el.textContent = fmtN(to);
+      return;
+    }
+    const t0 = performance.now();
+    const step = (): void => {
+      const k = Math.min(1, (performance.now() - t0) / CONFIG.countUpMs);
+      el.textContent = fmtN(Math.round(to * easeOutCubic(k)));
+      this.countTimer = k < 1 ? window.setTimeout(step, 16) : 0;
+    };
+    step();
+  }
+
+  private stopCountUp(): void {
+    if (this.countTimer) window.clearTimeout(this.countTimer);
+    this.countTimer = 0;
+  }
+
+  // A fill bar from one fraction to another; the CSS transition eases it.
+  private animateBar(el: HTMLElement, from: number, to: number): void {
+    const f = Math.max(0, Math.min(1, from));
+    el.style.transition = 'none';
+    el.style.transform = `scaleX(${f})`;
+    void el.offsetWidth;
+    el.style.transition = '';
+    el.style.transform = `scaleX(${Math.max(0, Math.min(1, to))})`;
+  }
+
+  // Every bar in a freshly written list, from its data-from to its data-to.
+  private kickBars(list: HTMLElement): void {
+    for (const b of list.querySelectorAll<HTMLElement>('.md-bar b')) {
+      this.animateBar(b, Number(b.dataset.from), Number(b.dataset.to));
+    }
+  }
+
   showPause(mandaos: MandaosView): void {
-    this.pauseMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, false);
+    const t = this.t();
+    this.pauseLevelEl.textContent = `${t.levelHead(mandaos.level, t.levelNames[mandaos.levelNameIdx])} · ${fmtBarrio(mandaos.mult)}`;
+    this.pauseMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, 'pause');
     this.hideCountdown();
     this.pause.classList.remove('hidden');
     this.setPedalLive(false);
@@ -1251,26 +1477,44 @@ export class UI {
     return m.tutorial || !mandaoPerRun(m.kind) ? base : base + t.perRun;
   }
 
-  // "7/10", or a check once done. Meters and seconds count down to whole units.
-  mandaoProgress(m: Mandao): string {
-    return m.done ? '✓' : `${fmtN(m.progress)}/${fmtN(m.target)}`;
+  // "7/10" while open. Meters and seconds count down to whole units; a done
+  // row shows a drawn check instead (the font has no check glyph).
+  private mandaoProgressHtml(m: Mandao): string {
+    return m.done ? CHECK_SVG : `${fmtN(m.progress)}/${fmtN(m.target)}`;
   }
 
-  private mandaoRowHtml(m: Mandao, tag: string): string {
-    const cls = `md-row${m.done ? ' done' : ''}${m.justDone ? ' just' : ''}${tag ? ' md-daily' : ''}`;
+  // One row: the goal, its count and a bar. Where the bar starts depends on
+  // the screen: the card fills it from where this run found it (0 for a
+  // per-run goal, the banked base for a lifetime one) and stamps a row this
+  // run finished; the sheet adds the reward.
+  private mandaoRowHtml(m: Mandao, tag: string, mode: 'card' | 'pause' | 'sheet', stampIdx: number): string {
+    const t = this.t();
+    const to = m.done ? 1 : Math.min(1, m.progress / Math.max(1, m.target));
+    const settled = mode !== 'card' || (m.done && !m.justDone);
+    const from = settled ? to : mandaoPerRun(m.kind) ? 0 : Math.min(1, m.base / Math.max(1, m.target));
+    const just = mode === 'card' && m.justDone;
+    const cls = `md-row${m.done ? ' done' : ''}${just ? ' just' : ''}${tag ? ' md-daily' : ''}`;
     const tagHtml = tag ? `<span class="md-tag">${tag}</span>` : '';
-    return `<li class="${cls}">${tagHtml}<span class="md-text">${this.mandaoText(m)}</span><b class="md-prog">${this.mandaoProgress(m)}</b></li>`;
+    const reward = mode === 'sheet' ? `<span class="md-reward">+${fmtN(m.reward)}${BANANA_SVG}</span>` : '';
+    const stamp = just ? `<span class="md-stamp" style="--i:${stampIdx}">${t.stamp}</span>` : '';
+    return (
+      `<li class="${cls}">${tagHtml}<span class="md-text">${this.mandaoText(m)}</span>` +
+      `<b class="md-prog">${this.mandaoProgressHtml(m)}</b>` +
+      `<span class="md-track"><span class="md-bar"><b data-from="${from}" data-to="${to}" style="transform:scaleX(${to})"></b></span>${reward}</span>` +
+      `${stamp}</li>`
+    );
   }
 
   // The three mandaos (the finished set, if this run leveled up) plus the
   // daily, as list items. The card adds the level-up line.
-  private mandaoRowsHtml(v: MandaosView, card: boolean): string {
+  private mandaoRowsHtml(v: MandaosView, mode: 'card' | 'pause'): string {
     const t = this.t();
     const rows = v.lastSet ?? v.set;
     let html = '';
-    for (const m of rows) html += this.mandaoRowHtml(m, '');
-    html += this.mandaoRowHtml(v.daily, t.dailyTag);
-    if (card && v.lastSet) {
+    let stampIdx = 0;
+    for (const m of rows) html += this.mandaoRowHtml(m, '', mode, m.justDone ? stampIdx++ : 0);
+    html += this.mandaoRowHtml(v.daily, t.dailyTag, mode, stampIdx);
+    if (mode === 'card' && v.lastSet) {
       html += `<li class="md-levelup">${t.levelUp(t.levelNames[v.levelNameIdx], fmtBarrio(v.mult))}</li>`;
     }
     return html;
@@ -1284,20 +1528,22 @@ export class UI {
     if (!this.mandaoSheetEl.classList.contains('hidden')) this.openMandaos();
   }
 
+  // The sheet: the level and its multiplier up top, the three mandaos with
+  // bars and rewards, then the daily with its streak.
   private openMandaos(): void {
     const v = this.mandaoView;
     if (!v) return;
     const t = this.t();
     const q = (sel: string): HTMLElement => this.mandaoSheetEl.querySelector(sel)!;
     q('#md-title').textContent = t.mandaos;
-    q('#md-level').textContent = t.levelLine(v.level, t.levelNames[v.levelNameIdx], fmtBarrio(v.mult));
+    q('#md-level').textContent = t.levelHead(v.level, t.levelNames[v.levelNameIdx]);
+    q('#md-mult').textContent = t.multPill(fmtBarrio(v.mult));
     let html = '';
-    for (const m of v.set) html += this.mandaoRowHtml(m, '');
-    html += `<li class="md-head">${t.dailyTitle}</li>`;
-    html += this.mandaoRowHtml(v.daily, t.dailyTag);
-    if (v.streak > 0) html += `<li class="md-streak">${t.streak(v.streak)}</li>`;
+    for (const m of v.set) html += this.mandaoRowHtml(m, '', 'sheet', 0);
+    const streak = v.streak > 0 ? `<span class="md-streak">${t.streak(v.streak)}</span>` : '';
+    html += `<li class="md-head"><span>${t.dailyTitle}</span>${streak}</li>`;
+    html += this.mandaoRowHtml(v.daily, t.dailyTag, 'sheet', 0);
     q('#md-list').innerHTML = html;
-    q('#md-close').textContent = t.closeHint;
     this.mandaoSheetEl.classList.remove('hidden');
   }
 
@@ -1455,11 +1701,242 @@ export class UI {
 
   // ---------------- share card ----------------
 
+  // The share card's photo: the game frame, cropped to the band around the
+  // rider. main calls this right after a render, in the same task, while the
+  // WebGL drawing buffer is still intact (no preserveDrawingBuffer needed).
+  captureScene(src: HTMLCanvasElement): void {
+    const W = src.width;
+    const H = src.height;
+    if (!W || !H) return;
+    const c = this.snap ?? document.createElement('canvas');
+    this.snap = c;
+    c.width = SNAP_W;
+    c.height = SNAP_H;
+    const g = c.getContext('2d');
+    if (!g) return;
+    const aspect = SNAP_W / SNAP_H;
+    const ch = Math.min(H * 0.62, W / aspect);
+    const cw = ch * aspect;
+    // The rider sits a little below the middle in every framing.
+    const cy = Math.min(H - ch / 2, Math.max(ch / 2, H * 0.64));
+    g.drawImage(src, (W - cw) / 2, cy - ch / 2, cw, ch, 0, 0, SNAP_W, SNAP_H);
+    this.snapReady = true;
+  }
+
+  // The card itself, 1080 x 1350 (4:5, what a chat thumbnail shows whole):
+  // the logo and the flag, the crash in a framed photo, the points over its
+  // lower edge, then the run, the ride and its barrio level, and the ask.
+  private drawShareCard(r: RunResult): HTMLCanvasElement {
+    const t = this.t();
+    const veh = VEHICLES[this.selectedVehicle];
+    const c = document.createElement('canvas');
+    c.width = 1080;
+    c.height = 1350;
+    const g = c.getContext('2d')!;
+    const FONT = '"Lilita One", sans-serif';
+
+    const bg = g.createLinearGradient(0, 0, 0, 1350);
+    bg.addColorStop(0, '#6ec6e6');
+    bg.addColorStop(0.42, '#ffd9a0');
+    bg.addColorStop(1, '#fff3c4');
+    g.fillStyle = bg;
+    g.fillRect(0, 0, 1080, 1350);
+    // a low sun behind the logo, like the title screen at golden hour
+    g.fillStyle = 'rgba(255,243,196,0.45)';
+    g.beginPath();
+    g.arc(880, 236, 150, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff3c4';
+    g.beginPath();
+    g.arc(880, 236, 96, 0, Math.PI * 2);
+    g.fill();
+
+    const stroked = (text: string, x: number, y: number, size: number, fill: string, stroke: string, strokeW: number, maxW = 1000): void => {
+      g.font = `${size}px ${FONT}`;
+      let s = size;
+      while (g.measureText(text).width > maxW && s > 20) {
+        s -= 2;
+        g.font = `${s}px ${FONT}`;
+      }
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineJoin = 'round';
+      if (strokeW > 0) {
+        g.lineWidth = strokeW;
+        g.strokeStyle = stroke;
+        g.strokeText(text, x, y);
+      }
+      g.fillStyle = fill;
+      g.fillText(text, x, y);
+    };
+    const plate = (text: string, cx: number, cy: number, size: number, fill: string, ink: string, rot: number): void => {
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(rot);
+      g.font = `${size}px ${FONT}`;
+      const w = g.measureText(text).width + size * 1.1;
+      const h = size * 1.55;
+      g.fillStyle = 'rgba(0,45,98,0.35)';
+      g.beginPath();
+      g.roundRect(-w / 2, -h / 2 + 8, w, h, h * 0.3);
+      g.fill();
+      g.fillStyle = fill;
+      g.beginPath();
+      g.roundRect(-w / 2, -h / 2, w, h, h * 0.3);
+      g.fill();
+      stroked(text, 0, 2, size, ink, ink, 0);
+      g.restore();
+    };
+
+    // The logo, stacked and leaning like the title's, and la bandera.
+    g.save();
+    g.translate(540, 0);
+    g.rotate(-0.03);
+    g.fillStyle = '#002d62';
+    g.beginPath();
+    g.roundRect(-64, 44, 128, 58, 14);
+    g.fill();
+    stroked('EL', 0, 75, 42, '#ffffff', '#002d62', 0);
+    stroked('CORRE', 0, 168, 116, '#ffffff', '#002d62', 16);
+    stroked('CORRE', 0, 274, 116, '#ffffff', '#002d62', 16);
+    g.restore();
+    const flagW = 104;
+    g.save();
+    g.shadowColor = 'rgba(0,45,98,0.35)';
+    g.shadowOffsetY = 4;
+    drawDominicanFlag(g, 540 - flagW / 2, 334, flagW);
+    g.restore();
+
+    // The photo: the crash itself, or the golden-hour Malecón when no frame
+    // was caught. Framed like the in-game cards: blue border, hard shadow.
+    const fx = 80;
+    const fy = 428;
+    const fw = 920;
+    const fh = 560;
+    g.fillStyle = 'rgba(0,45,98,0.35)';
+    g.beginPath();
+    g.roundRect(fx - 10, fy - 10 + 14, fw + 20, fh + 20, 42);
+    g.fill();
+    g.fillStyle = '#002d62';
+    g.beginPath();
+    g.roundRect(fx - 10, fy - 10, fw + 20, fh + 20, 42);
+    g.fill();
+    g.save();
+    g.beginPath();
+    g.roundRect(fx, fy, fw, fh, 32);
+    g.clip();
+    if (this.snap && this.snapReady) g.drawImage(this.snap, fx, fy, fw, fh);
+    else this.drawMalecon(g, fx, fy, fw, fh);
+    // a soft shade at the bottom, so the points read over any frame
+    const shade = g.createLinearGradient(0, fy + fh * 0.6, 0, fy + fh);
+    shade.addColorStop(0, 'rgba(0,45,98,0)');
+    shade.addColorStop(1, 'rgba(0,45,98,0.45)');
+    g.fillStyle = shade;
+    g.fillRect(fx, fy + fh * 0.6, fw, fh * 0.4);
+    g.restore();
+
+    // ¡NUEVO RÉCORD! is the points record; La Cinta alone earns the blue
+    // ¡MÁS LEJOS QUE NUNCA!. Stuck on the photo's corner like a sticker.
+    if (r.isNewRecord) plate(t.newRecord, 770, fy + 8, 46, '#ce1126', '#ffffff', -0.07);
+    else if (r.isNewDistRecord) plate(t.farRecord, 700, fy + 8, 42, '#002d62', '#ffffff', -0.07);
+
+    // The points, big, over the photo's lower edge. Its baseline sits high
+    // enough that a comma's tail clears the PUNTOS label.
+    const pts = fmtN(r.points);
+    let size = 196;
+    g.font = `${size}px ${FONT}`;
+    while (g.measureText(pts).width > 900 && size > 90) {
+      size -= 10;
+      g.font = `${size}px ${FONT}`;
+    }
+    const py = fy + fh - 12;
+    g.save();
+    g.translate(0, 10);
+    stroked(pts, 540, py, size, 'rgba(0,45,98,0.35)', 'rgba(0,45,98,0.35)', 26);
+    g.restore();
+    stroked(pts, 540, py, size, '#ffffff', '#002d62', 26);
+    stroked(t.points.toUpperCase(), 540, 1106, 32, '#002d62', '#002d62', 0);
+
+    // The ride and where it got, the run, and the barrio level that
+    // multiplied it: honest numbers for the group chat.
+    const where = r.tramo !== 'malecon' ? t.inVehicleReached(veh.name, t.tramoNames[r.tramo]) : t.inVehicle(veh.name);
+    stroked(where, 540, 1160, 46, '#002d62', '#002d62', 0, 980);
+    stroked(t.shareStats(r.distanceM, r.platanos), 540, 1212, 38, '#0e7490', '#0e7490', 0);
+    const lv = this.shareLevel;
+    plate(t.shareLevel(t.levelNames[lv.idx], fmtBarrio(lv.mult)), 540, 1264, 28, '#f4c430', '#002d62', 0);
+    // The ask stays small: the score does the talking.
+    const askY = SHARE_URL ? 1306 : 1314;
+    stroked(t.shareAsk, 540, askY, 30, '#0e7490', '#0e7490', 0);
+    if (SHARE_URL) stroked(SHARE_URL, 540, 1338, 22, '#002d62', '#002d62', 0);
+    return c;
+  }
+
+  // The fallback photo: the Malecón at golden hour from behind the rider.
+  // Sea on the left behind its seawall, the road down the middle, the
+  // sidewalk and pastel fronts on the right. The road never meets the sea.
+  private drawMalecon(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const hy = y + h * 0.44; // horizon
+    const vx = x + w * 0.5; // vanishing point
+    const sky = g.createLinearGradient(0, y, 0, hy);
+    sky.addColorStop(0, '#6ec6e6');
+    sky.addColorStop(1, '#ffd9a0');
+    g.fillStyle = sky;
+    g.fillRect(x, y, w, hy - y);
+    g.fillStyle = '#fff3c4';
+    g.beginPath();
+    g.arc(x + w * 0.24, hy - h * 0.08, h * 0.1, 0, Math.PI * 2);
+    g.fill();
+    const tri = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number, fill: string): void => {
+      g.fillStyle = fill;
+      g.beginPath();
+      g.moveTo(ax, ay);
+      g.lineTo(bx, by);
+      g.lineTo(cx, cy);
+      g.lineTo(dx, dy);
+      g.closePath();
+      g.fill();
+    };
+    const by = y + h; // bottom
+    // sea, then the seawall walk, then the road, then the far sidewalk
+    tri(x, hy, vx - 6, hy, x - w * 0.9, by, x, by, '#17a2b8');
+    tri(vx - 6, hy, vx - 3, hy, x + w * 0.02, by, x - w * 0.9, by, '#d9c7a7');
+    tri(vx - 3, hy, vx + 3, hy, x + w * 0.98, by, x + w * 0.02, by, '#3e3a38');
+    tri(vx + 3, hy, x + w, hy, x + w, by, x + w * 0.98, by, '#d9c7a7');
+    // pastel fronts on the right, shrinking toward the horizon
+    const pastels = ['#ffd3b6', '#a8e6cf', '#ff8b94', '#ffeaa7', '#b3d9ff', '#cdb4db'];
+    for (let i = 0; i < 6; i++) {
+      const k = 1 - i / 6.5;
+      const bx0 = vx + 8 + (w * 0.5 - 8) * k;
+      const bw = w * 0.1 * k;
+      const bh = h * 0.3 * k;
+      g.fillStyle = pastels[i];
+      g.fillRect(bx0 - bw, hy - bh, bw, bh + h * 0.02);
+    }
+    // the double yellow line and the white dashes
+    g.strokeStyle = '#f4c430';
+    g.lineWidth = 6;
+    for (const dx of [-7, 7]) {
+      g.beginPath();
+      g.moveTo(vx, hy);
+      g.lineTo(x + w * 0.5 + dx, by);
+      g.stroke();
+    }
+    g.strokeStyle = '#f2e9dc';
+    g.lineWidth = 5;
+    g.setLineDash([26, 30]);
+    for (const k of [0.25, 0.75]) {
+      g.beginPath();
+      g.moveTo(vx, hy);
+      g.lineTo(x + w * 0.02 + w * 0.96 * k, by);
+      g.stroke();
+    }
+    g.setLineDash([]);
+  }
+
   // Draws the card and hands it to share.ts (the native sheet in the app,
   // Web Share or a download on the web).
   async shareCard(r: RunResult): Promise<ShareResult> {
     const t = this.t();
-    const veh = VEHICLES[this.selectedVehicle];
     // Awaited, not requested, here: the font was warmed at boot so this
     // resolves immediately and iOS still sees navigator.share as a prompt
     // response rather than a late async call.
@@ -1468,130 +1945,7 @@ export class UI {
     } catch {
       // draw with whatever we have
     }
-    const c = document.createElement('canvas');
-    c.width = 1080;
-    c.height = 1350;
-    const g = c.getContext('2d')!;
-
-    const sky = g.createLinearGradient(0, 0, 0, 1350);
-    sky.addColorStop(0, '#6ec6e6');
-    sky.addColorStop(0.52, '#ffd9a0');
-    sky.addColorStop(0.7, '#ffe9bc');
-    sky.addColorStop(1, '#17a2b8');
-    g.fillStyle = sky;
-    g.fillRect(0, 0, 1080, 1350);
-
-    g.fillStyle = 'rgba(255,243,196,0.55)';
-    g.beginPath();
-    g.arc(830, 760, 200, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#fff3c4';
-    g.beginPath();
-    g.arc(830, 760, 130, 0, Math.PI * 2);
-    g.fill();
-
-    g.fillStyle = '#17a2b8';
-    g.fillRect(0, 900, 1080, 450);
-    g.fillStyle = 'rgba(255,255,255,0.35)';
-    for (let i = 0; i < 60; i++) {
-      g.fillRect(Math.random() * 1080, 910 + Math.random() * 420, 10 + Math.random() * 26, 3);
-    }
-
-    // the road wedge
-    g.fillStyle = '#3e3a38';
-    g.beginPath();
-    g.moveTo(240, 1350);
-    g.lineTo(470, 900);
-    g.lineTo(610, 900);
-    g.lineTo(840, 1350);
-    g.closePath();
-    g.fill();
-    g.strokeStyle = '#f4c430';
-    g.lineWidth = 10;
-    g.setLineDash([46, 34]);
-    g.beginPath();
-    g.moveTo(540, 900);
-    g.lineTo(540, 1350);
-    g.stroke();
-    g.setLineDash([]);
-
-    const stroked = (
-      text: string,
-      x: number,
-      y: number,
-      size: number,
-      fill: string,
-      stroke: string,
-      strokeW: number,
-    ): void => {
-      g.font = `${size}px "Lilita One", sans-serif`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.lineWidth = strokeW;
-      g.lineJoin = 'round';
-      g.strokeStyle = stroke;
-      g.strokeText(text, x, y);
-      g.fillStyle = fill;
-      g.fillText(text, x, y);
-    };
-
-    g.save();
-    g.translate(540, 0);
-    g.rotate(-0.03);
-    g.fillStyle = '#002d62';
-    g.beginPath();
-    g.roundRect(-74, 92, 148, 66, 16);
-    g.fill();
-    stroked('EL', 0, 126, 48, '#ffffff', '#002d62', 0.01);
-    stroked('CORRE', 0, 226, 130, '#ffffff', '#002d62', 16);
-    stroked('CORRE', 0, 344, 130, '#ffffff', '#002d62', 16);
-    g.restore();
-
-    // La bandera under the logo, escudo and all. The three-band version this
-    // replaced read as the French flag on a group-chat thumbnail. Sized to the
-    // band between the wordmark and the ¡NUEVO RÉCORD! badge.
-    const flagW = 120;
-    g.save();
-    g.shadowColor = 'rgba(0,45,98,0.35)';
-    g.shadowBlur = 0;
-    g.shadowOffsetY = 4;
-    drawDominicanFlag(g, 540 - flagW / 2, 396, flagW);
-    g.restore();
-
-    if (r.isNewRecord) {
-      g.save();
-      g.translate(540, 520); // clears the flag above it
-      g.rotate(-0.04);
-      g.fillStyle = '#ce1126';
-      g.beginPath();
-      g.roundRect(-230, -34, 460, 68, 18);
-      g.fill();
-      stroked(t.newRecord, 0, 2, 44, '#ffffff', '#ce1126', 0.01);
-      g.restore();
-    }
-
-    stroked(t.points.toUpperCase(), 540, 585, 44, '#002d62', '#002d62', 0.01);
-    let size = 230;
-    g.font = `${size}px "Lilita One", sans-serif`;
-    while (g.measureText(String(r.points)).width > 900 && size > 90) {
-      size -= 10;
-      g.font = `${size}px "Lilita One", sans-serif`;
-    }
-    stroked(String(r.points), 540, 715, size, '#002d62', '#ffffff', 20);
-
-    stroked(
-      `${t.distance} ${r.distanceM} m   ·   ${t.platanos} ${r.platanos}`,
-      540,
-      860,
-      42,
-      '#ffffff',
-      '#002d62',
-      8,
-    );
-    const where = r.tramo !== 'malecon' ? t.inVehicleReached(veh.name, t.tramoNames[r.tramo]) : t.inVehicle(veh.name);
-    stroked(where, 540, 985, 52, '#fff3c4', '#002d62', 10);
-    stroked(t.shareAsk, 540, 1160, 74, '#ffffff', '#ce1126', 12);
-    stroked('EL CORRE CORRE', 540, 1300, 34, 'rgba(255,255,255,0.85)', '#0e7490', 6);
+    const c = this.drawShareCard(r);
 
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
     if (!blob) return 'failed';

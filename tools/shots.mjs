@@ -255,6 +255,19 @@ function helpers(page, vp) {
       return done;
     },
 
+    // A returning player: write these storage keys, then reload so the game
+    // boots on them (records, the wallet, owned paints).
+    seed: async (entries) => {
+      await page.evaluate((e) => {
+        for (const [k, v] of Object.entries(e)) localStorage.setItem(k, v);
+        sessionStorage.setItem('__shotKeep', '1');
+      }, entries);
+      await page.reload({ waitUntil: 'load', timeout: LOAD_MS });
+      await page.waitForFunction(() => window.__ecc !== undefined, { timeout: LOAD_MS });
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      await ecc('tick', 1 / 60);
+    },
+
     // Where a pedal is on screen: the centre of #pedal-gas or #pedal-brake.
     pedalAt: (which) =>
       page.evaluate((sel) => {
@@ -324,16 +337,37 @@ const SCENES = [
     what: 'Title with El Civic selected and a locked pintura previewed',
     settle: 700,
     run: async (s) => {
-      await s.ecc('selectVehicle', 'civic');
-      await s.tap('.vcard[data-v="civic"] .pc-next');
+      await s.tap('.vtab[data-v="civic"]');
+      await s.tap('.paint[data-i="1"]');
+      await s.tick(0.6);
+    },
+  },
+  {
+    id: 'title-rich',
+    what: 'A returning player: records, 1,240 plátanos, two paints owned, a buyable one previewed',
+    settle: 700,
+    run: async (s) => {
+      await s.seed({
+        'ecc.v1.platanosLifetime': '1240',
+        'ecc.v1.record.motor': '48210',
+        'ecc.v1.recordDist.motor': '1870',
+        'ecc.v1.record.pasola': '9120',
+        'ecc.v1.pinturas.motor': '1',
+        'ecc.v1.pintura.motor': '1',
+      });
+      await s.tap('.paint[data-i="2"]');
       await s.tick(0.6);
     },
   },
   {
     id: 'title-mandaos',
-    what: 'Title with the Los Mandaos list open (a first launch: tutorial set 1 and the daily)',
+    what: 'Title with the Los Mandaos list open (tutorial set 1, the daily, a 3-day streak)',
     settle: 400,
     run: async (s) => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      await s.seed({ 'ecc.v1.streak': JSON.stringify({ last: today, n: 3 }) });
       await s.tap('#mandao-chip');
       await s.tick(0.3);
     },
@@ -619,8 +653,8 @@ const SCENES = [
   },
   {
     id: 'gameover',
-    what: 'Game-over card after a 400 m run',
-    settle: 700,
+    what: 'Game-over card after a 400 m run (a first run: LA META, a mandao stamped)',
+    settle: 1500,
     run: async (s) => {
       await s.start();
       await s.rideTo(400);
@@ -632,6 +666,67 @@ const SCENES = [
       // slower car can also hold the spot for a moment (the spawner will not
       // stack one car on another), so a refused spawn is offered again while
       // the run is live.
+      let crashed = false;
+      for (let i = 0; i < 4 && !crashed; i++) {
+        try {
+          await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+        } catch (err) {
+          if (i >= 3 || (await s.ecc('state')) !== 'playing') throw err;
+          continue;
+        }
+        crashed = await s.play(2.5, "e.state() === 'crashing'");
+      }
+      if (!crashed) throw new Error('no crash');
+      if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
+    },
+  },
+  {
+    id: 'gameover-levelup',
+    what: 'Game over on the run that finished the first mandao set: three stamps and the level-up line',
+    settle: 1800,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1);
+      await s.ecc('clearTraffic');
+      const x = await s.ecc('x');
+      for (let i = 0; i < 10; i++) await s.ecc('spawnPickup', 'platano', x, 8 + i * 2.2);
+      await s.tick(3);
+      await s.ecc('nearMiss', 1.0);
+      await s.ecc('nearMiss', 1.0);
+      await s.rideTo(330);
+      await s.unghost();
+      await s.ecc('god', false);
+      await s.ecc('clearTraffic');
+      let crashed = false;
+      for (let i = 0; i < 4 && !crashed; i++) {
+        try {
+          await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+        } catch (err) {
+          if (i >= 3 || (await s.ecc('state')) !== 'playing') throw err;
+          continue;
+        }
+        crashed = await s.play(2.5, "e.state() === 'crashing'");
+      }
+      if (!crashed) throw new Error('no crash');
+      if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
+      if (!(await s.ecc('mandaos')).lastSet) throw new Error('the set did not finish');
+    },
+  },
+  {
+    id: 'gameover-far',
+    what: 'Game over for a returning player: La Cinta fell (farthest ever), the points record did not',
+    settle: 1500,
+    run: async (s) => {
+      await s.seed({
+        'ecc.v1.platanosLifetime': '380',
+        'ecc.v1.record.motor': '99999',
+        'ecc.v1.recordDist.motor': '240',
+      });
+      await s.start();
+      await s.rideTo(300);
+      await s.unghost();
+      await s.ecc('god', false);
+      await s.ecc('clearTraffic');
       let crashed = false;
       for (let i = 0; i < 4 && !crashed; i++) {
         try {
@@ -895,8 +990,14 @@ function bootScript(seed, lang) {
     }
   };
   try {
-    localStorage.clear(); // every scene starts as a first launch
-    if (lang === 'en') localStorage.setItem('ecc.v1.lang', 'en');
+    // Every scene starts as a first launch, unless it reloaded itself with
+    // seeded storage (s.seed), which marks the reload in sessionStorage.
+    if (sessionStorage.getItem('__shotKeep')) {
+      sessionStorage.removeItem('__shotKeep');
+    } else {
+      localStorage.clear();
+      if (lang === 'en') localStorage.setItem('ecc.v1.lang', 'en');
+    }
   } catch {
     // fine
   }
