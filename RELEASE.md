@@ -60,8 +60,9 @@ are done in wave 4; 5 and 6 are still open.
    2026). Not published. Publishing is a push to the public
    `el-corre-corre-site` repo: ask Adelson first, then fetch the live URL and
    diff it against `site/privacy.html`.
-6. **In-app privacy link.** Owner decision, needed before App Store review
-   (not before TestFlight). See "Open decisions".
+6. **In-app privacy link.** Done: PAUSA ends with a "Privacidad" / "Privacy"
+   link that opens the privacy URL in Safari (Capacitor hands `window.open`
+   to the system).
 7. **Icon alpha.** Done: `tools/make-icons.mjs` writes RGB and stops on any
    non-opaque pixel; `sips -g hasAlpha` prints no for the icons and splash.
 
@@ -175,8 +176,8 @@ device test covers them. On Adelson's iPhone:
 
 ## App Store submission (version 1.0)
 
-Needs: build 10 checked on the iPhone, the privacy page current, the in-app
-privacy link decided, the screenshots made.
+Needs: build 10 checked on the iPhone, the privacy page published and
+current, the screenshots made.
 
 1. App Information, es-MX then en-US: Name, Subtitle, Privacy Policy URL.
    Category Games > Racing, secondary Games > Arcade. Content Rights: no
@@ -213,25 +214,14 @@ Controls: drag anywhere to steer. The two pedals at the bottom left are GAS (fas
 Missions (Los Mandaos) are in-game goals in sets of three, plus one daily goal. Paint jobs are bought only with plantains collected in runs or earned from missions. There is no real money anywhere.
 SHARE on the game-over card opens the iOS share sheet with an image of the run. The game sends nothing by itself.
 Spanish is the default. Tap EN at the top right of the title screen for English.
+The privacy policy link is on the pause screen: start a run, tap the pause button at the top left, then Privacy.
 ```
-
-If the in-app privacy link ships, add one line that says where it is.
 
 ## Open decisions (Adelson)
 
-1. **In-app privacy link** (Guideline 5.1.1(i): "within the app in an easily
-   accessible manner"). Both options keep the game offline:
-   - (A) A "Privacidad" / "Privacy" text link in the title footer or on the
-     pause screen that opens the privacy URL in Safari. It needs a
-     connection, and a `target=_blank` link must be checked to leave the
-     Capacitor web view.
-   - (B) An offline privacy card from the same spot with the policy's short
-     ES and EN paragraphs and the URL as text. It works in airplane mode and
-     adds one screen to keep in step with the site.
-   Either way: ES and EN strings, a 44x44 tap target, no overlap at 375x667.
-2. **Digital Services Act:** trader or non-trader (step 5 above).
-3. **Version release:** manual or automatic (step 9 above).
-4. **Share link:** `SHARE_URL` in `src/ui.ts` is empty, so the share card
+1. **Digital Services Act:** trader or non-trader (step 5 above).
+2. **Version release:** manual or automatic (step 9 above).
+3. **Share link:** `SHARE_URL` in `src/ui.ts` is empty, so the share card
    has no URL footer.
 
 ## After launch (roadmap lives in CLAUDE.md and docs/audit/PLAN.md)

@@ -82,9 +82,9 @@ the photo purpose string in ES and EN (`68fc5c6`), build number 10, the old
 archives moved to `ios/App/build-archive/` so `npx cap sync ios` exits 0, the
 `__ecc` rig gated out of the release bundle (section 4.1), the privacy page
 updated in `site/` (not pushed yet), opaque RGB icons, and the 6.9-inch
-screenshot sets in `docs/store/screenshots/{es,en}`. Still open: the in-app
-privacy link (owner decision, RELEASE.md "Open decisions") and publishing
-the privacy page.
+screenshot sets in `docs/store/screenshots/{es,en}`, and the in-app privacy
+link (a "Privacidad" / "Privacy" link at the bottom of PAUSA that opens the
+site page in Safari). Still open: publishing the privacy page.
 
 ---
 
@@ -612,19 +612,21 @@ commit, update PLAYTEST.md and memory, push when Adelson says so.
 ## 11. Open items after the next-level pass
 
 Owner decisions (Adelson):
-1. The in-app privacy policy link (Guideline 5.1.1(i)): a link to the site,
-   or an offline privacy card. RELEASE.md has both options.
-2. `SHARE_URL` in `ui.ts` is empty, so the share card has no URL footer.
-3. Whether the leaderboard and the share card show points with the barrio
-   multiplier (they do now).
-4. A sound and a haptic on the ¡HECHO! stamp slam (none now).
-5. A title showroom camera (the title uses the chase camera now).
-6. The Digital Services Act trader status and the new age-rating answers in
+1. `SHARE_URL` in `ui.ts` is empty, so the share card has no URL footer.
+   Natural choice once the game is live: the App Store link.
+2. Whether the leaderboard and the share card show points with the barrio
+   multiplier (they do now; the share card prints the level line).
+3. The Digital Services Act trader status and the new age-rating answers in
    App Store Connect.
 
-Engineering (wave 4 and after): the build-10 prerequisites in section 1, the
-App Store screenshot set (STORE.md), a 10-minute soak of this build, the
-device checks in RELEASE.md, and a VoiceOver pass. Post-launch roadmap:
+Done in wave 4 (formerly open): the ¡HECHO! stamp plays a soft thump and a
+light haptic; the title camera pulls back per ride so the ride clears the
+paint tray; the in-app privacy link; the 10-minute soak (heap +0.37 MB over
+9 min, DOM and listeners flat, 0 errors); the 6.9-inch store screenshots.
+
+Engineering still open: the device checks in RELEASE.md (launch alive with
+the console, share sheet, save mirror, edge deferral, haptics, audio by
+ear) and a VoiceOver pass. Post-launch roadmap:
 CLAUDE.md, plus PLAN.md decision 6 (revive ring, pursuer, night mode,
 weather and the rest).
 
