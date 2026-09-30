@@ -858,8 +858,8 @@ let testGod = false;
     traffic.debugSpawnPickup(kind, x, z, y),
   spawnObstacle: (kind: ObstacleKind, x: number, z: number) =>
     traffic.debugSpawnObstacle(kind, x, z),
-  spawnVehicle: (type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number) =>
-    traffic.debugSpawnVehicle(type, lane, z, dir, exactX),
+  spawnVehicle: (type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number, speed?: number) =>
+    traffic.debugSpawnVehicle(type, lane, z, dir, exactX, speed),
   // Empty the road mid-run, so a scene can stage its own traffic.
   clearTraffic: () => traffic.reset(),
   // Run one set piece now (announced ones pop their name).

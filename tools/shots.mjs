@@ -348,7 +348,9 @@ const SCENES = [
       // near-miss has to be a dodge: sit on each car's line, step out late.
       for (let i = 0; i < 6; i++) {
         const lane = i % 2 ? 3 : 2;
-        await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, 30 + i * 24, -1, lane === 2 ? 1.7 : 5.1);
+        // fixed speeds (each type's top speed), so the pass timing holds
+        // whatever the RNG draws
+        await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, 30 + i * 24, -1, lane === 2 ? 1.7 : 5.1, i === 2 ? 11 : 14);
       }
       const onLine = 'ax < 3.4 ? ax + 0.6 : ax - 0.6';
       const dodge = 'ax < 3.4 ? ax + 1.8 : ax - 1.8';
@@ -578,7 +580,7 @@ const SCENES = [
       const zs = [30, 54, 78, 102, 126, 150];
       for (let i = 0; i < zs.length; i++) {
         const lane = i % 2 ? 3 : 2;
-        await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, zs[i], -1, lane === 2 ? 1.7 : 5.1);
+        await s.spawn(i === 2 ? 'guagua' : 'sedan', lane, zs[i], -1, lane === 2 ? 1.7 : 5.1, i === 2 ? 11 : 14);
       }
       const onLine = 'ax < 3.4 ? ax + 0.6 : ax - 0.6';
       const dodge = 'ax < 3.4 ? ax + 1.8 : ax - 1.8';
