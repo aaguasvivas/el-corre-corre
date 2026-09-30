@@ -102,6 +102,7 @@ function helpers(page, vp) {
     );
 
   const s = {
+    page,
     ecc,
     tick: (sec) => ecc('tick', sec),
     down: (x, y) => touch('pointerdown', x, y),
@@ -286,6 +287,29 @@ function helpers(page, vp) {
 // 'finish' to jump every finite animation to its end (clean gameplay shots).
 // ---------------------------------------------------------------------------
 
+// Clip the rear corner of a slower car: a dead-center rear-end buries the
+// bike in the trunk, a corner hit leaves the tumble in the open.
+async function crashSetup(s, ride = 'motor') {
+  if (ride !== 'motor') await s.ecc('selectVehicle', ride);
+  await s.start(false);
+  await s.tick(2);
+  await s.ecc('clearTraffic');
+  await s.spawn('sedan', 1, 7, 1, (await s.ecc('x')) + 1.2);
+  if (!(await s.tickUntil("e.state() === 'crashing'", 5, 1 / 60))) throw new Error('no crash');
+}
+
+// Hold the full-screen flash at `ms` into its fade, whatever the wall clock did.
+async function poseFlash(s, ms) {
+  await s.page.evaluate((t) => {
+    for (const a of document.getAnimations()) {
+      if (a.effect?.target?.id === 'flash') {
+        a.pause();
+        a.currentTime = t;
+      }
+    }
+  }, ms);
+}
+
 const SCENES = [
   {
     id: 'title',
@@ -448,6 +472,19 @@ const SCENES = [
     },
   },
   {
+    id: 'brake-hot',
+    what: 'El freno caliente: FRENO held past 2 s, ¡CALIENTE! and smoke off the rear wheel',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(4);
+      const p = await s.pedalAt('brake');
+      await s.down(p.x, p.y);
+      if (!(await s.tickUntil('e.brakeHeat().hot', 4, 1 / 20))) throw new Error('the pads never cooked');
+      await s.tick(0.4);
+    },
+  },
+  {
     id: 'zona',
     what: 'La Zona Colonial, 300 m past the border',
     settle: 'finish',
@@ -507,20 +544,54 @@ const SCENES = [
       await s.tick(1 / 60);
     },
   },
+  // The crash at three moments: the impact frame (white flash, the killer
+  // lit), mid tumble (the rider in the air, off the ride), and the card
+  // landing over the rider lying under the stars.
+  {
+    id: 'crash-impact',
+    what: 'Crash, the impact frame: white flash, the car that hit you lit',
+    settle: 0,
+    run: async (s) => {
+      await crashSetup(s);
+      await s.tick(1 / 60);
+      await poseFlash(s, 40);
+    },
+  },
   {
     id: 'crash',
     what: 'Crash, mid tumble in the slow-mo',
-    settle: 60,
+    settle: 0,
     run: async (s) => {
-      await s.start(false);
-      await s.tick(2);
-      await s.ecc('clearTraffic');
-      // Clip the rear corner of a slower car: a dead-center rear-end buries
-      // the bike in the trunk, a corner hit leaves the tumble in the open.
-      await s.spawn('sedan', 1, 7, 1, (await s.ecc('x')) + 1.2);
-      if (!(await s.play(5, "e.state() === 'crashing'"))) throw new Error('no crash');
-      // the card lands 0.5 s into the slow-mo; this is the last moment before it
-      await s.play(0.4);
+      await crashSetup(s);
+      await s.play(0.22, 'false', 1 / 60);
+    },
+  },
+  {
+    id: 'crash-civic',
+    what: 'Crash in El Civic: el tiguere flies out of the sunroof, the car slews',
+    settle: 0,
+    run: async (s) => {
+      await crashSetup(s, 'civic');
+      await s.play(0.22, 'false', 1 / 60);
+    },
+  },
+  {
+    id: 'crash-pasola',
+    what: 'Crash on La Pasola, mid tumble',
+    settle: 0,
+    run: async (s) => {
+      await crashSetup(s, 'pasola');
+      await s.play(0.22, 'false', 1 / 60);
+    },
+  },
+  {
+    id: 'crash-card',
+    what: 'Crash, the card just landed over the tumble',
+    settle: 250,
+    run: async (s) => {
+      await crashSetup(s);
+      if (!(await s.play(1, "e.state() === 'gameover'", 1 / 60))) throw new Error('no game over');
+      await s.play(0.25, 'false', 1 / 60);
     },
   },
   {
@@ -561,6 +632,21 @@ const SCENES = [
       await s.tick(3);
       await s.tap('#hud-pause');
       await s.tick(0);
+    },
+  },
+
+  {
+    id: 'resume',
+    what: 'SEGUIR: the resume countdown, world frozen',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(3);
+      await s.tap('#hud-pause');
+      await s.tick(0);
+      await s.tap('#btn-resume');
+      await s.tick(0.6);
+      if ((await s.ecc('state')) !== 'countdown') throw new Error('no countdown');
     },
   },
 

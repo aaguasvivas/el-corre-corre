@@ -422,7 +422,7 @@ body {
   border: 4px solid var(--blue);
   border-radius: 22px;
   box-shadow: 0 10px 0 rgba(0, 45, 98, 0.35);
-  animation: cardin 0.18s ease-out;
+  animation: cardin 0.14s ease-out;
 }
 
 @keyframes cardin {
@@ -730,6 +730,43 @@ body {
 
 .pedal-brake .pedal-tread {
   background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 0 5px, transparent 5px 11px);
+}
+
+/* el freno caliente: heat fills FRENO from the bottom while it bites
+   (--heat, 0..1, written by ui.setBrakeHeat) */
+.pedal-heat {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px 12px 9px 9px;
+  background: linear-gradient(to top, var(--red), #ff8c42);
+  transform-origin: bottom;
+  transform: scaleY(var(--heat, 0));
+  opacity: 0.85;
+  transition: transform 80ms linear;
+}
+
+/* overheated: the pads are cooked, the pedal pulses hot and says so */
+.pedal-brake.hot {
+  border-color: #ffd23f;
+  animation: pedal-hot 0.36s ease-in-out infinite alternate;
+}
+
+.pedal-brake.hot .pedal-heat {
+  opacity: 1;
+}
+
+.pedal-brake.hot .pedal-label {
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+@keyframes pedal-hot {
+  from {
+    box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 4px rgba(255, 140, 66, 0.5);
+  }
+  to {
+    box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 16px rgba(255, 90, 40, 0.95);
+  }
 }
 
 .pedal-gas {
@@ -1155,6 +1192,83 @@ body {
 
 #banner.show {
   animation: banner-pop 1.8s ease forwards;
+}
+
+/* The resume countdown (3, 2, 1, ¡DALE!). Minimal: WP-E styles it. */
+#countdown {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(56px, 10vh, 88px);
+  color: var(--white);
+  -webkit-text-stroke: 3px var(--blue);
+  paint-order: stroke fill;
+  text-shadow: 0 6px 0 rgba(0, 45, 98, 0.35);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#countdown.beat {
+  animation: countdown-beat 0.5s ease-out forwards;
+}
+
+#countdown.go {
+  color: var(--sun);
+  -webkit-text-stroke-color: var(--red);
+  animation: countdown-go 0.45s ease-out forwards;
+}
+
+@keyframes countdown-beat {
+  from {
+    transform: translate(-50%, -50%) scale(1.35);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(0.92);
+    opacity: 0.85;
+  }
+}
+
+@keyframes countdown-go {
+  from {
+    transform: translate(-50%, -50%) scale(0.7);
+    opacity: 1;
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(1.1);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.2);
+    opacity: 0;
+  }
+}
+
+/* A full-screen flash: white on the crash's impact frame, gold on a
+   Bendición save. ui.flash sets the color, the peak and the fade. */
+#flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#flash.go {
+  animation: flash-fade 150ms ease-out forwards;
+}
+
+@keyframes flash-fade {
+  from {
+    opacity: var(--flash-a, 0.35);
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 /* Arriving in a new tramo. Deliberately not the record banner's red stroke:

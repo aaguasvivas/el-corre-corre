@@ -1,6 +1,8 @@
 // main.ts: bootstrap, render loop, resize, and the game state machine.
-// Fixed-timestep simulation (feel is framerate independent); the crash
-// slow-mo simply scales how fast real time feeds the accumulator.
+// Every rendered frame advances the sim by exactly its real dt, split into
+// equal substeps of at most CONFIG.fixedDt (framerate independent, no fixed
+// accumulator judder). The crash slow-mo, the impact frame and the micro
+// time-dips only scale how much sim time a frame feeds in.
 
 import './style.css';
 import '@fontsource/lilita-one';
@@ -8,16 +10,26 @@ import * as THREE from 'three';
 import { CONFIG, PINTURAS, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
-import { Traffic, type ObstacleKind, type PickupKind, type SetPieceKind, type StepCtx, type VehicleType } from './traffic';
+import {
+  Traffic,
+  type ObstacleKind,
+  type PickupKind,
+  type SetPieceKind,
+  type StepCtx,
+  type VehicleHit,
+  type VehicleType,
+} from './traffic';
 import { Score, nextPintura, type RunResult } from './score';
 import { Missions, type Completion } from './missions';
 import { tramoFor } from './tour';
 import { UI } from './ui';
 import { AudioEngine, type AudioUpdateCtx } from './audio';
 import { haptics } from './haptics';
+import { BrakeHeat } from './brakeHeat';
 import { submitScore } from './leaderboard';
 
-type GameState = 'title' | 'playing' | 'paused' | 'crashing' | 'gameover';
+// countdown: the 3, 2, 1 after SEGUIR, world frozen (resumeCountdownSec).
+type GameState = 'title' | 'playing' | 'paused' | 'countdown' | 'crashing' | 'gameover';
 
 const DEG = Math.PI / 180;
 const VEH_KEY = 'ecc.v1.vehicle';
@@ -101,8 +113,6 @@ let cafMult = 1; // eased cafecito speed factor: entry and exit glide instead of
 let imanT = 0;
 let invincibleT = 0;
 let tapeBurst = false;
-let shakeT = 0;
-let shakeAmp = 0;
 let baseFov: number = CONFIG.fovDesktop;
 let lastRun: RunResult | null = null;
 let shownMult = 1;
@@ -123,11 +133,67 @@ let gasOn = false; // a fondo and paying (felt speed gate)
 let brakeOn = false; // braking and paying less
 let gasInPrev = false; // raw press edges, for the instant cues
 let brakeInPrev = false;
+// El freno caliente: the pads' heat, shared with the traffic lab's bots.
+const brakeHeat = new BrakeHeat();
+let brakeHotPrev = false;
 
-function addShake(amp: number): void {
-  shakeAmp = Math.max(shakeAmp, amp);
-  shakeT = 0.3;
+// Real seconds since boot, advanced by every frame (and by __ecc.tick), so
+// the juice timers below run on the same clock in the game and in tests.
+let realClock = 0;
+
+// Trauma camera shake (0..1). Events add trauma, it decays linearly on real
+// time, and the shake is trauma squared: see updateCamera.
+let trauma = 0;
+function addTrauma(amount: number): void {
+  trauma = Math.min(1, trauma + amount);
 }
+
+// Reduced motion: shake, FOV kicks and the steering roll shrink to
+// CONFIG.reducedMotionScale. Followed live if the setting changes.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let motionScale: number = reducedMotion.matches ? CONFIG.reducedMotionScale : 1;
+reducedMotion.addEventListener('change', (e) => {
+  motionScale = e.matches ? CONFIG.reducedMotionScale : 1;
+});
+
+// Micro time-dip: a soft hit-stop on skill peaks. dipT counts real seconds
+// into the current dip (<0 = none); dipScaleNow() eases the sim rate.
+let dipT = -1;
+let dipHold = 0;
+let lastDipAt = -Infinity;
+
+// Exposed for WP-D's razor pass too. Never in the first dipMinRunSec of a
+// run, never closer than dipMinGapMs to the last one, only while playing.
+function triggerDip(holdMs: number = CONFIG.dipHoldMs): void {
+  if (state !== 'playing' || elapsed < CONFIG.dipMinRunSec) return;
+  if (realClock - lastDipAt < CONFIG.dipMinGapMs / 1000) return;
+  lastDipAt = realClock;
+  dipT = 0;
+  dipHold = holdMs / 1000;
+}
+
+function dipScaleNow(dt: number): number {
+  if (dipT < 0) return 1;
+  const t = dipT;
+  dipT += dt;
+  if (t < dipHold) return CONFIG.dipScale;
+  const u = (t - dipHold) / (CONFIG.dipReturnMs / 1000);
+  if (u >= 1) {
+    dipT = -1;
+    return 1;
+  }
+  const ease = 1 - (1 - u) * (1 - u); // easeOutQuad
+  return CONFIG.dipScale + (1 - CONFIG.dipScale) * ease;
+}
+
+// The resume countdown, in real seconds left, and the beat on screen.
+let countdownT = 0;
+let countdownBeat = 0;
+
+// The crash: what hit you (the camera looks toward it), and how far into
+// that look the camera is.
+let killer: VehicleHit | null = null;
+let killerLook = 0;
 
 const world = new World(scene, renderer);
 const score = new Score();
@@ -290,7 +356,7 @@ const traffic = new Traffic(scene, {
     const s = w2s(x, y + 0.5, Math.max(z, 1));
     ui.popup(`+${pts}`, s.x, s.y, 'pop-sm pop-gold');
     audio.platano();
-    haptics.medium();
+    haptics.platano(score.platanos);
     missions.sample(score);
   },
   onPowerup: (kind, x, z) => {
@@ -315,7 +381,7 @@ const traffic = new Traffic(scene, {
     hoyoTimer = CONFIG.hoyoRecoverSec;
     score.hitHoyo();
     ui.setCombo(0, null);
-    addShake(CONFIG.shakeHoyo);
+    addTrauma(CONFIG.traumaHoyo);
     audio.hoyo();
     haptics.medium();
   },
@@ -339,13 +405,24 @@ const traffic = new Traffic(scene, {
 });
 
 const player = new Player(scene, {
-  isSteeringActive: () => state === 'playing',
+  // During the resume countdown the steering finger is adopted and may
+  // pre-aim; the ride only moves once the world does.
+  isSteeringActive: () => state === 'playing' || state === 'countdown',
   isReservedPointer: (id) => ui.isPedalPointer(id),
   onScrape: () => {
     scrapeTimer = CONFIG.scrapeSlowSec;
     score.resetCombo();
     ui.setCombo(0, null);
     audio.scrape();
+    addTrauma(CONFIG.traumaScrape);
+    // DECISION: medium. The scrape costs the combo and speed; a light tick
+    // would read like a reward.
+    haptics.medium();
+  },
+  onTrickReady: () => {
+    if (state !== 'playing') return;
+    player.readySpark();
+    audio.click();
   },
   onWheelieEnd: () => {
     if (state !== 'playing') return;
@@ -407,8 +484,13 @@ function resetRunState(): void {
   recordFired = false;
   recordNudged = false;
   momentT = 0;
-  shakeT = 0;
-  shakeAmp = 0;
+  trauma = 0;
+  dipT = -1;
+  killer = null;
+  killerLook = 0;
+  brakeHeat.reset();
+  brakeHotPrev = false;
+  ui.setBrakeHeat(0, false);
   shownMult = 1;
   throttleMult = 1;
   gasK = 0;
@@ -417,7 +499,6 @@ function resetRunState(): void {
   brakeOn = false;
   gasInPrev = false;
   brakeInPrev = false;
-  acc = 0;
 }
 
 function startRun(): void {
@@ -449,42 +530,91 @@ function tryRestart(): void {
   startRun();
 }
 
+// SEGUIR (or the key) never drops you straight into live traffic: the world
+// stays frozen through a 3, 2, 1 first. The pedals come back live, but a
+// finger still resting on one needs a fresh press (ui.releasePedal).
 function resume(): void {
   if (state !== 'paused') return;
-  state = 'playing';
+  state = 'countdown';
+  countdownT = CONFIG.resumeCountdownSec;
+  countdownBeat = 0;
   ui.hidePause();
-  audio.resumeRun();
   audio.click();
+  stepCountdown(0);
+}
+
+function stepCountdown(dt: number): void {
+  countdownT -= dt;
+  if (countdownT <= 0) {
+    state = 'playing';
+    ui.countdownGo();
+    audio.resumeRun(); // same run, same tramo: the groove keeps its place
+    audio.click();
+    haptics.light();
+    return;
+  }
+  const beat = Math.ceil(countdownT / (CONFIG.resumeCountdownSec / 3));
+  if (beat !== countdownBeat) {
+    countdownBeat = beat;
+    ui.showCountdown(beat);
+    if (dt > 0) audio.click();
+    haptics.tick();
+  }
 }
 
 function pauseGame(): void {
-  if (state !== 'playing') return;
+  if (state !== 'playing' && state !== 'countdown') return;
+  const wasRunning = state === 'playing';
   state = 'paused';
   score.persist();
   missions.persist(score); // a pause may be the last thing a killed app does
   ui.showPause(missions.view());
-  audio.stopRun(false);
+  if (wasRunning) audio.stopRun(false);
   audio.click();
 }
 
-function doCrash(): void {
+// hit: the vehicle that did it (null for a test crash).
+function doCrash(hit: VehicleHit | null): void {
   state = 'crashing';
   crashRealT = 0;
+  killer = hit;
+  killerLook = 0;
   ui.setPedalLive(false);
-  player.crash();
+  ui.setBrakeHeat(0, false);
+  player.setBrakeHot(false);
+  // The harder the hit, the harder the shake: closing speed maps onto
+  // traumaCrashMin..Max.
+  const closing = hit ? Math.abs(currentEff - hit.dir * hit.speed) : currentEff;
+  const [lo, hi] = CONFIG.traumaCrashSpeed;
+  const k = Math.max(0, Math.min(1, (closing - lo) / (hi - lo)));
+  addTrauma(CONFIG.traumaCrashMin + (CONFIG.traumaCrashMax - CONFIG.traumaCrashMin) * k);
+  if (hit) traffic.stopVehicle(hit);
+  const side = hit ? (player.x >= hit.x ? 1 : -1) : Math.random() < 0.5 ? 1 : -1;
+  player.crash(side, hit ? hit.group : null);
   score.setContraVia(false);
   ui.setContraVia(false);
   ui.setCaballito(false);
-  addShake(CONFIG.shakeCrash);
+  ui.flash('#ffffff', CONFIG.crashFlashAlpha, CONFIG.crashFlashMs);
   audio.stopRun(true);
   haptics.heavy();
 }
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') {
-    toggleMute();
+    if (!e.repeat) toggleMute();
     return;
   }
+  // Escape and P pause and resume, for a desktop player without a mouse.
+  if (e.code === 'Escape' || e.code === 'KeyP') {
+    if (e.repeat) return;
+    if (state === 'playing' || state === 'countdown') pauseGame();
+    else if (state === 'paused') resume();
+    return;
+  }
+  // Every key below acts on a fresh press only: a Space held through a
+  // crash must not auto-repeat through the card into the next run, and a
+  // held arrow must not spin through the rides.
+  if (e.repeat) return;
   if (state === 'title' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
     const dir = e.code === 'ArrowRight' ? 1 : -1;
     const idx = VEHICLE_ORDER.indexOf(selectedVehicle);
@@ -498,7 +628,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && state === 'playing') pauseGame();
+  if (document.hidden && (state === 'playing' || state === 'countdown')) pauseGame();
 });
 
 // Portrait framing: a tall frame gets a higher, steeper camera and follows
@@ -545,9 +675,11 @@ function stepSim(h: number): void {
   // While it burns the brake reads as released but a held gas stays primed,
   // so the speed hands back to the pedal without a dip when it ends.
   const th = state === 'playing' ? (cafecitoT > 0 ? Math.max(0, player.throttle) : player.throttle) : 0;
+  // El freno caliente: the brake bites only as much as the pads allow.
+  const brakeAuth = brakeHeat.step(h, th < 0 ? -th : 0);
   const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
   const gasRatio = Math.min(CONFIG.gasSpeedMult, ceiling);
-  const thTarget = th >= 0 ? 1 + th * (gasRatio - 1) : 1 - -th * (1 - CONFIG.brakeSpeedMult);
+  const thTarget = th >= 0 ? 1 + th * (gasRatio - 1) : 1 - -th * brakeAuth * (1 - CONFIG.brakeSpeedMult);
   const rate = thTarget < throttleMult ? CONFIG.brakeResponse : CONFIG.gasResponse;
   throttleMult += (thTarget - throttleMult) * Math.min(1, rate * h);
   if (scrapeTimer > 0) scrapeTimer = Math.max(0, scrapeTimer - h);
@@ -589,7 +721,11 @@ function stepSim(h: number): void {
   // and the cafecito never stack, and the brake still bites whenever no
   // cafecito boost is left (a plain max() with cafMult = 1 would swallow it).
   const cafCap = Math.min(cafMult, ceiling);
-  const effSpeed = speed * (1 - slow) * (throttleMult + Math.max(0, cafCap - Math.max(throttleMult, 1)));
+  // Down is down: once you crash the road scroll stops fast (real time), so
+  // the car that hit you stays in frame instead of rolling over the tumble.
+  const crashScroll = state === 'crashing' ? Math.exp(-crashRealT / CONFIG.crashScrollTau) : 1;
+  const effSpeed =
+    speed * (1 - slow) * (throttleMult + Math.max(0, cafCap - Math.max(throttleMult, 1))) * crashScroll;
   currentEff = effSpeed;
   // Felt speed drives the FOV kick and the engine: a fondo pushes past 1.
   currentNorm = Math.max(0, Math.min(1.25, (effSpeed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
@@ -613,7 +749,10 @@ function stepSim(h: number): void {
   const gasIn = live && th >= CONFIG.gasEngageAt;
   const brakeIn = live && th <= -CONFIG.gasEngageAt;
   gasOn = gasIn && !cafe && throttleMult >= 1 + 0.5 * (gasRatio - 1) - 1e-4;
-  brakeOn = brakeIn && !cafe && throttleMult < 1;
+  // DECISION: the x0.5 needs a brake you can feel (1% under cruise). Once
+  // cooked pads let the ride run back up to cruise, FRENO says ¡CALIENTE!
+  // and stops charging, instead of lighting x0.5 on a pedal that does nothing.
+  brakeOn = brakeIn && !cafe && throttleMult < 0.99;
   score.setGas(gasOn);
   score.setBrake(brakeOn);
   ui.setGas(gasOn);
@@ -624,12 +763,24 @@ function stepSim(h: number): void {
     haptics.tick();
     player.gasPuff();
   }
-  if (brakeIn && !brakeInPrev) {
+  if (brakeIn && !brakeInPrev && !brakeHeat.hot) {
     audio.brake();
     haptics.tick();
   }
   gasInPrev = gasIn;
   brakeInPrev = brakeIn;
+  // The pads cook: ¡CALIENTE! on FRENO, smoke off the rear wheel, a sizzle.
+  if (brakeHeat.hot !== brakeHotPrev) {
+    brakeHotPrev = brakeHeat.hot;
+    player.setBrakeHot(brakeHeat.hot);
+    if (brakeHeat.hot) {
+      // DECISION: the splash's hiss stands in for a sizzle until audio.ts
+      // (WP-F) has a dedicated one.
+      audio.splash();
+      haptics.medium();
+    }
+  }
+  if (live) ui.setBrakeHeat(brakeHeat.heat, brakeHeat.hot);
 
   // Mutated in place: this runs at 120 Hz, and the brief's rule is zero
   // allocations in hot loops.
@@ -666,25 +817,35 @@ function stepSim(h: number): void {
       }
     }
 
-    if (!testGod && traffic.checkCollision(player.x, 0, player.radius)) {
+    const hit = testGod ? null : traffic.hitVehicle(player.x, 0, player.radius);
+    if (hit) {
       if (cafecitoT > 0 || cafGraceT > 0 || invincibleT > 0) {
         // el cafecito: plow right through
       } else if (player.hasShield) {
+        // La Bendición takes the hit, and like a hoverboard save it clears
+        // the way: the car spins off your line with a bocinazo, and anything
+        // else on your line just ahead slides aside, so the save never
+        // turns into a second crash.
         player.useShield();
         invincibleT = CONFIG.shieldGraceSec;
-        addShake(CONFIG.shakeShield);
+        traffic.shove(hit, player.x, player.radius);
+        addTrauma(CONFIG.traumaShield);
+        ui.flash(GOLD_FLASH, CONFIG.crashFlashAlpha, 220);
+        ui.popupShieldSaved();
         audio.shieldBreak();
+        audio.horn(panOf(hit.x), 0.9);
         haptics.medium();
       } else {
-        doCrash();
+        doCrash(hit);
+        return;
       }
     }
 
     runMoments(h);
-  } else {
-    player.updateTumble(h);
   }
 }
+
+const GOLD_FLASH = '#ffd54f';
 
 // ---------------- records and mandaos ----------------
 
@@ -702,7 +863,8 @@ function runMoments(h: number): void {
     if (tapeGoal) ui.bannerGoal();
     else ui.bannerFarthest();
     audio.farthest();
-    haptics.heavy();
+    haptics.success();
+    triggerDip(CONFIG.dipRecordHoldMs);
   }
   // ¡NUEVO RÉCORD! always means points, once, the moment they pass.
   const rec = score.prevRecord;
@@ -738,8 +900,12 @@ function onNearMiss(x: number, z: number, clearance: number): void {
   ui.setCombo(r.combo, ui.ladderTierText(r.combo));
   audio.nearMiss(panOf(x), r.combo, r.razor);
   if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
+  if (hit) {
+    haptics.ladder(r.combo);
+    if (r.combo >= 5) triggerDip(); // the big tiers land with a blink of hit-stop
+  }
   if (r.razor) razorPass();
-  else haptics.light();
+  else if (!hit) haptics.light();
   missions.sample(score);
 }
 
@@ -777,36 +943,58 @@ function finishRunRecords(): RunResult {
 let camX = 0;
 let camRoll = 0;
 let camGas = 0; // gasK, smoothed: the cafecito zeroes gasK in one step
+let shakeClock = 0; // real seconds; the shake noise is sampled on it
 const lookTarget = new THREE.Vector3();
+
+// Smooth noise in -1..1 for one shake axis: two sines at incommensurate
+// frequencies, phased per axis. Smooth, never white, so it reads as a
+// camera being knocked, and it keeps its rate through the slow-mo.
+function shakeNoise(t: number, axis: number): number {
+  return 0.6 * Math.sin(t * 17.3 + axis * 1.7) + 0.4 * Math.sin(t * 23.9 + axis * 4.1);
+}
 
 function updateCamera(dt: number): void {
   const k = 1 - Math.exp(-CONFIG.camDamping * dt);
   camX += (player.x * camFollow - camX) * k;
-  camRoll += (-player.velXNorm * CONFIG.cameraRollMaxDeg * DEG - camRoll) * k;
+  camRoll += (-player.velXNorm * CONFIG.cameraRollMaxDeg * DEG * motionScale - camRoll) * k;
   camera.up.set(Math.sin(camRoll), Math.cos(camRoll), 0);
   // A fondo the bike surges away from the lens.
   camGas += (gasK - camGas) * Math.min(1, 6 * dt);
   camera.position.set(camX, camUp, -(CONFIG.camBack + CONFIG.camGasPullBack * camGas));
-  if (shakeT > 0) {
-    shakeT -= dt;
-    const kk = shakeAmp * Math.max(0, shakeT / 0.3);
-    camera.position.x += (Math.random() - 0.5) * 2 * kk;
-    camera.position.y += (Math.random() - 0.5) * 1.2 * kk;
-    if (shakeT <= 0) shakeAmp = 0;
-  }
   // FOV speed kick: velocity you can feel in your stomach. The pedal adds
   // its own kick (or a small dip on the brake) on top, at any speed.
   const kickNorm = state === 'playing' || state === 'crashing' ? currentNorm : 0;
   const targetFov =
     baseFov +
-    CONFIG.fovSpeedKick * kickNorm +
-    CONFIG.fovGasKick * camGas -
-    CONFIG.fovBrakeDip * brakeK +
-    (cafecitoT > 0 ? CONFIG.fovCafecito : 0);
+    motionScale *
+      (CONFIG.fovSpeedKick * kickNorm +
+        CONFIG.fovGasKick * camGas -
+        CONFIG.fovBrakeDip * brakeK +
+        (cafecitoT > 0 ? CONFIG.fovCafecito : 0));
   camera.fov += (targetFov - camera.fov) * Math.min(1, 4 * dt);
   camera.updateProjectionMatrix();
   lookTarget.set((camX + player.x) / 2, camLookY, CONFIG.camLookAhead);
+  // Show what hit you: the aim eases part of the way toward it.
+  if (killer && (state === 'crashing' || state === 'gameover')) {
+    killerLook = Math.min(1, killerLook + dt / CONFIG.crashCamEaseSec);
+    const w = CONFIG.crashCamToKiller * (1 - (1 - killerLook) * (1 - killerLook));
+    lookTarget.x += (killer.x - lookTarget.x) * w;
+    lookTarget.y += (0.9 - lookTarget.y) * w;
+    lookTarget.z += (killer.z - lookTarget.z) * w;
+  }
   camera.lookAt(lookTarget);
+  // Trauma shake, on top of the aim: rotation (reads well in 3D) plus a
+  // hair of translation, scaled by trauma squared.
+  shakeClock += dt;
+  if (trauma > 0) {
+    const sh = trauma * trauma * motionScale;
+    camera.position.x += sh * CONFIG.shakeMoveM * shakeNoise(shakeClock, 3);
+    camera.position.y += sh * CONFIG.shakeMoveM * shakeNoise(shakeClock, 4);
+    camera.rotateY(sh * CONFIG.shakeYawDeg * DEG * shakeNoise(shakeClock, 0));
+    camera.rotateX(sh * CONFIG.shakePitchDeg * DEG * shakeNoise(shakeClock, 1));
+    camera.rotateZ(sh * CONFIG.shakeRollDeg * DEG * shakeNoise(shakeClock, 2));
+    trauma = Math.max(0, trauma - CONFIG.traumaDecayPerSec * dt);
+  }
 }
 
 // Everything the HUD derives from live state, once per rendered frame. The
@@ -825,28 +1013,46 @@ function syncHud(): void {
 }
 
 let last = performance.now();
-let acc = 0;
 let fpsAvg = 60;
 
+// One rendered frame of real time dt. The sim gets simDt: all of it while
+// playing (less inside a micro time-dip), none on the impact frame, a crawl
+// in the crash slow-mo. It runs as equal substeps of at most fixedDt, so a
+// frame always moves the world by exactly what its real time says: no
+// fixed-step beat against the display, no judder.
 function advance(dt: number, now: number): void {
-  if (state === 'crashing') {
-    acc += dt * CONFIG.crashTimeScale;
+  realClock += dt;
+  let simDt = 0;
+  if (state === 'playing') {
+    simDt = dt * dipScaleNow(dt);
+  } else if (state === 'title') {
+    simDt = dt;
+  } else if (state === 'countdown') {
+    stepCountdown(dt);
+  } else if (state === 'crashing') {
     crashRealT += dt;
-    if (crashRealT >= CONFIG.crashSlowmoSec) {
-      state = 'gameover';
-      gameOverAt = now;
-      lastRun = finishRunRecords();
-      submitScore(lastRun.points, selectedVehicle);
-      ui.showGameOver(lastRun, missions.view(), nextPintura(selectedVehicle, ownedPinturas(selectedVehicle), score.bank));
+    // the impact frame holds the world still, then the slow-mo crawls
+    if (crashRealT > CONFIG.crashImpactSec) {
+      simDt = dt * CONFIG.crashTimeScale;
+      player.updateTumble(dt); // the tumble itself runs on real time
     }
-  } else if (state !== 'paused' && state !== 'gameover') {
-    acc += dt;
   }
-  while (acc >= CONFIG.fixedDt) {
-    stepSim(CONFIG.fixedDt);
-    acc -= CONFIG.fixedDt;
+  if (simDt > 0) {
+    const n = Math.max(1, Math.ceil(simDt / CONFIG.fixedDt - 1e-6));
+    const h = simDt / n;
+    const from = state;
+    // a crash ends the frame's sim right there: the impact frame holds
+    for (let i = 0; i < n && state === from; i++) stepSim(h);
   }
-  if (state === 'gameover') player.updateTumble(dt); // finish the flop in real time
+  if (state === 'crashing' && crashRealT >= CONFIG.crashSlowmoSec) {
+    state = 'gameover';
+    gameOverAt = now;
+    lastRun = finishRunRecords();
+    submitScore(lastRun.points, selectedVehicle);
+    ui.showGameOver(lastRun, missions.view(), nextPintura(selectedVehicle, ownedPinturas(selectedVehicle), score.bank));
+  } else if (state === 'gameover') {
+    player.updateTumble(dt); // finish the flop in real time
+  }
   player.updateFx(dt);
 }
 
@@ -953,8 +1159,23 @@ let testGod = false;
     if (state === 'title' || state === 'gameover') startRun();
   },
   crash: () => {
-    if (state === 'playing') doCrash();
+    if (state === 'playing') doCrash(null);
   },
+  // WP-G probes: el freno caliente, the time-dip, the shake, the crash.
+  brakeHeat: () => ({ heat: +brakeHeat.heat.toFixed(3), hot: brakeHeat.hot, auth: +brakeHeat.auth.toFixed(3) }),
+  dip: () => ({ active: dipT >= 0, t: dipT }),
+  triggerDip: (holdMs?: number) => triggerDip(holdMs),
+  trauma: () => +trauma.toFixed(3),
+  countdown: () => (state === 'countdown' ? +countdownT.toFixed(3) : -1),
+  crashT: () => +crashRealT.toFixed(3),
+  // Sim seconds into the run (unrounded): a frame's share of it shows the
+  // impact frame, the slow-mo, a dip, and that no frame judders.
+  simT: () => elapsed,
+  motion: () => motionScale,
+  killer: () => (killer ? { x: +killer.x.toFixed(2), z: +killer.z.toFixed(2), speed: killer.speed } : null),
+  // The resume path without tapping SEGUIR (P and Escape do the same).
+  pause: () => pauseGame(),
+  resume: () => resume(),
   god: (on: boolean) => {
     testGod = on;
   },
@@ -996,8 +1217,6 @@ let testGod = false;
   }),
   lastRun: () => lastRun,
   mandaos: () => missions.view(),
-  pause: () => pauseGame(),
-  resume: () => resume(),
   menu: () => goToMenu(),
   setDistance: (m: number) => {
     score.distance = m;

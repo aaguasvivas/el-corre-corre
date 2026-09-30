@@ -55,6 +55,9 @@ const STRINGS = {
     ctrlThrottleKey: '↑ acelera · ↓ frena',
     pedalGas: '¡DALE!',
     pedalBrake: 'FRENO',
+    pedalBrakeHot: '¡CALIENTE!', // el freno caliente: overheated pads, no brake
+    countdownGo: '¡DALE!', // the resume countdown's last beat
+    shieldSaved: '¡TE SALVÓ LA BENDICIÓN!',
     ariaGas: 'Acelerar',
     ariaBrake: 'Frenar',
     trickBike: '¡CABALLITO!',
@@ -166,6 +169,10 @@ const STRINGS = {
     ctrlThrottleKey: '↑ gas · ↓ brake',
     pedalGas: 'GAS',
     pedalBrake: 'BRAKE',
+    pedalBrakeHot: 'HOT!',
+    countdownGo: 'GO!',
+    // DECISION: the power-up keeps its name in EN, as its pickup popup does
+    shieldSaved: 'LA BENDICIÓN SAVED YOU!',
     ariaGas: 'Gas',
     ariaBrake: 'Brake',
     trickBike: 'WHEELIE!',
@@ -391,6 +398,8 @@ export class UI {
   private pause: HTMLElement;
   private vignette: HTMLElement;
   private bannerEl: HTMLElement;
+  private countdownEl: HTMLElement;
+  private flashEl: HTMLElement;
   private popups: HTMLElement[] = [];
   private scoreEl: HTMLElement;
   private comboEl: HTMLElement;
@@ -398,6 +407,8 @@ export class UI {
   private cabEl: HTMLElement;
   private gasShown = false;
   private brakeShown = false;
+  private brakeHeatShown = -1; // heat fill, in 5% steps
+  private brakeHotShown = false;
   private speedLinesShown = -1;
   // El pedal. One pointer owns the cluster; every finger that ever landed on
   // it stays reserved (never steers, never swipes) until it lifts, even
@@ -484,12 +495,14 @@ export class UI {
           <div id="pedal-speed" class="pedal-speed"><b id="pedal-kmh">0</b><span>km/h</span></div>
           <b class="pedal-mult pedal-mult-brake">${multTag(CONFIG.brakeScoreMult)}</b>
           <b class="pedal-mult pedal-mult-gas">${multTag(CONFIG.gasScoreMult)}</b>
-          <button id="pedal-brake" class="pedal pedal-brake" type="button"><i class="pedal-tread"></i><span class="pedal-label"></span></button>
+          <button id="pedal-brake" class="pedal pedal-brake" type="button"><i class="pedal-heat"></i><i class="pedal-tread"></i><span class="pedal-label"></span></button>
           <button id="pedal-gas" class="pedal pedal-gas" type="button"><i class="pedal-tread"></i><span class="pedal-label"></span></button>
         </div>
       </div>
       <div id="popup-layer"></div>
       <div id="banner"></div>
+      <div id="countdown" class="hidden"></div>
+      <div id="flash"></div>
       <div id="tramo-card"><span id="tramo-kicker"></span><span id="tramo-name"></span></div>
       <div id="mandao-toast"><span id="mandao-toast-kicker"></span><span id="mandao-toast-text"></span></div>
       <div id="title" class="screen hidden">
@@ -567,6 +580,8 @@ export class UI {
     this.pause = q('#pause');
     this.vignette = q('#vignette');
     this.bannerEl = q('#banner');
+    this.countdownEl = q('#countdown');
+    this.flashEl = q('#flash');
     this.scoreEl = q('#hud-score');
     this.comboEl = q('#hud-combo');
     this.cvEl = q('#hud-cv');
@@ -826,6 +841,22 @@ export class UI {
     this.pedalsEl.classList.toggle('brake-on', on);
   }
 
+  // El freno caliente: FRENO fills with heat while it bites, and once the
+  // pads overheat it turns into a pulsing ¡CALIENTE! until they cool.
+  // Written only when the fill moves a 5% step or the state flips.
+  setBrakeHeat(heat: number, hot: boolean): void {
+    const q = Math.round(heat * 20);
+    if (q !== this.brakeHeatShown) {
+      this.brakeHeatShown = q;
+      this.pedalBrakeEl.style.setProperty('--heat', String(q / 20));
+    }
+    if (hot === this.brakeHotShown) return;
+    this.brakeHotShown = hot;
+    this.pedalBrakeEl.classList.toggle('hot', hot);
+    const t = this.t();
+    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = hot ? t.pedalBrakeHot : t.pedalBrake;
+  }
+
   // The speedometer above the pedals, in km/h. Written only when the
   // rounded number changes.
   setSpeedKmh(kmh: number): void {
@@ -867,7 +898,7 @@ export class UI {
     this.pedalGasEl.setAttribute('aria-label', t.ariaGas);
     this.pedalBrakeEl.setAttribute('aria-label', t.ariaBrake);
     this.pedalGasEl.querySelector('.pedal-label')!.textContent = t.pedalGas;
-    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = t.pedalBrake;
+    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = this.brakeHotShown ? t.pedalBrakeHot : t.pedalBrake;
     this.subtitleEl.textContent = t.subtitle;
     const touch = this.inputMode === 'touch';
     this.ctrlThrottleEl.textContent = touch ? t.ctrlThrottleTouch : t.ctrlThrottleKey;
@@ -966,6 +997,7 @@ export class UI {
   showTitle(record: number): void {
     this.lastRecord = record;
     this.mandaoSheetEl.classList.add('hidden');
+    this.hideCountdown();
     this.applyLang();
     this.title.classList.remove('hidden');
     this.hud.classList.add('hidden');
@@ -980,6 +1012,8 @@ export class UI {
 
   showPlaying(record: number): void {
     this.lastRecord = record;
+    this.setBrakeHeat(0, false);
+    this.hideCountdown();
     this.applyLang();
     this.lastScore = -1;
     this.setScore(0);
@@ -1050,6 +1084,7 @@ export class UI {
 
   showPause(mandaos: MandaosView): void {
     this.pauseMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, false);
+    this.hideCountdown();
     this.pause.classList.remove('hidden');
     this.setPedalLive(false);
   }
@@ -1346,6 +1381,44 @@ export class UI {
 
   bannerNewRecord(): void {
     this.banner(this.t().newRecord);
+  }
+
+  // The Bendición took the hit for you.
+  popupShieldSaved(): void {
+    this.popup(this.t().shieldSaved, 50, 40, 'pop-lg pop-gold');
+  }
+
+  // The resume countdown: 3, 2, 1, then ¡DALE! as the world moves again.
+  // Minimal markup; the look is WP-E's.
+  showCountdown(n: number): void {
+    this.countdownEl.textContent = String(n);
+    this.countdownEl.classList.remove('hidden', 'go', 'beat');
+    void this.countdownEl.offsetWidth; // restart the beat animation
+    this.countdownEl.classList.add('beat');
+  }
+
+  countdownGo(): void {
+    this.countdownEl.textContent = this.t().countdownGo;
+    this.countdownEl.classList.remove('hidden', 'beat', 'go');
+    void this.countdownEl.offsetWidth;
+    this.countdownEl.classList.add('go');
+  }
+
+  hideCountdown(): void {
+    this.countdownEl.classList.add('hidden');
+    this.countdownEl.classList.remove('beat', 'go');
+  }
+
+  // A full-screen flash: white at the crash's impact frame, gold when the
+  // Bendición takes a hit. alpha is the peak, ms the fade.
+  flash(color: string, alpha: number, ms: number): void {
+    const el = this.flashEl;
+    el.style.background = color;
+    el.style.setProperty('--flash-a', String(alpha));
+    el.style.animationDuration = `${ms}ms`;
+    el.classList.remove('go');
+    void el.offsetWidth;
+    el.classList.add('go');
   }
 
   popup(text: string, xPct: number, yPct: number, cls: string): void {
