@@ -306,6 +306,41 @@ const SCENES = [
     },
   },
   {
+    id: 'title-mandaos',
+    what: 'Title with the Los Mandaos list open (a first launch: tutorial set 1 and the daily)',
+    settle: 400,
+    run: async (s) => {
+      await s.tap('#mandao-chip');
+      await s.tick(0.3);
+    },
+  },
+  {
+    id: 'mandao-toast',
+    what: 'Mid-run: a mandao gets done (10 plátanos) and its toast drops in',
+    settle: 450,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1);
+      await s.ecc('clearTraffic');
+      const x = await s.ecc('x');
+      for (let i = 0; i < 10; i++) await s.ecc('spawnPickup', 'platano', x, 8 + i * 2.2);
+      const shown = "document.getElementById('mandao-toast').classList.contains('show')";
+      if (!(await s.play(4, shown))) throw new Error('no mandao toast');
+    },
+  },
+  {
+    id: 'meta',
+    what: 'A first run: LA META stands at 400 m (no distance record yet)',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.rideTo(345);
+      await s.clearFx();
+      await s.ecc('clearTraffic');
+      await s.tick(0.1);
+    },
+  },
+  {
     id: 'malecon',
     what: 'El Malecon, 4 s into a run, with traffic both ways',
     settle: 'finish',

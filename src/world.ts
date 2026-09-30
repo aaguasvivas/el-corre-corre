@@ -3635,6 +3635,13 @@ export class World {
   // past the camera.
   burstTape(): void {
     this.tapeBroken = true;
+    this.confettiBurst();
+  }
+
+  // Flag-color confetti ahead of the rider, riding along with them. The
+  // tape burst uses it, and so does the points record, which must not
+  // break a tape the rider has not reached.
+  confettiBurst(): void {
     const v = this.lastSpeed;
     for (const f of this.confetti) {
       f.life = 2.2 + Math.random() * 0.6;

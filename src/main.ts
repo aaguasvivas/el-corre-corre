@@ -9,7 +9,8 @@ import { CONFIG, PINTURAS, ROAD, VEHICLES, type VehicleId } from './config';
 import { World } from './world';
 import { Player } from './player';
 import { Traffic, type ObstacleKind, type PickupKind, type SetPieceKind, type StepCtx, type VehicleType } from './traffic';
-import { Score, type RunResult } from './score';
+import { Score, nextPintura, type RunResult } from './score';
+import { Missions, type Completion } from './missions';
 import { tramoFor } from './tour';
 import { UI } from './ui';
 import { AudioEngine, type AudioUpdateCtx } from './audio';
@@ -105,6 +106,13 @@ let shakeAmp = 0;
 let baseFov: number = CONFIG.fovDesktop;
 let lastRun: RunResult | null = null;
 let shownMult = 1;
+// Records and mandaos, per run (see runMoments). The tape stands at the
+// distance record the run started with, or at LA META on a ride's first runs.
+let tapeAt = 0;
+let tapeGoal = false;
+let recordFired = false; // ¡NUEVO RÉCORD! fires once per run
+let recordNudged = false; // ¡Ya casi el récord! fires once per run
+let momentT = 0; // sim seconds since the last 4 Hz record/mandao read
 let throttleMult = 1; // eased speed factor from the pedal, brakeSpeedMult .. gas ratio
 // El pedal's feel channels, 0..1: how far into the gas or the brake the FELT
 // speed is (not the raw press). FOV, camera, speed lines and engine read
@@ -124,6 +132,8 @@ function addShake(amp: number): void {
 const world = new World(scene, renderer);
 const score = new Score();
 score.setVehicle(selectedVehicle);
+const missions = new Missions();
+missions.onComplete = onMandaoDone;
 const audio = new AudioEngine();
 
 // World-to-screen projection for popup placement (percent coordinates).
@@ -166,6 +176,7 @@ function selectVehicle(id: VehicleId): void {
   ui.updateVehicles(id, vehicleRecords());
   previewIdx = equippedPintura(id);
   refreshPinturaUI();
+  refreshTitleMeta(); // caballito or derrape in the copy
   ui.showTitle(score.record);
   audio.click();
 }
@@ -185,6 +196,11 @@ function refreshPinturaUI(): void {
     price: p.price,
     bank: score.bank,
   });
+}
+
+// The title's mandao chip and list, after anything that can change them.
+function refreshTitleMeta(): void {
+  ui.setMandaos(missions.view());
 }
 
 function onPinturaCycle(dir: 1 | -1): void {
@@ -232,6 +248,7 @@ function onPinturaTap(): void {
 function goToMenu(): void {
   if (state !== 'gameover' && state !== 'paused') return;
   // Quitting from PAUSE abandons a live run, so bank it before wiping it.
+  if (state === 'paused') missions.finishRun(score);
   score.persist();
   state = 'title';
   resetRunState();
@@ -240,6 +257,7 @@ function goToMenu(): void {
   previewIdx = equippedPintura(selectedVehicle);
   player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
   refreshPinturaUI();
+  refreshTitleMeta();
   audio.click();
 }
 
@@ -264,20 +282,7 @@ const ui = new UI(document.getElementById('ui')!, {
 ui.setMuted(audio.muted);
 
 const traffic = new Traffic(scene, {
-  onNearMiss: (x, z, clearance) => {
-    const r = score.nearMiss();
-    const s = w2s(x, 1.3, Math.max(z, 1.5));
-    ui.popup(`${ui.nextNearMissText()} +${r.pts}`, s.x, s.y, r.combo >= 5 ? 'pop-md' : 'pop-sm');
-    const hit = ui.ladderHitText(r.combo);
-    if (hit) {
-      ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
-      audio.ladder(r.combo);
-    }
-    ui.setCombo(r.combo, ui.ladderTierText(r.combo));
-    audio.nearMiss(panOf(x), r.combo, clearance <= CONFIG.nearMissRazorM);
-    if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
-    haptics.light();
-  },
+  onNearMiss,
   onPlatano: (x, y, z) => {
     const pts = score.collectPlatano();
     ui.setPlatanos(score.platanos);
@@ -286,6 +291,7 @@ const traffic = new Traffic(scene, {
     ui.popup(`+${pts}`, s.x, s.y, 'pop-sm pop-gold');
     audio.platano();
     haptics.medium();
+    missions.sample(score);
   },
   onPowerup: (kind, x, z) => {
     const s = w2s(x, 1.4, Math.max(z, 1));
@@ -307,7 +313,7 @@ const traffic = new Traffic(scene, {
   },
   onHoyo: () => {
     hoyoTimer = CONFIG.hoyoRecoverSec;
-    score.resetCombo();
+    score.hitHoyo();
     ui.setCombo(0, null);
     addShake(CONFIG.shakeHoyo);
     audio.hoyo();
@@ -357,6 +363,7 @@ const player = new Player(scene, {
       const s = w2s(player.x, 1.4, 2);
       ui.popupAir(pts, s.x, s.y);
     }
+    missions.sample(score);
   },
 });
 player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
@@ -397,6 +404,9 @@ function resetRunState(): void {
   imanT = 0;
   invincibleT = 0;
   tapeBurst = false;
+  recordFired = false;
+  recordNudged = false;
+  momentT = 0;
   shakeT = 0;
   shakeAmp = 0;
   shownMult = 1;
@@ -415,11 +425,16 @@ function startRun(): void {
   // Drop any unpurchased pintura preview: you ride what you own.
   previewIdx = equippedPintura(selectedVehicle);
   player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
-  score.reset();
+  score.setBarrioMult(missions.barrioMult);
+  score.reset(); // freezes the records this run chases
   resetRunState();
+  missions.startRun(selectedVehicle);
+  // La Cinta: the distance record the run started with, or LA META.
+  tapeGoal = score.prevRecordDist <= 0;
+  tapeAt = tapeGoal ? CONFIG.goalTapeM : score.prevRecordDist;
   // The tour restarts from the Malecon; traffic's mix follows it explicitly
   // because the world does not announce the start line.
-  world.startRun(score.recordDist, ui.tapeLabel(score.recordDist));
+  world.startRun(tapeAt, tapeGoal ? ui.goalTapeLabel() : ui.tapeLabel(tapeAt));
   traffic.setTramo('malecon');
   traffic.startRun(); // the opening: slow cars to pass and a plátano weave
   state = 'playing';
@@ -446,7 +461,8 @@ function pauseGame(): void {
   if (state !== 'playing') return;
   state = 'paused';
   score.persist();
-  ui.showPause();
+  missions.persist(score); // a pause may be the last thing a killed app does
+  ui.showPause(missions.view());
   audio.stopRun(false);
   audio.click();
 }
@@ -643,7 +659,6 @@ function stepSim(h: number): void {
     // Score momentum: the run pays more the deeper you get
     if (score.distMult !== shownMult) {
       shownMult = score.distMult;
-      ui.setDistMult(shownMult);
       if (shownMult > 1) {
         ui.popupMultUp(shownMult);
         audio.multUp(shownMult);
@@ -665,20 +680,97 @@ function stepSim(h: number): void {
       }
     }
 
-    // La Cinta del Récord (the world places it; this is the burst). Its last
-    // meters get a snare roll.
-    const toTape = score.recordDist - score.distance;
-    audio.tapeRiser(!tapeBurst && score.recordDist > 0 && toTape > 0 && toTape <= CONFIG.tapeRiserM);
-    if (!tapeBurst && score.recordDist > 0 && score.distance >= score.recordDist) {
-      tapeBurst = true;
-      world.burstTape();
-      ui.bannerNewRecord();
-      audio.farthest();
-      haptics.heavy();
-    }
+    runMoments(h);
   } else {
     player.updateTumble(h);
   }
+}
+
+// ---------------- records and mandaos ----------------
+
+// The run's record and mandao moments, every live step. Records compare
+// against the values the run started with (score.prevRecord and
+// prevRecordDist), never the live ones a pause may have banked.
+function runMoments(h: number): void {
+  // La Cinta del Récord: the distance record, or LA META on a first run.
+  // Its last meters get a snare roll.
+  const toTape = tapeAt - score.distance;
+  audio.tapeRiser(!tapeBurst && tapeAt > 0 && toTape > 0 && toTape <= CONFIG.tapeRiserM);
+  if (!tapeBurst && tapeAt > 0 && score.distance >= tapeAt) {
+    tapeBurst = true;
+    world.burstTape();
+    if (tapeGoal) ui.bannerGoal();
+    else ui.bannerFarthest();
+    audio.farthest();
+    haptics.heavy();
+  }
+  // ¡NUEVO RÉCORD! always means points, once, the moment they pass.
+  const rec = score.prevRecord;
+  if (!recordFired && rec > 0 && score.points > rec) {
+    recordFired = true;
+    ui.bannerNewRecord();
+    world.confettiBurst();
+    audio.recordStinger();
+    haptics.heavy();
+  }
+  momentT += h;
+  if (momentT < CONFIG.mandaoSampleSec) return;
+  momentT -= CONFIG.mandaoSampleSec;
+  missions.sample(score);
+  if (!recordNudged && !recordFired && rec > 0 && score.points >= rec * CONFIG.recordNudgeAt) {
+    recordNudged = true;
+    ui.popupRecordNear();
+  }
+  ui.setRecordLabel(rec, score.points);
+}
+
+// A near-miss: clearance is the gap (m) between the rider's circle and the
+// vehicle's hitbox at the pass; razorMissM or tighter is ¡Por un pelito!.
+function onNearMiss(x: number, z: number, clearance: number): void {
+  const r = score.nearMiss(clearance);
+  const s = w2s(x, 1.3, Math.max(z, 1.5));
+  ui.popupNearMiss(r.razor, r.pts, s.x, s.y, r.combo);
+  const hit = ui.ladderHitText(r.combo);
+  if (hit) {
+    ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
+    audio.ladder(r.combo);
+  }
+  ui.setCombo(r.combo, ui.ladderTierText(r.combo));
+  audio.nearMiss(panOf(x), r.combo, r.razor);
+  if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
+  if (r.razor) razorPass();
+  else haptics.light();
+  missions.sample(score);
+}
+
+// A razor pass (¡Por un pelito!). One call site for its feel, so a time-dip
+// or a bigger cue plugs in here.
+function razorPass(): void {
+  haptics.medium();
+}
+
+// A mandao got done. The reward lands in the wallet at once; mid-run it
+// also toasts, sounds and buzzes (one found at the finish shows on the
+// game-over card instead).
+function onMandaoDone(c: Completion): void {
+  score.addToBank(c.reward + c.setBonus);
+  if (state !== 'playing') return;
+  ui.toastMandao(c);
+  mandaoSound();
+  haptics.medium();
+}
+
+// The mandao sound, in one place for the audio pass to replace.
+function mandaoSound(): void {
+  audio.bell();
+  audio.platano();
+}
+
+// The run is over: mandaos take their last read (and pay) first, so the
+// card's earned plátanos include them; then the records are banked.
+function finishRunRecords(): RunResult {
+  missions.finishRun(score);
+  return score.finishRun(tramoFor(score.distance));
 }
 
 // Camera chase state; vectors reused every frame, no per-frame allocations.
@@ -729,6 +821,7 @@ function syncHud(): void {
   ui.setSpeedLines(state === 'playing' ? Math.max(currentNorm, 0.6 + 0.6 * gasK * CONFIG.gasSpeedLines) : 0);
   ui.showPedal(player.throttle > 0 ? 1 : player.throttle < 0 ? -1 : 0);
   ui.setSpeedKmh(Math.round(currentEff * 3.6));
+  ui.setLiveMult(score.liveMult);
 }
 
 let last = performance.now();
@@ -742,9 +835,9 @@ function advance(dt: number, now: number): void {
     if (crashRealT >= CONFIG.crashSlowmoSec) {
       state = 'gameover';
       gameOverAt = now;
-      lastRun = score.finishRun(tramoFor(score.distance));
+      lastRun = finishRunRecords();
       submitScore(lastRun.points, selectedVehicle);
-      ui.showGameOver(lastRun);
+      ui.showGameOver(lastRun, missions.view(), nextPintura(selectedVehicle, ownedPinturas(selectedVehicle), score.bank));
     }
   } else if (state !== 'paused' && state !== 'gameover') {
     acc += dt;
@@ -791,6 +884,7 @@ ui.showTitle(score.record);
 ui.updateVehicles(selectedVehicle, vehicleRecords());
 previewIdx = equippedPintura(selectedVehicle);
 refreshPinturaUI();
+refreshTitleMeta();
 // Compile every shader while the title is up. renderer.compile walks the whole
 // scene, not just the visible parts, so the pooled traffic, obstacles and the
 // 46 confetti get their programs built here instead of hitching mid-run, worst
@@ -870,10 +964,41 @@ let testGod = false;
   wheelieNow: () => {
     // hold-based now; tests should dispatch keydown Space instead
   },
+  // Moves this run's tape (a distance record of m) for scenes and probes.
   setRecordDist: (m: number) => {
     score.recordDist = m;
+    tapeAt = m;
+    tapeGoal = false;
     world.setTape(m, ui.tapeLabel(m));
   },
+  // Records and mandaos, for probes.
+  records: () => ({
+    record: score.record,
+    prevRecord: score.prevRecord,
+    prevRecordDist: score.prevRecordDist,
+    tapeAt,
+    tapeGoal,
+    recordFired,
+    recordNudged,
+  }),
+  liveMult: () => +score.liveMult.toFixed(3),
+  // A near-miss through the real handler, at a chosen clearance (m).
+  nearMiss: (clearance: number) => {
+    if (state === 'playing') onNearMiss(player.x + 1.8, 4, clearance);
+  },
+  runStats: () => ({
+    nearMisses: score.nearMisses,
+    razorMisses: score.razorMisses,
+    bestCombo: score.bestCombo,
+    cvMeters: Math.floor(score.cvMeters),
+    airs: score.airs,
+    points: score.points,
+  }),
+  lastRun: () => lastRun,
+  mandaos: () => missions.view(),
+  pause: () => pauseGame(),
+  resume: () => resume(),
+  menu: () => goToMenu(),
   setDistance: (m: number) => {
     score.distance = m;
   },

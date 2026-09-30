@@ -3,7 +3,8 @@
 // both languages.
 
 import { CONFIG, VEHICLES, type VehicleId } from './config';
-import { LADDER_STEPS, type RunResult } from './score';
+import { LADDER_STEPS, type PinturaGoal, type RunResult } from './score';
+import { barrioMultFor, mandaoPerRun, type Completion, type Mandao, type MandaoKind, type MandaosView } from './missions';
 import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
 import type { SetPieceKind } from './traffic';
@@ -12,6 +13,9 @@ type Lang = 'es' | 'en';
 const LANG_KEY = 'ecc.v1.lang';
 const PEDAL_SEEN_KEY = 'ecc.v1.pedalSeen'; // '1' once the gas pedal has been pressed, ever
 const POPUP_POOL = 12;
+
+// reachTramo targets are tramo borders: the copy names the place.
+const TRAMO_M = CONFIG.tramoLengthM;
 
 const STRINGS = {
   es: {
@@ -73,8 +77,57 @@ const STRINGS = {
     pinturaNew: '¡Pintura nueva!',
     tramoKicker: 'LLEGASTE A',
     pinturaEquip: 'PONER',
-    nearMiss: ['¡Cerquita!', '¡Por un pelito!'],
+    nearMiss: '¡Cerquita!',
+    razorMiss: '¡Por un pelito!',
     ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
+    // Records: ¡NUEVO RÉCORD! is points, La Cinta is distance.
+    farRecord: '¡MÁS LEJOS QUE NUNCA!',
+    farLine: (m: number) => `¡Más lejos que nunca! ${fmtN(m)} m`,
+    goalTape: 'LA META',
+    goalReached: '¡LLEGASTE A LA META!',
+    recordNear: '¡Ya casi el récord!',
+    toGo: (n: number) => `FALTAN ${n}`, // raw digits, like the score and RÉCORD n beside it
+    // Los Mandaos
+    mandaos: 'LOS MANDAOS',
+    mandaoChip: (done: number, level: number, mult: string, name: string) =>
+      level > 0 ? `MANDAOS ${done}/3 · NIVEL ${level} ${mult}` : `MANDAOS ${done}/3 · ${name.toUpperCase()}`,
+    levelLine: (level: number, name: string, mult: string) => `Nivel ${level} · ${name} · ${mult} en puntos`,
+    levelNames: ['Novato', 'Pasajero', 'Motoconchista', 'Tíguere', 'Tíguere de Verdad', 'Jefe del Malecón', 'Leyenda del Malecón'],
+    mandaoDone: '¡MANDAO HECHO!',
+    dailyDone: '¡MANDAO DEL DÍA!',
+    levelUp: (name: string, mult: string) => `¡SUBISTE A ${name.toUpperCase()}! ${mult}`,
+    levelUpKicker: '¡SUBISTE DE NIVEL!',
+    dailyTitle: 'EL MANDAO DEL DÍA',
+    dailyTag: 'HOY',
+    streak: (n: number) => (n === 1 ? 'Racha: 1 día' : `Racha: ${n} días`),
+    reward: (n: number) => `+${fmtN(n)} plátanos`,
+    closeHint: 'Toca pa’ cerrar',
+    perRun: ' en una corrida',
+    earned: (n: number) => `+${fmtN(n)} plátanos`,
+    pinturaNeed: (n: number, name: string) => `Te faltan ${fmtN(n)} plátanos pa’ ${name}`,
+    pinturaReady: (name: string) => `¡Ya te alcanza pa’ ${name}!`,
+    mandao: {
+      platanosRun: (n: number) => `Recoge ${fmtN(n)} plátanos`,
+      nearMissRun: (n: number) => (n === 1 ? 'Haz una cerquita' : `Haz ${n} cerquitas`),
+      razorRun: (n: number) => (n === 1 ? 'Pasa una vez por un pelito' : `Pasa ${n} veces por un pelito`),
+      comboReach: (n: number) => `Llega a combo ×${n}`,
+      cvMetersRun: (n: number) => `Corre ${fmtN(n)} m en contra vía`,
+      cvNearMissRun: (n: number) => (n === 1 ? 'Haz una cerquita en contra vía' : `Haz ${n} cerquitas en contra vía`),
+      trickSecRun: (n: number, trick: string) => `Aguanta ${n} s de ${trick}`,
+      trickHold: (n: number, trick: string) => `Echa un ${trick} de ${n} s`,
+      gasSecRun: (n: number) => `Ve a fondo ${n} s`,
+      airRun: (n: number) => (n === 1 ? 'Vuela un policía acostao' : `Vuela ${n} policías acostaos`),
+      distRun: (n: number) => `Llega a ${fmtN(n)} m`,
+      reachTramo: (n: number) =>
+        n === TRAMO_M ? 'Llega a La Zona Colonial' : n === 2 * TRAMO_M ? 'Llega a El Campo' : n === 3 * TRAMO_M ? 'Dale la vuelta al país' : `Llega a ${fmtN(n)} m`,
+      pointsRun: (n: number) => `Haz ${fmtN(n)} puntos`,
+      cleanMeters: (n: number) => `Corre ${fmtN(n)} m seguidos sin caer en un hoyo`,
+      pasolaMeters: (n: number) => `Corre ${fmtN(n)} m en LA PASOLA`,
+      civicMeters: (n: number) => `Corre ${fmtN(n)} m en EL CIVIC TUNEAO`,
+      platanosTotal: (n: number) => `Recoge ${fmtN(n)} plátanos en total`,
+    } satisfies Record<MandaoKind, (n: number, trick: string) => string>,
+    trickNounBike: 'caballito',
+    trickNounCar: 'derrape',
   },
   en: {
     subtitle: "Let's go, we're late!",
@@ -135,8 +188,55 @@ const STRINGS = {
     pinturaNew: 'New paint!',
     tramoKicker: 'YOU REACHED',
     pinturaEquip: 'USE',
-    nearMiss: ['So close!', 'By a hair!'],
+    nearMiss: 'So close!',
+    razorMiss: 'By a hair!',
     ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
+    farRecord: 'FARTHEST EVER!',
+    farLine: (m: number) => `Farthest ever! ${fmtN(m)} m`,
+    goalTape: 'GOAL',
+    goalReached: 'GOAL REACHED!',
+    recordNear: 'Record in reach!',
+    toGo: (n: number) => `${n} TO GO`,
+    mandaos: 'MISSIONS',
+    mandaoChip: (done: number, level: number, mult: string, name: string) =>
+      level > 0 ? `MISSIONS ${done}/3 · LEVEL ${level} ${mult}` : `MISSIONS ${done}/3 · ${name.toUpperCase()}`,
+    levelLine: (level: number, name: string, mult: string) => `Level ${level} · ${name} · ${mult} on points`,
+    levelNames: ['Rookie', 'Passenger', 'Moto-taxi Rider', 'Tíguere', 'Real Tíguere', 'Boss of the Malecón', 'Legend of the Malecón'],
+    mandaoDone: 'MISSION DONE!',
+    dailyDone: 'DAILY DONE!',
+    levelUp: (name: string, mult: string) => `LEVEL UP: ${name.toUpperCase()}! ${mult}`,
+    levelUpKicker: 'LEVEL UP!',
+    dailyTitle: 'TODAY’S MISSION',
+    dailyTag: 'TODAY',
+    streak: (n: number) => (n === 1 ? 'Streak: 1 day' : `Streak: ${n} days`),
+    reward: (n: number) => `+${fmtN(n)} plantains`,
+    closeHint: 'Tap to close',
+    perRun: ' in one run',
+    earned: (n: number) => `+${fmtN(n)} plantains`,
+    pinturaNeed: (n: number, name: string) => `${fmtN(n)} more plantains for ${name}`,
+    pinturaReady: (name: string) => `You can afford ${name}!`,
+    mandao: {
+      platanosRun: (n: number) => `Grab ${fmtN(n)} plantains`,
+      nearMissRun: (n: number) => (n === 1 ? 'Pull a near-miss' : `Pull ${n} near-misses`),
+      razorRun: (n: number) => (n === 1 ? 'Squeeze by a hair once' : `Squeeze by a hair ${n} times`),
+      comboReach: (n: number) => `Hit a ×${n} combo`,
+      cvMetersRun: (n: number) => `Ride ${fmtN(n)} m on the wrong side`,
+      cvNearMissRun: (n: number) => (n === 1 ? 'Pull a wrong-way near-miss' : `Pull ${n} wrong-way near-misses`),
+      trickSecRun: (n: number, trick: string) => `${trick} for ${n} s`,
+      trickHold: (n: number, trick: string) => `Hold a ${n} s ${trick.toLowerCase()}`,
+      gasSecRun: (n: number) => `Floor it for ${n} s`,
+      airRun: (n: number) => (n === 1 ? 'Launch off a speed bump' : `Launch off ${n} speed bumps`),
+      distRun: (n: number) => `Reach ${fmtN(n)} m`,
+      reachTramo: (n: number) =>
+        n === TRAMO_M ? 'Reach La Zona Colonial' : n === 2 * TRAMO_M ? 'Reach El Campo' : n === 3 * TRAMO_M ? 'Ride the whole country' : `Reach ${fmtN(n)} m`,
+      pointsRun: (n: number) => `Score ${fmtN(n)} points`,
+      cleanMeters: (n: number) => `Ride ${fmtN(n)} m straight without a pothole`,
+      pasolaMeters: (n: number) => `Ride ${fmtN(n)} m on LA PASOLA`,
+      civicMeters: (n: number) => `Drive ${fmtN(n)} m in EL CIVIC TUNEAO`,
+      platanosTotal: (n: number) => `Collect ${fmtN(n)} plantains in total`,
+    } satisfies Record<MandaoKind, (n: number, trick: string) => string>,
+    trickNounBike: 'Wheelie',
+    trickNounCar: 'Drift',
   },
 } as const;
 const VEHICLE_IDS: VehicleId[] = ['pasola', 'motor', 'civic'];
@@ -212,6 +312,21 @@ function multTag(m: number): string {
   return `×${m}`;
 }
 
+// 12,000: the same grouping in both languages, like the tape label.
+function fmtN(n: number): string {
+  return Math.floor(n).toLocaleString('en-US');
+}
+
+// ×2, ×3.8, ×15: one decimal under ten, whole numbers above.
+function fmtMult(m: number): string {
+  return `×${m >= 10 ? Math.round(m) : Math.round(m * 10) / 10}`;
+}
+
+// The barrio multiplier moves in quarters: ×1.25, ×1.5, ×3.
+function fmtBarrio(m: number): string {
+  return `×${Math.round(m * 100) / 100}`;
+}
+
 function clampPct(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -260,8 +375,11 @@ export class UI {
   private platShown = -1;
   private cvShown = false;
   private cabShown = false;
-  private multShown = 1;
-  private nearMissIdx = 0;
+  private multQ = 10; // the live multiplier as shown, x10 (10 = ×1, hidden)
+  private recordKey = Number.NaN; // what the HUD record label says now (see setRecordLabel)
+  private mandaoView: MandaosView | null = null;
+  private toastQueue: Array<[string, string]> = [];
+  private toastBusy = false;
   private popupIdx = 0;
   private lastPopupAt = 0;
   private popupBurst = 0;
@@ -336,6 +454,15 @@ export class UI {
   private pauseTitle: HTMLElement;
   private btnResume: HTMLElement;
   private btnPauseMenu: HTMLElement;
+  private mandaoChipEl: HTMLElement;
+  private mandaoSheetEl: HTMLElement;
+  private goFarEl: HTMLElement;
+  private goMandaosEl: HTMLElement;
+  private goEarnedEl: HTMLElement;
+  private pauseMandaosEl: HTMLElement;
+  private toastEl: HTMLElement;
+  private toastKickerEl: HTMLElement;
+  private toastTextEl: HTMLElement;
 
   constructor(root: HTMLElement, cb: UICallbacks) {
     this.cb = cb;
@@ -364,6 +491,7 @@ export class UI {
       <div id="popup-layer"></div>
       <div id="banner"></div>
       <div id="tramo-card"><span id="tramo-kicker"></span><span id="tramo-name"></span></div>
+      <div id="mandao-toast"><span id="mandao-toast-kicker"></span><span id="mandao-toast-text"></span></div>
       <div id="title" class="screen hidden">
         <button id="lang" class="chip" type="button"></button>
         <button id="mute" class="chip chip-mute" type="button" aria-label="Sonido">
@@ -384,7 +512,18 @@ export class UI {
           <span id="ctrl-throttle"></span>
         </div>
         <div id="title-record" class="title-record"></div>
-        <div id="title-bank" class="title-bank">${BANANA_SVG}<span id="bank-n">0</span></div>
+        <div class="title-chips">
+          <div id="title-bank" class="title-bank">${BANANA_SVG}<span id="bank-n">0</span></div>
+          <button id="mandao-chip" class="mandao-chip" type="button"></button>
+        </div>
+        <div id="mandao-sheet" class="mandao-sheet hidden">
+          <div class="md-card">
+            <div id="md-title" class="md-title"></div>
+            <div id="md-level" class="md-level"></div>
+            <ul id="md-list" class="md-list"></ul>
+            <div id="md-close" class="md-close"></div>
+          </div>
+        </div>
       </div>
       <div id="gameover" class="screen hidden">
         <div class="card">
@@ -394,11 +533,14 @@ export class UI {
           <div id="go-tour" class="go-tour"></div>
           <div id="go-points-label" class="go-points-label"></div>
           <div id="go-points" class="go-points">0</div>
+          <div id="go-far" class="go-far hidden"></div>
           <div class="go-rows">
             <div><span id="go-dist-label"></span><b id="go-dist"></b></div>
             <div><span id="go-rec-label"></span><b id="go-rec"></b></div>
             <div><span id="go-plat-label"></span><b id="go-plat"></b></div>
           </div>
+          <ul id="go-mandaos" class="md-list md-compact"></ul>
+          <div id="go-earned" class="go-earned"></div>
           <button id="btn-again" class="btn-big" type="button"></button>
           <div class="btn-row">
             <button id="btn-menu" class="btn-mid" type="button"></button>
@@ -411,6 +553,7 @@ export class UI {
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
         <div id="pause-title" class="pause-title"></div>
+        <ul id="pause-mandaos" class="md-list md-pause"></ul>
         <div class="pause-btns">
           <button id="btn-resume" class="btn-big" type="button"></button>
           <button id="btn-pause-menu" class="btn-mid" type="button"></button>
@@ -464,6 +607,15 @@ export class UI {
     this.pauseTitle = q('#pause-title');
     this.btnResume = q('#btn-resume');
     this.btnPauseMenu = q('#btn-pause-menu');
+    this.mandaoChipEl = q('#mandao-chip');
+    this.mandaoSheetEl = q('#mandao-sheet');
+    this.goFarEl = q('#go-far');
+    this.goMandaosEl = q('#go-mandaos');
+    this.goEarnedEl = q('#go-earned');
+    this.pauseMandaosEl = q('#pause-mandaos');
+    this.toastEl = q('#mandao-toast');
+    this.toastKickerEl = q('#mandao-toast-kicker');
+    this.toastTextEl = q('#mandao-toast-text');
 
     const layer = q('#popup-layer');
     for (let i = 0; i < POPUP_POOL; i++) {
@@ -535,6 +687,20 @@ export class UI {
     q('#hud-pause').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.cb.onPause();
+    });
+    // Los Mandaos on the title: the chip opens the list, any tap closes it,
+    // and neither starts a run.
+    this.mandaoChipEl.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.openMandaos();
+    });
+    this.mandaoSheetEl.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.mandaoSheetEl.classList.add('hidden');
+    });
+    this.toastEl.addEventListener('animationend', () => {
+      this.toastBusy = false;
+      this.nextToast();
     });
     this.bindPedals();
 
@@ -713,6 +879,8 @@ export class UI {
       this.lastRecord > 0 ? `${t.record}: ${this.lastRecord}` : '';
     this.hudRecordEl.textContent =
       this.lastRecord > 0 ? `${t.record.toUpperCase()} ${this.lastRecord}` : '';
+    this.recordKey = Number.NaN; // the run's countdown rewrites it on its next tick
+    if (this.mandaoView) this.setMandaos(this.mandaoView);
     this.goPointsLabel.textContent = t.points.toUpperCase();
     this.goDistLabel.textContent = `${t.distance} `;
     this.goRecLabel.textContent = `${t.record} `;
@@ -797,6 +965,7 @@ export class UI {
 
   showTitle(record: number): void {
     this.lastRecord = record;
+    this.mandaoSheetEl.classList.add('hidden');
     this.applyLang();
     this.title.classList.remove('hidden');
     this.hud.classList.add('hidden');
@@ -824,8 +993,12 @@ export class UI {
     this.setBrake(false);
     this.showPedal(0);
     this.setPedalLive(true);
-    this.multShown = 1;
+    this.multQ = 10;
     this.multEl.classList.add('hidden');
+    this.recordKey = Number.NaN;
+    this.toastQueue.length = 0;
+    this.toastBusy = false;
+    this.toastEl.classList.remove('show');
     for (const p of this.popups) p.classList.remove('go');
     this.hud.classList.remove('hidden');
     this.title.classList.add('hidden');
@@ -833,7 +1006,10 @@ export class UI {
     this.pause.classList.add('hidden');
   }
 
-  showGameOver(r: RunResult): void {
+  // The card: the run, the records it chased, the mandaos it moved and the
+  // plátanos it earned toward the next pintura. Every line is plain text a
+  // restyle can move around; the data comes in whole.
+  showGameOver(r: RunResult, mandaos: MandaosView, pintura: PinturaGoal | null): void {
     const t = this.t();
     this.lastResult = r;
     this.lastRecord = r.record;
@@ -846,6 +1022,14 @@ export class UI {
     this.goBadge.classList.toggle('hidden', !r.isNewRecord);
     this.goClose.classList.toggle('hidden', r.closeCall === null);
     if (r.closeCall !== null) this.goClose.textContent = t.closeCall(r.closeCall);
+    // La Cinta fell but the points record did not: say so, in meters.
+    const far = r.isNewDistRecord && !r.isNewRecord;
+    this.goFarEl.classList.toggle('hidden', !far);
+    if (far) this.goFarEl.textContent = t.farLine(r.distanceM);
+    this.goMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, true);
+    this.goEarnedEl.innerHTML =
+      `<b>${t.earned(r.platanosEarned)}</b>` +
+      (pintura ? `<span>${pintura.need > 0 ? t.pinturaNeed(pintura.need, pintura.name) : t.pinturaReady(pintura.name)}</span>` : '');
     // The tour's own close-call: how far you got, or how close the next
     // stretch was. Runs that stayed home get a target, not a shrug.
     const tour = document.getElementById('go-tour');
@@ -864,7 +1048,8 @@ export class UI {
     this.setPedalLive(false);
   }
 
-  showPause(): void {
+  showPause(mandaos: MandaosView): void {
+    this.pauseMandaosEl.innerHTML = this.mandaoRowsHtml(mandaos, false);
     this.pause.classList.remove('hidden');
     this.setPedalLive(false);
   }
@@ -953,14 +1138,36 @@ export class UI {
     this.mutePauseBtn.classList.toggle('muted', m);
   }
 
-  setDistMult(n: number): void {
-    if (n === this.multShown) return;
-    this.multShown = n;
-    this.multEl.classList.toggle('hidden', n < 2);
-    this.multEl.textContent = `×${n}`;
-    this.multEl.classList.remove('bump');
-    void this.multEl.offsetWidth;
-    this.multEl.classList.add('bump');
+  // Every multiplier stacked into one number (Score.liveMult): ×2, ×3.8,
+  // ×15. Hidden at ×1. Called every frame; it writes only when the shown
+  // value changes, and bumps when it climbs.
+  setLiveMult(m: number): void {
+    const q = m >= 10 ? Math.round(m) * 10 : Math.round(m * 10);
+    if (q === this.multQ) return;
+    const up = q > this.multQ;
+    this.multQ = q;
+    this.multEl.classList.toggle('hidden', q === 10);
+    if (q === 10) return;
+    this.multEl.textContent = fmtMult(q / 10);
+    if (up) {
+      this.multEl.classList.remove('bump');
+      void this.multEl.offsetWidth;
+      this.multEl.classList.add('bump');
+    }
+  }
+
+  // The HUD record label against the record the run started with: RÉCORD n,
+  // then FALTAN n from recordNudgeFrom on, then ¡NUEVO RÉCORD! once passed.
+  // The caller runs it at 4 Hz; it writes only when the text changes.
+  setRecordLabel(record: number, points: number): void {
+    const key =
+      record <= 0 ? -1 : points > record ? -2 : points >= record * CONFIG.recordNudgeFrom ? record - points : -3;
+    if (key === this.recordKey) return;
+    this.recordKey = key;
+    const t = this.t();
+    this.hudRecordEl.textContent =
+      key === -1 ? '' : key === -2 ? t.newRecord : key === -3 ? `${t.record.toUpperCase()} ${record}` : t.toGo(key);
+    this.hudRecordEl.classList.toggle('near', key >= 0);
   }
 
   // La Cinta's banner text for a record distance: TU RÉCORD · 1,234 m.
@@ -968,10 +1175,117 @@ export class UI {
     return `${this.t().tapeRecord} · ${Math.round(m).toLocaleString('en-US')} m`;
   }
 
-  nextNearMissText(): string {
-    const texts = this.t().nearMiss;
-    this.nearMissIdx = (this.nearMissIdx + 1) % texts.length;
-    return texts[this.nearMissIdx];
+  // La Cinta on a ride with no distance record yet.
+  goalTapeLabel(): string {
+    return this.t().goalTape;
+  }
+
+  // ¡Cerquita! for the band, ¡Por un pelito! for a razor pass (bigger, gold).
+  popupNearMiss(razor: boolean, pts: number, x: number, y: number, combo: number): void {
+    const t = this.t();
+    const cls = razor ? 'pop-md pop-gold' : combo >= 5 ? 'pop-md' : 'pop-sm';
+    this.popup(`${razor ? t.razorMiss : t.nearMiss} +${pts}`, x, y, cls);
+  }
+
+  popupRecordNear(): void {
+    this.popup(this.t().recordNear, 50, 30, 'pop-lg pop-gold');
+  }
+
+  bannerFarthest(): void {
+    this.banner(this.t().farRecord);
+  }
+
+  bannerGoal(): void {
+    this.banner(this.t().goalReached);
+  }
+
+  // ---------------- Los Mandaos ----------------
+
+  private trickNoun(): string {
+    const t = this.t();
+    return this.selectedVehicle === 'civic' ? t.trickNounCar : t.trickNounBike;
+  }
+
+  // One mandao as a sentence, in the current language and for the current
+  // ride (caballito or derrape). Tutorial goals skip the "in one run" tail.
+  mandaoText(m: Mandao): string {
+    const t = this.t();
+    const base = t.mandao[m.kind](m.target, this.trickNoun());
+    return m.tutorial || !mandaoPerRun(m.kind) ? base : base + t.perRun;
+  }
+
+  // "7/10", or a check once done. Meters and seconds count down to whole units.
+  mandaoProgress(m: Mandao): string {
+    return m.done ? '✓' : `${fmtN(m.progress)}/${fmtN(m.target)}`;
+  }
+
+  private mandaoRowHtml(m: Mandao, tag: string): string {
+    const cls = `md-row${m.done ? ' done' : ''}${m.justDone ? ' just' : ''}${tag ? ' md-daily' : ''}`;
+    const tagHtml = tag ? `<span class="md-tag">${tag}</span>` : '';
+    return `<li class="${cls}">${tagHtml}<span class="md-text">${this.mandaoText(m)}</span><b class="md-prog">${this.mandaoProgress(m)}</b></li>`;
+  }
+
+  // The three mandaos (the finished set, if this run leveled up) plus the
+  // daily, as list items. The card adds the level-up line.
+  private mandaoRowsHtml(v: MandaosView, card: boolean): string {
+    const t = this.t();
+    const rows = v.lastSet ?? v.set;
+    let html = '';
+    for (const m of rows) html += this.mandaoRowHtml(m, '');
+    html += this.mandaoRowHtml(v.daily, t.dailyTag);
+    if (card && v.lastSet) {
+      html += `<li class="md-levelup">${t.levelUp(t.levelNames[v.levelNameIdx], fmtBarrio(v.mult))}</li>`;
+    }
+    return html;
+  }
+
+  // The title chip: MANDAOS 1/3 · NIVEL 2 ×1.5. Keeps the view for the list.
+  setMandaos(v: MandaosView): void {
+    this.mandaoView = v;
+    const t = this.t();
+    this.mandaoChipEl.textContent = t.mandaoChip(v.doneCount, v.level, fmtBarrio(v.mult), t.levelNames[v.levelNameIdx]);
+    if (!this.mandaoSheetEl.classList.contains('hidden')) this.openMandaos();
+  }
+
+  private openMandaos(): void {
+    const v = this.mandaoView;
+    if (!v) return;
+    const t = this.t();
+    const q = (sel: string): HTMLElement => this.mandaoSheetEl.querySelector(sel)!;
+    q('#md-title').textContent = t.mandaos;
+    q('#md-level').textContent = t.levelLine(v.level, t.levelNames[v.levelNameIdx], fmtBarrio(v.mult));
+    let html = '';
+    for (const m of v.set) html += this.mandaoRowHtml(m, '');
+    html += `<li class="md-head">${t.dailyTitle}</li>`;
+    html += this.mandaoRowHtml(v.daily, t.dailyTag);
+    if (v.streak > 0) html += `<li class="md-streak">${t.streak(v.streak)}</li>`;
+    q('#md-list').innerHTML = html;
+    q('#md-close').textContent = t.closeHint;
+    this.mandaoSheetEl.classList.remove('hidden');
+  }
+
+  // Mid-run: a mandao got done. Toasts queue, so a set finished on one
+  // plátano still reads one line at a time, then the level up.
+  toastMandao(c: Completion): void {
+    const t = this.t();
+    this.toastQueue.push([c.daily ? t.dailyDone : t.mandaoDone, `${this.mandaoText(c.mandao)} · ${t.reward(c.reward)}`]);
+    if (c.levelUp) {
+      const name = t.levelNames[Math.min(c.level, t.levelNames.length - 1)];
+      this.toastQueue.push([t.levelUpKicker, `${name} ${fmtBarrio(barrioMultFor(c.level))} · ${t.reward(c.setBonus)}`]);
+    }
+    this.nextToast();
+  }
+
+  private nextToast(): void {
+    if (this.toastBusy) return;
+    const next = this.toastQueue.shift();
+    if (!next) return;
+    this.toastBusy = true;
+    this.toastKickerEl.textContent = next[0];
+    this.toastTextEl.textContent = next[1];
+    this.toastEl.classList.remove('show');
+    void this.toastEl.offsetWidth;
+    this.toastEl.classList.add('show');
   }
 
   ladderHitText(combo: number): string | null {
