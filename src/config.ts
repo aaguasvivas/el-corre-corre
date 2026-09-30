@@ -212,14 +212,25 @@ export const CONFIG = {
   // Contra via must be RISKIER than your own lane, not emptier. While you ride
   // the wrong way, oncoming filler aims for the lane you are actually in.
   cvTargetBias: 0.65, // FEEL: chance a CV-time oncoming spawn picks your lane
-  sameLaneGapM: 16, // min same-lane spacing at spawn; keeps convoys threadable
   antiWallWindowM: 14, // window (converted to arrival time) for the corridor check
   // FEEL / SACRED: the brief's rule. Never commit a spawn unless a continuous
   // gap of this many player widths survives across the whole road, shoulders
   // included. Lower it and the game starts walling you; raise it and traffic
   // thins out. Measure bot survival after changing it.
   minCorridorMult: 1.7,
-  laneJitterM: 0.4, // lane-center jitter a spawn may be given, budgeted for in validation
+  // FEEL: how far off its lane center a car may ride. Every car still stays
+  // inside its own lane (the cap shrinks for wide types), but at 0.7 the
+  // lane lines stop being a safe place to park: a car hugging its line
+  // reaches a rider parked on it. The audit bot measured the old 0.4.
+  laneJitterM: 0.7,
+  laneDriftM: 0.3, // FEEL: max slow lateral sway (Dominican lane discipline), inside the same lane budget
+  // FEEL: share of motoconchos that ride the dashed lines instead of a lane.
+  // They lane-split in the DR, and it takes away the last safe parking spot.
+  motoLineShare: 0.5,
+  // FEEL: chance a car spawning in a lane beside a rider parked between two
+  // lanes (a dashed line or the seam) rides the edge of its lane nearest
+  // the rider. Between the lanes must never be safer than in one.
+  lineCampLean: 0.5,
   fillerPatternShare: 0.4, // FEEL: filler singles rate multiplier once patterns are running
   // El rebase: every so often a vehicle swings onto the center seam to
   // overtake, the most Dominican move on the road and the reason parking on
@@ -227,10 +238,79 @@ export const CONFIG = {
   overtakeEvery: [4, 8], // FEEL: seconds between overtake swings at full density
   overtakeSec: 2.6, // FEEL: how long the swing holds the seam
   overtakeUnlockSec: 12, // no seam pressure during the gentle open
+  // SACRED: a swing only starts on a car that will reach you in this window
+  // (seconds), picked by arrival time rather than distance. The swing peaks
+  // at overtakeSec / 2, so the car is still on the seam when it arrives, and
+  // it has been visibly moving (with its bocinazo) for at least the minimum.
+  rebaseLeadSec: [1.7, 2.2],
+  // FEEL: a rider parked on the seam (|x| under seamBandM) gets swings this
+  // much more often. The seam belongs to whoever is overtaking, so it must
+  // never be safer than a real lane.
+  seamBandM: 0.9,
+  seamRebaseMult: 0.5,
+  // FEEL: a same-direction car catching a slower rider (brake, hoyo, scrape)
+  // matches the rider's speed minus this and leans on the horn instead of
+  // rear-ending an off-screen rider.
+  riderLeadMarginMps: 0.5,
+  // FEEL: civics only join the filler once the rider closes on them at least
+  // this fast, so they never idle in the fog early or arrive in a blink.
+  civicMinClosing: 7,
+  convoyGapM: 6, // min bumper gap a convoy spawn may keep; car-following holds it after
+  // Shoulder anti-camping: ride the shoulder this long and a cart or a parked
+  // guagua is sent onto it, far enough out to read. It never kills on its
+  // own, it only takes the safe line away.
+  shoulderCampSec: 2.5, // FEEL: seconds on a shoulder before the road answers
+  shoulderCampCooldown: [5, 8], // FEEL: seconds between two answers
+
+  // The opening: gentle means no threats, not no content. A plátano weave
+  // from the start line pays out inside 2 s, and three slow cars are seeded
+  // on your side so the first passes land around 5, 9 and 14 s.
+  openingSec: 20, // FEEL: early same-direction filler closes at openingClosing so the stream keeps coming
+  openingClosing: [7, 9], // m/s the rider closes on early same-direction filler
+  // [type, lane, z, speed]: seeded at the start of every run on lane centers
+  openingCars: [
+    ['guagua', 1, 34, 9],
+    ['sedan', 0, 58, 10],
+    ['motoconcho', 1, 100, 10.5],
+  ],
+  openingTrailCount: 10, // plátanos in the opening weave
+  openingTrailStartZ: 32, // FEEL: the first one is about 2 s out
+  openingTrailSpacingM: 3.2,
+  openingTrailAmpM: 1.7, // FEEL: how far the weave swings toward lane 0 and back
+
+  // Escalation rides the distance tiers the HUD already shows
+  // (distMultTiers), so "it pays more" reads as "it got harder". spawn
+  // multiplies the filler rate, pattern the gaps between waves, rebase the
+  // gaps between seam swings, and gapM is the minimum spacing between cars
+  // sharing a line, so the extra rate actually lands. Tested for walls.
+  escalation: [
+    { atM: 0, spawn: 1, pattern: 1, rebase: 1, gapM: 16 },
+    { atM: 500, spawn: 1.15, pattern: 0.88, rebase: 0.85, gapM: 14 },
+    { atM: 1200, spawn: 1.3, pattern: 0.76, rebase: 0.7, gapM: 13 },
+    { atM: 2200, spawn: 1.45, pattern: 0.66, rebase: 0.6, gapM: 12 },
+  ],
 
   // Wave patterns
   patternIntervalMin: 2.2, // FEEL: seconds between authored waves (scaled by density)
   patternIntervalMax: 3.8,
+  // The wave director: a run is a string of sets. Each set builds with
+  // regular patterns, peaks with one set piece from the current escalation
+  // tier (and tramo), then pays off with a breather. Pressure, then rest.
+  setBuildPatterns: 2, // FEEL: regular patterns before each set piece
+  setPeakSec: 4, // FEEL: seconds the set piece owns before the breather
+  setBreatherSec: 4.5, // FEEL: seconds of breather before the next build
+  setPieceUnlockSec: 20, // DECISION: before this only la guagua lenta may peak; a new player learns first
+  breatherDip: 0.4, // FEEL: filler rate drops this fraction after a breather...
+  breatherRecoverSec: 8, // ...and climbs back over this many seconds (the sawtooth)
+  breatherPowerupChance: 0.35, // FEEL: chance a breather also hands out a power-up
+  guaguaLentaMps: 6, // FEEL: la guagua lenta crawls; the plátano line runs past it on the seam
+  taponMps: 7, // FEEL: el tapón's speed
+  taponSpacingM: 11,
+  camionPlatanosMps: 8,
+  camionDropEveryM: 6, // FEEL: el camión drops a plátano every this many meters it travels
+  camionDropZ: [28, 135], // m: it drops only while this far ahead, so no drop lands on your nose
+  horaPicoSec: 8, // FEEL: hora pico lasts this long...
+  horaPicoSpawnMult: 1.4, // ...at this filler rate
 
   // Traffic speeds (m/s) per archetype: [min, max]
   vehicleSpeeds: {
@@ -249,8 +329,12 @@ export const CONFIG = {
   vehicleHitboxScale: 0.9, // FEEL: forgiveness; the killer box is smaller than the visual box
   playerRadius: 0.5, // FEEL: base player collision circle, scaled per vehicle
 
-  // Near-miss and combo
-  nearMissRadius: 1.2,
+  // Near-miss and combo. A near-miss has to be a dodge: the rider must have
+  // been on the vehicle's line within nearMissThreatSec of the pass and then
+  // moved out of it. Parking beside traffic pays nothing.
+  nearMissRadius: 1.4, // FEEL: clearance (m) that still counts as close; feel beats realism
+  nearMissThreatSec: 1.0, // FEEL: how late the collision course may be and still count as a dodge
+  nearMissDodgeM: 0.2, // min lateral move (m) between the collision course and the pass
   nearMissPoints: 25,
   comboDecaySec: 4,
 
@@ -314,10 +398,33 @@ export const CONFIG = {
   platanoPoints: 10,
   platanoRadius: 0.95, // FEEL: collection reach; generous feels better
   platanoYTolerance: 0.55, // arc platanos need a jump to grab
+  // Plátanos trace the racing line: patterns lay them beside their own cars,
+  // right where you pass them, so the coin line whispers "acércate más".
+  platanoLineGapM: 0.35, // FEEL: gap between a car's hitbox and the rider's circle along a line
+  platanoLineSpacingM: 3.2,
+  platanoLayZ: 125, // m: lines appear once their car is this close (in the fog), so nothing pops in
+  platanoTrailEvery: [4, 6.5], // FEEL: seconds between drought-filling trails...
+  platanoTrailUnlockSec: 3,
+  platanoTrailDroughtSec: 6, // ...which only come when no plátano spawned for this long
+  platanoTrailLen: 5,
+  policiaLeadIn: 3, // ground plátanos leading into a bump; the arc itself follows the real jump
+  jumpArcCount: 6, // plátanos laid along the launched rider's own parabola
   powerupEvery: [18, 30],
   powerupUnlockSec: 20,
+  // DECISION: every run's first power-up is a Bendición arriving about this
+  // many seconds in, on the rider's line, so a new player's first mistake
+  // becomes a golden save instead of a game over.
+  firstPowerupSec: 14,
   cafecitoSec: 5,
   cafecitoBoost: 1.35, // FEEL: cafecito speed multiplier
+  // FEEL: after the cafecito ends the rider stays ghosted this long, blinking,
+  // so plowing through a car on the last tick is never a death. Speed eases
+  // back through cafecitoEaseSec instead of snapping.
+  cafecitoGraceSec: 1.0,
+  cafecitoBlinkHz: 8,
+  cafecitoEaseSec: 0.6,
+  cafecitoRiverSpacingM: 7, // FEEL: el río de plátanos laid along the free path while it burns
+  cafecitoRiverFromZ: 36, // m: where the river starts ahead of the rider
 
   // El acelerador. Speed is the risk dial: gas raises the ramp speed and pays
   // a multiplier, the brake lowers it to a floor, never to a stop (el corre

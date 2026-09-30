@@ -6,6 +6,7 @@ import { VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type RunResult } from './score';
 import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
+import type { SetPieceKind } from './traffic';
 
 type Lang = 'es' | 'en';
 const LANG_KEY = 'ecc.v1.lang';
@@ -53,6 +54,17 @@ const STRINGS = {
     air: '¡AIRE!',
     obelisco: '¡El Obelisco!',
     multUp: (n: number) => `¡MULTIPLICADOR ×${n}!`,
+    // Set pieces call their name; escalation says the street got harder.
+    setPieces: {
+      guaguaLenta: '¡GUAGUA LENTA!',
+      tapon: '¡TAPÓN!',
+      parada: '¡SE PARÓ LA GUAGUA!',
+      caravana: '¡CARAVANA!',
+      camionPlatanos: '¡SE LE CAEN LOS PLÁTANOS!',
+      calleEstrecha: '¡CALLE ESTRECHA!',
+      horaPico: '¡HORA PICO!',
+    } satisfies Record<SetPieceKind, string>,
+    streetWild: '¡La calle se puso brava!',
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: '¡Pintura nueva!',
     tramoKicker: 'LLEGASTE A',
@@ -101,6 +113,16 @@ const STRINGS = {
     air: 'AIR!',
     obelisco: 'The Obelisco!',
     multUp: (n: number) => `MULTIPLIER ×${n}!`,
+    setPieces: {
+      guaguaLenta: 'SLOW BUS!',
+      tapon: 'TRAFFIC JAM!',
+      parada: 'BUS STOP!',
+      caravana: 'CONVOY!',
+      camionPlatanos: 'SPILLED PLANTAINS!',
+      calleEstrecha: 'NARROW STREET!',
+      horaPico: 'RUSH HOUR!',
+    } satisfies Record<SetPieceKind, string>,
+    streetWild: 'The street got wild!',
     // Places keep their names in both languages
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: 'New paint!',
@@ -785,6 +807,17 @@ export class UI {
 
   popupObelisco(): void {
     this.popup(this.t().obelisco, 50, 28, 'pop-lg pop-gold');
+  }
+
+  // A set piece announces itself where the combo ladder lands.
+  popupSetPiece(kind: SetPieceKind): void {
+    this.popup(this.t().setPieces[kind], 50, 34, 'pop-lg');
+  }
+
+  // Escalation fires on the same tick as the multiplier popup, just before
+  // it, so it sits below it instead of stacking on top.
+  popupEscalation(): void {
+    this.popup(this.t().streetWild, 50, 48, 'pop-md');
   }
 
   popupMultUp(n: number): void {

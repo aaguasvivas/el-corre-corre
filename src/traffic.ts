@@ -19,14 +19,31 @@ import { toonMaterial, textTexture, worldMaterial, paint, vcToonMaterial } from 
 
 export type VehicleType = 'sedan' | 'guagua' | 'camion' | 'civic' | 'motoconcho' | 'guaguaParada' | 'cart';
 export type PowerupKind = 'cafecito' | 'bendicion' | 'iman';
+export type PatternKind = 'convoy' | 'zigzag' | 'guaguaStop' | 'oncomingSwarm' | 'breather' | 'hoyoField';
+// Set pieces: the named moments of a run. Announced ones reach the HUD
+// through TrafficEvents.onSetPiece.
+export type SetPieceKind =
+  | 'guaguaLenta'
+  | 'tapon'
+  | 'parada'
+  | 'caravana'
+  | 'camionPlatanos'
+  | 'calleEstrecha'
+  | 'horaPico';
+type Tramo = keyof typeof CONFIG.tramoVehicleWeights;
 
 export interface TrafficEvents {
-  onNearMiss(x: number, z: number): void;
+  // clearance: meters between the rider's circle and the vehicle's hitbox at the pass
+  onNearMiss(x: number, z: number, clearance: number): void;
   onPlatano(x: number, y: number, z: number): void;
   onPowerup(kind: PowerupKind, x: number, z: number): void;
   onHoyo(): void;
   onPolicia(): void;
   onCharco(): void;
+  onRebase(x: number, z: number): void; // a car starts el rebase: its bocinazo is the telegraph
+  onHornBehind(x: number): void; // a car caught behind a slower rider honks instead of rear-ending
+  onSetPiece(kind: SetPieceKind): void; // an announced set piece is on its way
+  onEscalate(tier: number): void; // the street got harder (tier 1 and up)
 }
 
 export interface StepCtx {
@@ -42,6 +59,9 @@ export interface StepCtx {
   airborne: boolean;
   wheelie: boolean;
   magnet: boolean;
+  runDist: number; // meters into this run: escalation follows the distance tiers
+  shielded: boolean; // the Bendición is up: the power-up bag skips a second one
+  cafecito: boolean; // the cafecito is burning: el río de plátanos
 }
 
 interface Vehicle {
@@ -62,6 +82,43 @@ interface Vehicle {
   driftAmp: number;
   overtakeT: number; // seconds into an overtake swing; <0 means not swinging
   blinkers: THREE.Object3D[];
+  threat: boolean; // the rider was on its line within nearMissThreatSec of the pass
+  threatX: number; // rider x the last time it was on that line
+  honked: boolean; // already honked at a slow rider ahead (once per vehicle)
+  lineN: number; // plátanos still to lay beside it, placed once it nears the fog line
+  lineSide: number; // -1 / +1: which side of it the racing line runs
+  dropT: number; // >= 0: el camión botando plátanos, seconds to the next drop
+  noRebase: boolean; // set pieces and line motoconchos never swing onto the seam
+}
+
+// Read-only views for tests and the traffic lab.
+export interface VehicleView {
+  readonly type: VehicleType;
+  readonly active: boolean;
+  readonly lane: number;
+  readonly x: number;
+  readonly z: number;
+  readonly dir: 1 | -1;
+  readonly speed: number;
+  readonly halfW: number;
+  readonly halfL: number;
+  readonly overtakeT: number;
+}
+
+export interface PickupView {
+  readonly kind: PickupKind;
+  readonly active: boolean;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+export interface TrafficStats {
+  spawnAttempts: number;
+  corridorRejects: number; // the sacred corridor check said no
+  pickupPoolMisses: number; // a pickup could not spawn: the pool was empty
+  platanosSpawned: number;
+  setPiecesPlaced: number;
 }
 
 export type ObstacleKind = 'hoyo' | 'policia' | 'charco';
@@ -351,6 +408,49 @@ const ACCENT_VARIED = [0xffd3b6, 0xb3d9ff, 0xf2e9dc, 0xcdb4db];
 // spawn validation allocates nothing.
 const _corridorBlocks: number[] = [];
 
+const HIT = CONFIG.vehicleHitboxScale;
+// The dashed line between your two lanes (mirrored on the oncoming side):
+// where the rider starts, and where lane-splitting motoconchos ride.
+const LINE_X = (ROAD.laneCenters[0] + ROAD.laneCenters[1]) / 2;
+const SWING_M = 1.55; // how far el rebase carries a car from its lane center toward the seam
+// Beyond this the fog hides everything in every tramo, so a set piece may
+// clear filler out of its way there without anything visibly vanishing.
+const FOGGED_Z = 150;
+// Where el río de plátanos steps when its line is blocked, nearest first.
+const RIVER_STEPS = [0.85, -0.85, 1.7, -1.7, 2.55, -2.55] as const;
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+// The set-piece library. tier: the escalation tier that unlocks it; tramo:
+// the stretch it belongs to (null = anywhere).
+interface SetPieceDef {
+  kind: SetPieceKind;
+  tier: number;
+  tramo: Tramo | null;
+}
+const SET_PIECES: readonly SetPieceDef[] = [
+  { kind: 'guaguaLenta', tier: 0, tramo: null },
+  { kind: 'parada', tier: 0, tramo: 'malecon' },
+  { kind: 'camionPlatanos', tier: 0, tramo: 'campo' },
+  { kind: 'tapon', tier: 1, tramo: null },
+  { kind: 'calleEstrecha', tier: 1, tramo: 'zona' },
+  { kind: 'caravana', tier: 2, tramo: null },
+  { kind: 'horaPico', tier: 3, tramo: null },
+];
+// DECISION: la guagua lenta is the quiet teaching piece and is not announced;
+// every other piece calls its name, so a run has moments worth retelling.
+const PIECE_ANNOUNCED: Record<SetPieceKind, boolean> = {
+  guaguaLenta: false,
+  parada: true,
+  camionPlatanos: true,
+  tapon: true,
+  calleEstrecha: true,
+  caravana: true,
+  horaPico: true,
+};
+
 export class Traffic {
   private vehicles: Vehicle[] = [];
   private obstacles: Obstacle[] = [];
@@ -365,6 +465,7 @@ export class Traffic {
   private lastPlayerR: number = CONFIG.playerRadius;
   private lastPlayerSpeed: number = CONFIG.baseSpeed;
   private typeHalfW = new Map<VehicleType, number>();
+  private typeHalfL = new Map<VehicleType, number>();
   private spawnAcc = 0;
   private activeCount = 0;
 
@@ -376,10 +477,60 @@ export class Traffic {
   private nextCharcoAt = -1;
   private nextCartAt = -1;
   private nextPowerupAt = -1;
-  private powerupCycle: PowerupKind[] = ['cafecito', 'bendicion', 'iman'];
+  private nextTrailAt = -1;
+  private lastPlatanoAt = 0;
+
+  // Power-up shuffle bag: every kind once per bag, in a random order.
+  private bag: PowerupKind[] = ['cafecito', 'bendicion', 'iman'];
+  private bagIdx = 3;
+  private firstPowerupDue = false;
+  private lastShielded = false;
+
+  // The opening is seeded on the first live step, once the rider's speed is known.
+  private openingPending = false;
+
+  // Escalation and the wave director
+  private tier = 0;
+  private setPhase: 'build' | 'peak' | 'breather' = 'build';
+  private setBuilds = 0;
+  private lastPiece: SetPieceKind | null = null;
+  private sawT = 0; // seconds left in the post-breather sawtooth
+  private horaPicoUntil = 0;
+
+  // Shoulder anti-camping
+  private campSide = 0;
+  private campT = 0;
+  private nextCampAt = 0;
+
+  // El río de plátanos
+  private lastCafecito = false;
+
+  private readonly statsData: TrafficStats = {
+    spawnAttempts: 0,
+    corridorRejects: 0,
+    pickupPoolMisses: 0,
+    platanosSpawned: 0,
+    setPiecesPlaced: 0,
+  };
 
   get activeCars(): number {
     return this.activeCount;
+  }
+
+  get stats(): Readonly<TrafficStats> {
+    return this.statsData;
+  }
+
+  get vehicleViews(): readonly VehicleView[] {
+    return this.vehicles;
+  }
+
+  get pickupViews(): readonly PickupView[] {
+    return this.pickups;
+  }
+
+  get escalationTier(): number {
+    return this.tier;
   }
 
   constructor(scene: THREE.Scene, events: TrafficEvents) {
@@ -400,6 +551,7 @@ export class Traffic {
     const vcMat = vcToonMaterial();
     for (const [type, a] of defs) {
       this.typeHalfW.set(type, a.halfW);
+      this.typeHalfL.set(type, a.halfL);
       for (let i = 0; i < a.pool; i++) {
         const group = new THREE.Group();
         // Every static part of a vehicle becomes one merged, vertex-colored
@@ -424,6 +576,8 @@ export class Traffic {
           type, group, active: false, lane: 0, baseX: 0, x: 0, z: 0, dir: 1,
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
           driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
+          threat: false, threatX: 0, honked: false, lineN: 0, lineSide: 1,
+          dropT: -1, noRebase: false,
         });
       }
     }
@@ -611,23 +765,45 @@ export class Traffic {
     return ROAD.laneCenters[lane];
   }
 
+  // Where el rebase takes an inner-lane car: onto the center seam, measured
+  // from the lane center so a car jittered toward the seam never overshoots.
+  private swingX(v: Vehicle): number {
+    return ROAD.laneCenters[v.lane] + (v.lane === 1 ? SWING_M : -SWING_M);
+  }
+
+  // How far a car of this half width may sit off its lane center toward -x
+  // or +x and still keep its whole body (drift included) inside its lane.
+  // On the shoulder side it also keeps clear of a parked guagua.
+  private laneRoom(lane: number, halfW: number, towardPlus: boolean): number {
+    let room = CONFIG.laneWidth / 2 - halfW - 0.05;
+    if ((lane === 0 && !towardPlus) || (lane === 3 && towardPlus)) {
+      const toShoulder = ROAD.shoulderCenters[1] - ROAD.laneCenters[3];
+      room = Math.min(room, toShoulder - (halfW + (this.typeHalfW.get('guaguaParada') ?? 1.15)) * 0.85);
+    }
+    return Math.max(0, room);
+  }
+
   // The brief's sacred rule: never commit a spawn that leaves no continuous
   // gap of at least minCorridorMult player widths. This measures the real
   // corridor across the whole road, shoulders included (parked guaguas and
   // vendor carts narrow it too), among everything that ARRIVES together.
-  private widestCorridor(lane: number, halfW: number, tCand: number, tWin: number): number {
+  private widestCorridor(cx: number, cw: number, tCand: number, tWin: number): number {
     const blocks = _corridorBlocks;
     blocks.length = 0;
-    // the candidate itself, plus the lane jitter it may be given
-    const cx = this.laneX(lane);
-    const cw = halfW * CONFIG.vehicleHitboxScale + CONFIG.laneJitterM;
-    blocks.push(cx - cw, cx + cw);
+    blocks.push(cx - cw, cx + cw); // the candidate, drift included
     for (const v of this.vehicles) {
       if (!v.active) continue;
       const t = this.arrivalTime(v.z, v.dir, v.speed);
       if (!isFinite(t) || Math.abs(t - tCand) > tWin) continue;
-      const w = v.halfW * CONFIG.vehicleHitboxScale;
-      blocks.push(v.x - w, v.x + w);
+      const w = v.halfW * HIT + v.driftAmp;
+      let lo = v.baseX - w;
+      let hi = v.baseX + w;
+      if (v.overtakeT >= 0) {
+        const sx = this.swingX(v);
+        lo = Math.min(lo, sx - w);
+        hi = Math.max(hi, sx + w);
+      }
+      blocks.push(lo, hi);
     }
     // widest free run across the drivable width, sweeping the interval starts
     let widest = 0;
@@ -656,21 +832,97 @@ export class Traffic {
     return widest;
   }
 
-  private canPlace(lane: number, z: number, halfL: number, halfW: number, dir: 1 | -1, speed: number): boolean {
+  private canPlace(
+    lane: number,
+    x: number,
+    z: number,
+    halfL: number,
+    halfW: number,
+    drift: number,
+    dir: 1 | -1,
+    speed: number,
+    gapM: number,
+  ): boolean {
+    this.statsData.spawnAttempts++;
+    // Nobody spawns on top of anyone sharing its line: the same lane, or a
+    // body that overlaps sideways (a motoconcho on the dashed line touches
+    // both lanes beside it).
     for (const v of this.vehicles) {
-      if (!v.active || v.lane !== lane) continue;
-      if (Math.abs(v.z - z) < CONFIG.sameLaneGapM + halfL + v.halfL) return false;
+      if (!v.active) continue;
+      const sideBySide =
+        v.lane === lane || Math.abs(v.baseX - x) < v.halfW + halfW + v.driftAmp + drift + 0.1;
+      if (sideBySide && Math.abs(v.z - z) < gapM + halfL + v.halfL) return false;
     }
+    if (this.pickupInWay(x, z, halfW, halfL, drift, dir, speed, false)) return false;
     const tCand = this.arrivalTime(z, dir, speed);
-    if (!isFinite(tCand)) return true; // never reaches the player, cannot wall them
+    if (!isFinite(tCand) || tCand <= 0) return true; // never reaches the player, cannot wall them
     const tWin = CONFIG.antiWallWindowM / Math.max(this.lastPlayerSpeed, 1);
     const need = CONFIG.minCorridorMult * 2 * this.lastPlayerR;
-    return this.widestCorridor(lane, halfW, tCand, tWin) >= need;
+    if (this.widestCorridor(x, halfW * HIT + drift, tCand, tWin) < need) {
+      this.statsData.corridorRejects++;
+      return false;
+    }
+    return true;
   }
 
-  private laneHasVehicleNear(lane: number, z: number, window: number): boolean {
+  // Would a vehicle spawned here sit on a pickup at the moment the rider
+  // reaches it? A pickup already in view vetoes the spawn; with clearFar set,
+  // pickups still deep in the fog make way instead.
+  private pickupInWay(
+    x: number,
+    z: number,
+    halfW: number,
+    halfL: number,
+    drift: number,
+    dir: 1 | -1,
+    speed: number,
+    clearFar: boolean,
+  ): boolean {
+    const vr = Math.max(this.lastPlayerSpeed, 1);
+    const closing = vr - dir * speed;
+    for (const p of this.pickups) {
+      if (!p.active || p.z <= 0) continue;
+      const reach = p.kind === 'platano' ? 0.5 : 1.1;
+      if (Math.abs(p.x - x) >= halfW * HIT + reach + drift + 0.2) continue;
+      // where the vehicle is when this pickup reaches the rider line
+      const rel = z - closing * (p.z / vr);
+      if (Math.abs(rel) >= halfL * HIT + reach + 1 + 0.02 * p.z) continue;
+      if (!clearFar) {
+        if (p.z <= CONFIG.platanoLayZ) return true;
+      } else if (p.z > CONFIG.platanoLayZ) {
+        p.active = false;
+        p.group.visible = false;
+      }
+    }
+    return false;
+  }
+
+  // Is a pickup at (x, z) reachable when the rider gets there, given where
+  // every vehicle will be by then? Speeds are assumed constant, so the
+  // margin grows with distance.
+  private pickupClear(x: number, z: number, reach = 0.5): boolean {
+    const vr = Math.max(this.lastPlayerSpeed, 1);
+    const tp = z / vr;
     for (const v of this.vehicles) {
-      if (v.active && v.lane === lane && Math.abs(v.z - z) < window) return true;
+      if (!v.active) continue;
+      const rel = v.z - (vr - v.dir * v.speed) * tp;
+      if (Math.abs(rel) >= v.halfL * HIT + reach + 1 + 0.02 * z) continue;
+      let lo = v.baseX;
+      let hi = v.baseX;
+      if (v.overtakeT >= 0) {
+        const sx = this.swingX(v);
+        lo = Math.min(lo, sx);
+        hi = Math.max(hi, sx);
+      }
+      const w = v.halfW * HIT + reach + v.driftAmp + 0.15;
+      if (x > lo - w && x < hi + w) return false;
+    }
+    return true;
+  }
+
+  private vehicleNear(x: number, z: number, window: number): boolean {
+    for (const v of this.vehicles) {
+      if (v.active && Math.abs(v.x - x) < v.halfW + 1.2 && Math.abs(v.z - z) < window) return true;
     }
     return false;
   }
@@ -682,38 +934,73 @@ export class Traffic {
     dir: 1 | -1,
     speedOverride?: number,
     exactX?: number,
-  ): boolean {
-    if (this.activeCount >= CONFIG.trafficMaxActive) return false;
+    gapM?: number,
+  ): Vehicle | null {
+    if (this.activeCount >= CONFIG.trafficMaxActive) return null;
     const isStaticType = type === 'guaguaParada' || type === 'cart';
-    const range = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
-    const planSpeed = isStaticType ? 0 : (speedOverride ?? (range[0] + range[1]) / 2);
-    if (!this.canPlace(lane, z, 3.5, this.typeHalfW.get(type) ?? 1, dir, planSpeed)) return false;
+    const halfW = this.typeHalfW.get(type) ?? 1;
+    const halfL = this.typeHalfL.get(type) ?? 2;
+    let speed = 0;
+    if (!isStaticType) {
+      const range = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
+      speed = speedOverride ?? rand(range[0], range[1]);
+    }
+    // The lateral spot is decided before validation, so the corridor check
+    // measures where the car really goes.
+    let x: number;
+    let drift = 0;
+    let onLine = false;
+    if (isStaticType) {
+      x = lane === 4 ? ROAD.shoulderCenters[1] : ROAD.shoulderCenters[0];
+    } else if (exactX !== undefined) {
+      x = exactX;
+    } else if (type === 'motoconcho' && Math.random() < CONFIG.motoLineShare) {
+      // lane-splitting on the dashed line of its own side
+      x = dir === 1 ? LINE_X : -LINE_X;
+      drift = Math.random() * CONFIG.laneDriftM * 0.5;
+      onLine = true;
+    } else {
+      const minus = Math.min(CONFIG.laneJitterM, this.laneRoom(lane, halfW, false));
+      const plus = Math.min(CONFIG.laneJitterM, this.laneRoom(lane, halfW, true));
+      // a rider parked between this lane and the next one gets company
+      const toRider = this.lastPlayerX - ROAD.laneCenters[lane];
+      const lean = Math.abs(toRider) > 1 && Math.abs(toRider) < 2.6 && Math.random() < CONFIG.lineCampLean;
+      const j = !lean ? rand(-minus, plus) : toRider > 0 ? rand(0, plus) : rand(-minus, 0);
+      drift = Math.min(Math.random() * CONFIG.laneDriftM, Math.max(0, (j < 0 ? minus : plus) - Math.abs(j)));
+      x = ROAD.laneCenters[lane] + j;
+    }
+    const gap = gapM ?? CONFIG.escalation[this.tier].gapM;
+    if (!this.canPlace(lane, x, z, halfL, halfW, drift, dir, speed, gap)) return null;
     for (const v of this.vehicles) {
       if (v.active || v.type !== type) continue;
+      this.pickupInWay(x, z, halfW, halfL, drift, dir, speed, true);
       v.active = true;
       v.lane = lane;
       v.dir = dir;
       v.z = z;
       v.passed = false;
+      v.threat = false;
+      v.honked = false;
+      v.lineN = 0;
+      v.dropT = -1;
+      v.overtakeT = -1;
+      v.noRebase = onLine;
+      v.speed = speed;
+      v.cruise = speed;
+      v.driftAmp = drift;
+      v.baseX = x;
       if (isStaticType) {
-        v.speed = 0;
-        v.driftAmp = 0;
-        v.baseX = lane === 4 ? ROAD.shoulderCenters[1] : ROAD.shoulderCenters[0];
         v.group.rotation.y = (Math.random() - 0.5) * 0.14;
       } else {
-        v.speed = speedOverride ?? rand(range[0], range[1]);
-        v.cruise = v.speed;
-        v.driftAmp = exactX === undefined ? Math.random() * 0.3 : 0; // Dominican lane discipline
-        v.baseX = exactX ?? ROAD.laneCenters[lane] + rand(-0.4, 0.4);
         v.group.rotation.y = dir === 1 ? 0 : Math.PI;
       }
       v.x = v.baseX;
       v.group.position.set(v.x, 0, v.z);
       v.group.visible = true;
       this.activeCount++;
-      return true;
+      return v;
     }
-    return false;
+    return null;
   }
 
   private spawnObstacle(kind: ObstacleKind, x: number, z: number): boolean {
@@ -740,9 +1027,134 @@ export class Traffic {
       p.y = y ?? (kind === 'platano' ? 0.55 : 0.7);
       p.group.position.set(x, p.y, z);
       p.group.visible = true;
+      if (kind === 'platano') {
+        this.statsData.platanosSpawned++;
+        this.lastPlatanoAt = this.elapsed;
+      }
+      return true;
+    }
+    this.statsData.pickupPoolMisses++;
+    return false;
+  }
+
+  // ---------------- plátano lines ----------------
+
+  // Mark a car to carry a racing line: n plátanos beside it on `side`, laid
+  // when it nears the fog line so they land right where you pass it.
+  private attachLine(v: Vehicle, n: number, side: number): void {
+    if (Math.abs(v.baseX - this.laneX(v.lane)) > 1) return; // lane-splitters carry none
+    v.lineN = n;
+    v.lineSide = side;
+  }
+
+  private layLine(v: Vehicle): void {
+    const n = v.lineN;
+    v.lineN = 0;
+    const t = this.arrivalTime(v.z, v.dir, v.speed);
+    if (!isFinite(t) || t <= 0) return;
+    const zc = this.lastPlayerSpeed * t; // the plátano the rider takes as it passes the car
+    const edge = ROAD.edgeX - 0.6;
+    const x = clamp(v.baseX + v.lineSide * (v.halfW * HIT + 0.5 + CONFIG.platanoLineGapM + v.driftAmp), -edge, edge);
+    for (let i = 0; i < n; i++) {
+      const z = zc + (i - (n - 1) / 2) * CONFIG.platanoLineSpacingM;
+      if (z > 2 && this.pickupClear(x, z)) this.spawnPickup('platano', x, z);
+    }
+  }
+
+  // Lay a short line in whichever lane is clear, starting from a random lane.
+  // shape: lateral offset per index. Returns false when no lane was clear.
+  private layLaneLine(z0: number, n: number, spacing: number, amp: number, freq: number): boolean {
+    const start = Math.floor(Math.random() * 4);
+    for (let k = 0; k < 4; k++) {
+      const lc = ROAD.laneCenters[(start + k) % 4];
+      let clear = 0;
+      for (let i = 0; i < n; i++) if (this.pickupClear(lc + amp * Math.sin(i * freq), z0 + i * spacing)) clear++;
+      if (clear < n - 1) continue;
+      for (let i = 0; i < n; i++) {
+        const x = lc + amp * Math.sin(i * freq);
+        const z = z0 + i * spacing;
+        if (this.pickupClear(x, z)) this.spawnPickup('platano', x, z);
+      }
       return true;
     }
     return false;
+  }
+
+  // El río de plátanos: while the cafecito burns, a plátano every few meters
+  // along the free path ahead, stepping aside around whatever is in the way.
+  private layRiver(x0: number): void {
+    const edge = ROAD.edgeX - 0.7;
+    let x = clamp(x0, -edge, edge);
+    for (let z = CONFIG.cafecitoRiverFromZ; z <= CONFIG.spawnAhead; z += CONFIG.cafecitoRiverSpacingM) {
+      if (!this.pickupClear(x, z)) {
+        let found = false;
+        for (const d of RIVER_STEPS) {
+          const nx = x + d;
+          if (nx < -edge || nx > edge || !this.pickupClear(nx, z)) continue;
+          x = nx;
+          found = true;
+          break;
+        }
+        if (!found) continue;
+      }
+      this.spawnPickup('platano', x, z);
+    }
+  }
+
+  // Called by main.ts right after the rider launches off a policía acostado:
+  // plátanos along the rider's own parabola, so a straight jump takes them all.
+  spawnJumpArc(x: number, speed: number, vy: number): number {
+    const g = CONFIG.jumpGravity;
+    const flight = (2 * vy) / g;
+    const n = CONFIG.jumpArcCount;
+    let spawned = 0;
+    for (let k = 0; k < n; k++) {
+      const t = ((k + 1) / (n + 1)) * flight;
+      // the rider's reach is centered 0.6 above its own height
+      const y = 0.6 + vy * t - 0.5 * g * t * t;
+      if (this.spawnPickup('platano', x, speed * t, y)) spawned++;
+    }
+    return spawned;
+  }
+
+  // ---------------- power-ups ----------------
+
+  // Shuffle bag: each kind once per bag. A Bendición drawn while the shield
+  // is already up would do nothing, so it is skipped.
+  private drawPowerup(): PowerupKind {
+    for (let tries = 0; tries < 4; tries++) {
+      if (this.bagIdx >= this.bag.length) {
+        for (let i = this.bag.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = this.bag[i];
+          this.bag[i] = this.bag[j];
+          this.bag[j] = tmp;
+        }
+        this.bagIdx = 0;
+      }
+      const k = this.bag[this.bagIdx++];
+      if (k === 'bendicion' && this.lastShielded) continue;
+      return k;
+    }
+    return 'cafecito';
+  }
+
+  // Put a power-up at xWant if it is reachable there, else in the nearest
+  // lane that is.
+  private placePowerup(kind: PowerupKind, xWant: number, z: number): boolean {
+    const edge = ROAD.edgeX - 0.8;
+    const x0 = clamp(xWant, -edge, edge);
+    if (this.pickupClear(x0, z, 1.1)) return this.spawnPickup(kind, x0, z);
+    let best = NaN;
+    for (const lc of ROAD.laneCenters) {
+      if (!this.pickupClear(lc, z, 1.1)) continue;
+      if (Number.isNaN(best) || Math.abs(lc - x0) < Math.abs(best - x0)) best = lc;
+    }
+    return Number.isNaN(best) ? false : this.spawnPickup(kind, best, z);
+  }
+
+  private schedulePowerupNow(z: number): void {
+    this.placePowerup(this.drawPowerup(), ROAD.laneCenters[Math.floor(Math.random() * 4)], z);
   }
 
   // ---------------- wave patterns ----------------
@@ -756,69 +1168,85 @@ export class Traffic {
     return Math.max(CONFIG.spawnAhead + 15, need) + rand(0, 20);
   }
 
-  private runPattern(): void {
-    const opts: Array<readonly [string, number]> = [
-      ['convoy', 24],
-      ['zigzag', 30],
-      ['breather', 18],
-    ];
-    if (this.elapsed > 20) {
-      opts.push(['guaguaStop', 14], ['oncomingSwarm', 18]);
-    }
-    if (this.elapsed > 40) opts.push(['hoyoField', 14]);
-    const pick = pickWeighted(opts);
+  // During the opening, same-direction traffic is slow enough that the rider
+  // closes on it at openingClosing, so the stream keeps arriving early.
+  private sameSpeed(type: VehicleType): number | undefined {
+    if (this.elapsed >= CONFIG.openingSec) return undefined;
+    const r = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
+    const want = this.lastPlayerSpeed - rand(CONFIG.openingClosing[0], CONFIG.openingClosing[1]);
+    return Math.max(6, Math.min(rand(r[0], r[1]), want));
+  }
 
-    if (pick === 'convoy') {
+  // Civics join only once the rider closes on them properly: no idling in
+  // the fog early, no blink arrivals.
+  private civicOk(): boolean {
+    return (
+      this.elapsed > CONFIG.civicUnlockSec &&
+      this.lastPlayerSpeed - CONFIG.vehicleSpeeds.civic[1] >= CONFIG.civicMinClosing
+    );
+  }
+
+  private runSwarm(n: number): number {
+    const z0 = this.oncBase();
+    let lane = Math.random() < 0.5 ? 2 : 3;
+    const spacing = rand(14, 19);
+    let placed = 0;
+    for (let i = 0; i < n; i++) {
+      const type: VehicleType =
+        i === n - 1 && Math.random() < 0.3 && this.elapsed > CONFIG.bigVehicleUnlockSec
+          ? 'guagua'
+          : Math.random() < 0.65 ? 'sedan' : 'motoconcho';
+      const v = this.spawnVehicle(type, lane, z0 + i * spacing, -1);
+      if (v) {
+        placed++;
+        this.attachLine(v, 1, lane === 2 ? 1 : -1); // toward the contra vía dashed line: x2 bait
+      }
+      lane = lane === 2 ? 3 : 2;
+    }
+    return placed;
+  }
+
+  private runPattern(kind: PatternKind): void {
+    if (kind === 'convoy') {
       const lane = Math.random() < 0.5 ? 0 : 1;
       const z0 = this.sameBase();
       const n = Math.random() < 0.5 ? 3 : 4;
       const spacing = rand(13, 17);
+      const side = Math.random() < 0.5 ? 1 : -1;
       for (let i = 0; i < n; i++) {
         const type: VehicleType = i === 0 && Math.random() < 0.4 && this.elapsed > CONFIG.bigVehicleUnlockSec
           ? 'guagua'
           : Math.random() < 0.75 ? 'sedan' : 'motoconcho';
-        this.spawnVehicle(type, lane, z0 + i * spacing, 1);
+        const v = this.spawnVehicle(type, lane, z0 + i * spacing, 1, this.sameSpeed(type), undefined, CONFIG.convoyGapM);
+        if (v) this.attachLine(v, 2, side);
       }
-    } else if (pick === 'zigzag') {
+    } else if (kind === 'zigzag') {
       const z0 = this.sameBase();
       let lane = Math.random() < 0.5 ? 0 : 1;
       const spacing = rand(17, 21);
       for (let i = 0; i < 4; i++) {
         const type: VehicleType =
-          this.elapsed > CONFIG.civicUnlockSec && Math.random() < 0.3
-            ? 'civic'
-            : Math.random() < 0.7 ? 'sedan' : 'motoconcho';
-        this.spawnVehicle(type, lane, z0 + i * spacing, 1);
+          this.civicOk() && Math.random() < 0.3 ? 'civic' : Math.random() < 0.7 ? 'sedan' : 'motoconcho';
+        const v = this.spawnVehicle(type, lane, z0 + i * spacing, 1, this.sameSpeed(type));
+        if (v) this.attachLine(v, 2, lane === 0 ? 1 : -1); // the gap side: weave to take it
         lane = lane === 0 ? 1 : 0;
       }
-    } else if (pick === 'guaguaStop') {
+    } else if (kind === 'guaguaStop') {
       const seaSide = Math.random() < 0.2;
       const z0 = this.sameBase();
-      this.spawnVehicle('guaguaParada', seaSide ? 4 : -1, z0, 1);
+      const p = this.spawnVehicle('guaguaParada', seaSide ? 4 : -1, z0, 1);
+      if (p) this.attachLine(p, 3, seaSide ? -1 : 1); // thread the gap between the bus and the lane
       this.spawnVehicle('sedan', seaSide ? 3 : 0, z0 - rand(4, 10), seaSide ? -1 : 1);
-    } else if (pick === 'oncomingSwarm') {
-      const z0 = this.oncBase();
-      let lane = Math.random() < 0.5 ? 2 : 3;
+    } else if (kind === 'oncomingSwarm') {
       const n = this.elapsed > 60 ? 5 + (Math.random() < 0.5 ? 1 : 0) : Math.random() < 0.4 ? 5 : 4;
-      const spacing = rand(14, 19);
-      for (let i = 0; i < n; i++) {
-        const type: VehicleType =
-          i === n - 1 && Math.random() < 0.3 && this.elapsed > CONFIG.bigVehicleUnlockSec
-            ? 'guagua'
-            : Math.random() < 0.65 ? 'sedan' : 'motoconcho';
-        this.spawnVehicle(type, lane, z0 + i * spacing, -1);
-        lane = lane === 2 ? 3 : 2;
-      }
-    } else if (pick === 'breather') {
+      this.runSwarm(n);
+    } else if (kind === 'breather') {
       this.vehiclePauseUntil = this.elapsed + 2.8;
-      const lane = Math.floor(Math.random() * 4);
+      this.sawT = CONFIG.breatherRecoverSec;
       const z0 = this.sameBase();
-      const n = 7;
-      for (let i = 0; i < n; i++) {
-        this.spawnPickup('platano', ROAD.laneCenters[lane] + rand(-0.2, 0.2), z0 + i * 2.3);
-      }
-      if (Math.random() < 0.3) this.schedulePowerupNow(z0 + n * 2.3 + 4);
-    } else if (pick === 'hoyoField') {
+      this.layLaneLine(z0, 6, 2.8, 1.2, 0.6); // an S through a clear lane
+      if (Math.random() < CONFIG.breatherPowerupChance) this.schedulePowerupNow(z0 + 6 * 2.8 + 4);
+    } else if (kind === 'hoyoField') {
       this.vehiclePauseUntil = this.elapsed + 2.2;
       const z0 = this.sameBase();
       for (let i = 0; i < 5; i++) {
@@ -832,18 +1260,169 @@ export class Traffic {
     }
   }
 
-  private schedulePowerupNow(z: number): void {
-    const kind = this.powerupCycle[Math.floor(Math.random() * this.powerupCycle.length)];
-    const lane = Math.floor(Math.random() * 4);
-    const x = ROAD.laneCenters[lane];
-    if (!this.laneHasVehicleNear(lane, z, 12)) this.spawnPickup(kind, x, z);
+  // ---------------- the wave director ----------------
+
+  private pickBuild(): PatternKind {
+    const e = this.elapsed;
+    const wStop = e > 20 ? 14 : 0;
+    const wSwarm = e > 20 ? 18 : 0;
+    const wHoyo = e > 40 ? 14 : 0;
+    let r = Math.random() * (24 + 30 + wStop + wSwarm + wHoyo);
+    if ((r -= 24) < 0) return 'convoy';
+    if ((r -= 30) < 0) return 'zigzag';
+    if ((r -= wStop) < 0) return 'guaguaStop';
+    if ((r -= wSwarm) < 0) return 'oncomingSwarm';
+    return 'hoyoField';
+  }
+
+  private pieceEligible(d: SetPieceDef): boolean {
+    if (d.tier > this.tier) return false;
+    if (d.tramo !== null && d.tramo !== this.tramo) return false;
+    if (this.elapsed < CONFIG.setPieceUnlockSec && d.kind !== 'guaguaLenta') return false;
+    return true;
+  }
+
+  // Deeper tiers lean on their own pieces; the same piece never runs twice
+  // in a row unless it is the only one available.
+  private pickPiece(): SetPieceKind {
+    let total = 0;
+    for (const d of SET_PIECES) if (this.pieceEligible(d) && d.kind !== this.lastPiece) total += 1 + d.tier;
+    if (total === 0) return this.lastPiece ?? 'guaguaLenta';
+    let r = Math.random() * total;
+    for (const d of SET_PIECES) {
+      if (!this.pieceEligible(d) || d.kind === this.lastPiece) continue;
+      r -= 1 + d.tier;
+      if (r < 0) return d.kind;
+    }
+    return 'guaguaLenta';
+  }
+
+  // One step of the current set: build, peak, breather. Returns the wait
+  // until the next step.
+  private directorStep(density: number, patternMult: number): number {
+    if (this.setPhase === 'build') {
+      this.runPattern(this.pickBuild());
+      if (++this.setBuilds >= CONFIG.setBuildPatterns) this.setPhase = 'peak';
+      return (rand(CONFIG.patternIntervalMin, CONFIG.patternIntervalMax) / (0.6 + 0.4 * density)) * patternMult;
+    }
+    if (this.setPhase === 'peak') {
+      const kind = this.pickPiece();
+      this.lastPiece = kind;
+      this.runSetPiece(kind);
+      this.setPhase = 'breather';
+      return CONFIG.setPeakSec * patternMult;
+    }
+    this.runPattern('breather');
+    this.setPhase = 'build';
+    this.setBuilds = 0;
+    return CONFIG.setBreatherSec;
+  }
+
+  // A set piece built around one vehicle tries a little further out, then
+  // the other lane of your side, when its spot is taken at the spawn line,
+  // instead of silently not happening.
+  private spawnKey(type: VehicleType, lane: number, z0: number, speed: number): Vehicle | null {
+    for (let k = 0; k < 3; k++) {
+      for (let j = 0; j < 2; j++) {
+        const l = j === 0 ? lane : 1 - lane;
+        const v = this.spawnVehicle(type, l, z0 + k * 24, 1, speed, ROAD.laneCenters[l]);
+        if (v) return v;
+      }
+    }
+    return null;
+  }
+
+  // A set piece outranks filler: slow filler piles up just past the fog line
+  // and would refuse it. Clear that band (still invisible) in its lanes.
+  private clearFogged(dir: 1 | -1): void {
+    for (const v of this.vehicles) {
+      if (!v.active || v.dir !== dir || v.speed === 0 || v.z <= FOGGED_Z) continue;
+      if (v.lane < 0 || v.lane > 3) continue;
+      v.active = false;
+      v.group.visible = false;
+      this.activeCount--;
+    }
+  }
+
+  private runSetPiece(kind: SetPieceKind): void {
+    let placed = 0;
+    const z0 = this.sameBase();
+    this.clearFogged(kind === 'caravana' ? -1 : 1);
+    if (kind === 'guaguaLenta') {
+      // Crawls in lane 1; the plátano line runs past it on the seam side,
+      // the way you overtake a guagua in real life.
+      const v = this.spawnKey('guagua', 1, z0, CONFIG.guaguaLentaMps);
+      if (v) {
+        placed++;
+        v.noRebase = true;
+        this.attachLine(v, 4, 1); // on its left: toward the seam, or toward lane 1 from lane 0
+      }
+    } else if (kind === 'tapon') {
+      // Both of your lanes jammed and crawling. Three exits: the seam (where
+      // a jammed car may swing out), the shoulder (a cart waits there) or
+      // contra vía at x2.
+      const sp = CONFIG.taponSpacingM;
+      for (let i = 0; i < 3; i++) {
+        const type: VehicleType = i === 1 && Math.random() < 0.5 ? 'guagua' : 'sedan';
+        const v = this.spawnVehicle(type, 0, z0 + i * sp, 1, CONFIG.taponMps, undefined, CONFIG.convoyGapM);
+        if (v) {
+          placed++;
+          this.attachLine(v, 1, -1); // the shoulder exit
+        }
+      }
+      for (let i = 0; i < 2; i++) {
+        const type: VehicleType = Math.random() < 0.5 ? 'sedan' : 'camion';
+        if (this.spawnVehicle(type, 1, z0 + sp * 0.5 + i * sp, 1, CONFIG.taponMps, undefined, CONFIG.convoyGapM)) placed++;
+      }
+      this.spawnVehicle('cart', -1, z0 + 40, 1);
+    } else if (kind === 'parada') {
+      // The guagua stops on the shoulder with its hazards on, and a carro
+      // público has pulled in behind it, half onto the shoulder. DECISION:
+      // it is placed already stopped (it would brake deep in the fog anyway),
+      // so the corridor check validates it as the parked car it will be; a
+      // car that changes speed after validation could close a gap unseen.
+      let p: Vehicle | null = null;
+      for (let k = 0; k < 3 && !p; k++) p = this.spawnVehicle('guaguaParada', -1, z0 + k * 24, 1);
+      if (p) {
+        placed++;
+        const c = this.spawnVehicle('sedan', 0, p.z - 9, 1, 0, ROAD.shoulderCenters[0] + 1.3, 1);
+        if (c) c.noRebase = true;
+        if (this.tier >= 1) this.spawnVehicle('guagua', 1, p.z + rand(-4, 6), 1);
+      }
+    } else if (kind === 'caravana') {
+      placed = this.runSwarm(5);
+    } else if (kind === 'camionPlatanos') {
+      const v = this.spawnKey('camion', 1, z0, CONFIG.camionPlatanosMps);
+      if (v) {
+        placed++;
+        v.noRebase = true;
+        v.dropT = 0;
+      }
+    } else if (kind === 'calleEstrecha') {
+      // Carts close both shoulders and motoconchos split both dashed lines.
+      if (this.spawnVehicle('cart', -1, z0, 1)) placed++;
+      if (this.spawnVehicle('cart', 4, z0 + 6, 1, undefined, undefined, 1)) placed++;
+      const m = this.spawnVehicle('motoconcho', 0, z0 + rand(-8, 8), 1, undefined, LINE_X);
+      if (m) m.noRebase = true;
+      // the oncoming one arrives with the carts
+      const vs = rand(CONFIG.vehicleSpeeds.motoconcho[0], CONFIG.vehicleSpeeds.motoconcho[1]);
+      const zOnc = Math.min(300, (z0 * (this.lastPlayerSpeed + vs)) / Math.max(this.lastPlayerSpeed, 1));
+      const o = this.spawnVehicle('motoconcho', 3, Math.max(zOnc, this.oncBase(vs)), -1, vs, -LINE_X);
+      if (o) o.noRebase = true;
+    } else if (kind === 'horaPico') {
+      this.horaPicoUntil = this.elapsed + CONFIG.horaPicoSec;
+      placed = 1;
+    }
+    if (placed === 0) return;
+    this.statsData.setPiecesPlaced++;
+    if (PIECE_ANNOUNCED[kind]) this.events.onSetPiece(kind);
   }
 
   // Los Tramos: each stretch has its own traffic personality. World tells us
   // where we are; the filler mix follows.
-  private tramo: keyof typeof CONFIG.tramoVehicleWeights = 'malecon';
+  private tramo: Tramo = 'malecon';
 
-  setTramo(t: keyof typeof CONFIG.tramoVehicleWeights): void {
+  setTramo(t: Tramo): void {
     this.tramo = t;
   }
 
@@ -858,7 +1437,7 @@ export class Traffic {
     if (this.elapsed > CONFIG.bigVehicleUnlockSec) {
       opts.push(['guagua', w.guagua], ['camion', w.camion]);
     }
-    if (dir === 1 && this.elapsed > CONFIG.civicUnlockSec) opts.push(['civic', w.civic]);
+    if (dir === 1 && this.civicOk()) opts.push(['civic', w.civic]);
     const type = pickWeighted(opts);
     const lanes: [number, number] = dir === 1 ? [0, 1] : [2, 3];
     let first = Math.random() < 0.5 ? 0 : 1;
@@ -867,11 +1446,35 @@ export class Traffic {
       first = this.lastPlayerX < ROAD.laneCenters[2] + CONFIG.laneWidth / 2 ? 0 : 1;
     }
     const range = CONFIG.vehicleSpeeds[type as keyof typeof CONFIG.vehicleSpeeds];
-    const z = type === 'civic'
-      ? 80 + rand(0, 25) // slow closing speed: let the civic enter through the fog sooner
-      : dir === 1 ? this.sameBase() : this.oncBase(range[1]);
+    const z = dir === 1 ? this.sameBase() : this.oncBase(range[1]);
+    const speed = dir === 1 ? this.sameSpeed(type) : undefined;
     for (const cand of [lanes[first], lanes[1 - first]]) {
-      if (this.spawnVehicle(type, cand, z, dir)) return;
+      if (this.spawnVehicle(type, cand, z, dir, speed)) return;
+    }
+  }
+
+  // ---------------- the run ----------------
+
+  // A new run: the opening is seeded on the first live step, when the
+  // rider's real speed is known, and the first power-up is a Bendición.
+  startRun(): void {
+    this.openingPending = true;
+    this.firstPowerupDue = true;
+  }
+
+  // Gentle means no threats, not no content: slow cars on your side that you
+  // catch in the first seconds, and a plátano weave from the start line.
+  private seedOpening(playerX: number): void {
+    this.openingPending = false;
+    for (const [type, lane, z, speed] of CONFIG.openingCars) {
+      const v = this.spawnVehicle(type, lane, z, 1, speed, ROAD.laneCenters[lane]);
+      if (v) v.noRebase = true;
+    }
+    const n = CONFIG.openingTrailCount;
+    for (let i = 0; i < n; i++) {
+      const x = playerX - CONFIG.openingTrailAmpM * Math.sin((i / (n - 1)) * Math.PI);
+      const z = CONFIG.openingTrailStartZ + i * CONFIG.openingTrailSpacingM;
+      if (this.pickupClear(x, z)) this.spawnPickup('platano', x, z);
     }
   }
 
@@ -886,28 +1489,44 @@ export class Traffic {
     this.lastPlayerCv = ctx.playerCv;
     this.lastPlayerR = ctx.playerR;
     this.lastPlayerSpeed = ctx.speed;
+    this.lastShielded = ctx.shielded;
 
     const blinkOn = this.time % 0.9 < 0.45;
 
-    // El que va alante manda: same lane, same direction, nobody drives
-    // through the vehicle ahead. A faster follower that closes inside its
-    // headway matches the leader's speed instead of ghosting through.
-    // Spawn validation only guarantees the moment of spawn; this holds the
-    // promise for the rest of every vehicle's life.
+    // El que va alante manda: nobody drives through the vehicle ahead on its
+    // line (same lane, or a body overlapping sideways). A faster follower
+    // that closes inside its headway matches the leader's speed instead of
+    // ghosting through. The live rider leads too: a car catching a slower
+    // rider from behind (brake, hoyo, scrape) matches the rider and honks
+    // once instead of rear-ending someone it cannot see.
     for (const v of this.vehicles) {
       if (!v.active || v.speed === 0) continue;
       let leaderSpeed = -1;
       let bestGap = Infinity;
+      let riderLeads = false;
       for (const o of this.vehicles) {
-        if (o === v || !o.active || o.lane !== v.lane || o.dir !== v.dir) continue;
+        if (o === v || !o.active || o.dir !== v.dir) continue;
+        if (o.lane !== v.lane && !this.sharesLine(o, v)) continue;
         const gap = (o.z - v.z) * v.dir - o.halfL - v.halfL;
         if (gap >= -0.5 && gap < bestGap) {
           bestGap = gap;
           leaderSpeed = o.speed;
         }
       }
+      if (live && v.dir === 1 && v.z < 0 && Math.abs(v.x - ctx.playerX) < v.halfW * HIT + ctx.playerR + 0.6) {
+        const gap = -v.z - v.halfL - ctx.playerR;
+        if (gap >= -0.5 && gap < bestGap) {
+          bestGap = gap;
+          leaderSpeed = Math.max(0, ctx.speed - CONFIG.riderLeadMarginMps);
+          riderLeads = true;
+        }
+      }
       if (leaderSpeed >= 0 && bestGap < 2 + v.speed * 0.12 && leaderSpeed < v.speed) {
         v.speed = leaderSpeed;
+        if (riderLeads && !v.honked) {
+          v.honked = true;
+          this.events.onHornBehind(v.x);
+        }
       } else if (v.speed < v.cruise) {
         // the road opened up: ease back to the speed it wanted, so traffic
         // keeps overtaking itself instead of settling into one slow parade
@@ -929,10 +1548,10 @@ export class Traffic {
       let vx = v.baseX;
       if (v.driftAmp > 0) vx += Math.sin(this.time * 0.55 + v.driftPhase) * v.driftAmp;
       if (v.overtakeT >= 0) {
-        // ease onto the seam and back off; lane 1 swings +x, lane 2 swings -x
+        // ease onto the seam and back off
         v.overtakeT += dt;
         const k = Math.sin(Math.PI * Math.min(1, v.overtakeT / CONFIG.overtakeSec));
-        vx += (v.lane === 1 ? 1 : -1) * 1.55 * k;
+        vx += (this.swingX(v) - v.baseX) * k;
         if (v.overtakeT >= CONFIG.overtakeSec) v.overtakeT = -1;
       }
       v.x = vx;
@@ -940,11 +1559,47 @@ export class Traffic {
       v.group.position.z = v.z;
       for (const b of v.blinkers) b.visible = blinkOn;
 
-      if (live && !v.passed && v.z <= 0) {
-        v.passed = true;
-        const clearance = Math.abs(ctx.playerX - v.x) - (v.halfW * CONFIG.vehicleHitboxScale + ctx.playerR);
-        if (clearance >= 0 && clearance <= CONFIG.nearMissRadius) {
-          this.events.onNearMiss(v.x, v.z);
+      if (!live) continue;
+
+      if (v.lineN > 0) {
+        const t = this.arrivalTime(v.z, v.dir, v.speed);
+        if (isFinite(t) && this.lastPlayerSpeed * t <= CONFIG.platanoLayZ) this.layLine(v);
+      }
+
+      // el camión botando plátanos: one off the back every few meters, only
+      // while it is far enough ahead that none lands on your nose
+      if (v.dropT >= 0) {
+        v.dropT -= dt;
+        if (v.dropT <= 0) {
+          v.dropT += CONFIG.camionDropEveryM / Math.max(v.speed, 1);
+          const pz = v.z - v.halfL - 0.8;
+          // a car tailing the camión would sit on the drop: skip that one
+          if (v.z > CONFIG.camionDropZ[0] && v.z < CONFIG.camionDropZ[1] && this.pickupClear(v.x, pz)) {
+            this.spawnPickup('platano', v.x, pz);
+          }
+        }
+      }
+
+      // Near-miss: it has to be a dodge. The rider must have been on this
+      // vehicle's line within nearMissThreatSec of the pass, then moved out.
+      if (!v.passed) {
+        const lineW = v.halfW * HIT + ctx.playerR;
+        if (v.z <= 0) {
+          v.passed = true;
+          const clearance = Math.abs(ctx.playerX - v.x) - lineW;
+          if (
+            v.threat &&
+            clearance >= 0 &&
+            clearance <= CONFIG.nearMissRadius &&
+            Math.abs(ctx.playerX - v.threatX) >= CONFIG.nearMissDodgeM
+          ) {
+            this.events.onNearMiss(v.x, v.z, clearance);
+          }
+        } else if (Math.abs(ctx.playerX - v.x) < lineW) {
+          if (this.arrivalTime(v.z, v.dir, v.speed) <= CONFIG.nearMissThreatSec) {
+            v.threat = true;
+            v.threatX = ctx.playerX;
+          }
         }
       }
     }
@@ -1023,20 +1678,34 @@ export class Traffic {
 
     // ---------------- spawning ----------------
 
+    if (this.openingPending) this.seedOpening(ctx.playerX);
+
+    // Escalation follows the run's distance tiers.
+    let tier = 0;
+    for (let i = 1; i < CONFIG.escalation.length; i++) if (ctx.runDist >= CONFIG.escalation[i].atM) tier = i;
+    if (tier > this.tier) {
+      this.tier = tier;
+      this.events.onEscalate(tier);
+    }
+    const esc = CONFIG.escalation[this.tier];
+
     const density =
       CONFIG.trafficDensityStart +
       (CONFIG.trafficDensityMax - CONFIG.trafficDensityStart) * Math.min(1, elapsed / CONFIG.densityRampSec);
+    if (this.sawT > 0) this.sawT = Math.max(0, this.sawT - dt);
 
     if (this.nextPatternAt < 0) this.nextPatternAt = CONFIG.gentleStartSec * 0.7 + rand(0, 2);
     const patternsRunning = elapsed >= this.nextPatternAt || elapsed > CONFIG.gentleStartSec;
     if (elapsed >= this.nextPatternAt) {
-      if (elapsed >= this.vehiclePauseUntil) this.runPattern();
-      this.nextPatternAt = elapsed + rand(CONFIG.patternIntervalMin, CONFIG.patternIntervalMax) / (0.6 + 0.4 * density);
+      this.nextPatternAt =
+        elapsed < this.vehiclePauseUntil ? this.vehiclePauseUntil : elapsed + this.directorStep(density, esc.pattern);
     }
 
-    let rate = CONFIG.spawnsPerSecAtFull * density;
+    let rate = CONFIG.spawnsPerSecAtFull * density * esc.spawn;
     if (elapsed < CONFIG.gentleStartSec) rate *= CONFIG.gentleSpawnFactor;
     if (patternsRunning) rate *= CONFIG.fillerPatternShare;
+    if (this.sawT > 0) rate *= 1 - CONFIG.breatherDip * (this.sawT / CONFIG.breatherRecoverSec);
+    if (elapsed < this.horaPicoUntil) rate *= CONFIG.horaPicoSpawnMult;
     this.spawnAcc += rate * dt;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
@@ -1045,70 +1714,156 @@ export class Traffic {
 
     // El rebase: swing an inner-lane vehicle onto the center seam. This is
     // why parking on the yellow line is not a free ride: the seam belongs to
-    // whoever is overtaking. Cadence tightens with density.
+    // whoever is overtaking. Once due, it waits for a car that will reach you
+    // inside rebaseLeadSec, and the car announces itself with a bocinazo.
     if (elapsed > CONFIG.overtakeUnlockSec) {
       if (this.nextOvertakeAt < 0) {
         this.nextOvertakeAt = elapsed + rand(CONFIG.overtakeEvery[0], CONFIG.overtakeEvery[1]);
       }
       if (elapsed >= this.nextOvertakeAt) {
-        this.nextOvertakeAt =
-          elapsed + rand(CONFIG.overtakeEvery[0], CONFIG.overtakeEvery[1]) / (0.5 + 0.5 * density);
-        let best: Vehicle | null = null;
-        for (const v of this.vehicles) {
-          // inner lanes only, moving, far enough out to telegraph the swing
-          if (!v.active || v.speed === 0 || v.overtakeT >= 0) continue;
-          if (v.lane !== 1 && v.lane !== 2) continue;
-          if (v.z < 45 || v.z > 150) continue;
-          if (!best || v.z < best.z) best = v; // the nearest telegraphable one
-        }
-        // Only swing if the seam neighborhood is clear: a rebase into the
-        // side of an inner-lane neighbor looks exactly like the ghosting
-        // this system exists to prevent.
+        const best = this.pickRebase();
         if (best) {
-          let clear = true;
-          for (const o of this.vehicles) {
-            if (o === best || !o.active) continue;
-            if ((o.lane === 1 || o.lane === 2) && Math.abs(o.z - best.z) < 8) {
-              clear = false;
-              break;
-            }
-          }
-          if (clear) best.overtakeT = 0;
+          best.overtakeT = 0;
+          this.events.onRebase(best.x, best.z);
+          const seam = Math.abs(ctx.playerX) < CONFIG.seamBandM ? CONFIG.seamRebaseMult : 1;
+          this.nextOvertakeAt =
+            elapsed +
+            (rand(CONFIG.overtakeEvery[0], CONFIG.overtakeEvery[1]) / (0.5 + 0.5 * density)) * esc.rebase * seam;
         }
       }
     }
 
-    // Standalone obstacles, carts, and power-ups on their own cadence
-    this.nextHoyoAt = this.cadence(this.nextHoyoAt, CONFIG.hoyoUnlockSec, CONFIG.hoyoEvery, () => {
-      const lane = Math.floor(Math.random() * 4);
-      const z = this.sameBase();
-      if (!this.laneHasVehicleNear(lane, z, 14)) {
-        this.spawnObstacle('hoyo', ROAD.laneCenters[lane] + rand(-0.6, 0.6), z);
+    // The first power-up of every run: a Bendición on the rider's line.
+    if (this.firstPowerupDue) {
+      const lead = (CONFIG.firstPowerupSec - elapsed) * this.lastPlayerSpeed;
+      if (lead <= CONFIG.spawnAhead + 10) {
+        this.firstPowerupDue = false;
+        this.placePowerup('bendicion', ctx.playerX, Math.max(lead, 40));
       }
-    });
-    this.nextPoliciaAt = this.cadence(this.nextPoliciaAt, CONFIG.policiaUnlockSec, CONFIG.policiaEvery, () => {
-      const z = this.sameBase() + 10;
-      this.spawnObstacle('policia', 0, z);
-      if (Math.random() < 0.45) {
-        for (let i = -2; i <= 2; i++) {
-          const y = Math.max(0.55, 1.35 - i * i * 0.18);
-          this.spawnPickup('platano', rand(-1, 1), z + i * 2.1, y);
-        }
+    }
+
+    // El río de plátanos starts with the cafecito.
+    if (ctx.cafecito && !this.lastCafecito) this.layRiver(ctx.playerX);
+    this.lastCafecito = ctx.cafecito;
+
+    // Shoulder anti-camping: the road takes the calm line away.
+    const side = ctx.playerX < -ROAD.halfRoad ? -1 : ctx.playerX > ROAD.halfRoad ? 1 : 0;
+    if (side !== 0 && side === this.campSide) this.campT += dt;
+    else {
+      this.campSide = side;
+      this.campT = 0;
+    }
+    if (this.campT >= CONFIG.shoulderCampSec && elapsed >= this.nextCampAt) {
+      const type: VehicleType = Math.random() < 0.5 ? 'cart' : 'guaguaParada';
+      if (this.spawnVehicle(type, side < 0 ? -1 : 4, this.sameBase(), 1)) {
+        this.nextCampAt = elapsed + rand(CONFIG.shoulderCampCooldown[0], CONFIG.shoulderCampCooldown[1]);
+        this.campT = 0;
       }
-    });
-    this.nextCharcoAt = this.cadence(this.nextCharcoAt, CONFIG.charcoUnlockSec, CONFIG.charcoEvery, () => {
-      const lane = Math.floor(Math.random() * 4);
-      const z = this.sameBase();
-      if (!this.laneHasVehicleNear(lane, z, 10)) {
-        this.spawnObstacle('charco', ROAD.laneCenters[lane] + rand(-0.5, 0.5), z);
+    }
+
+    // Standalone obstacles, carts, power-ups and plátano trails on their own cadence
+    this.nextHoyoAt = this.cadence(this.nextHoyoAt, CONFIG.hoyoUnlockSec, CONFIG.hoyoEvery, this.fireHoyo);
+    this.nextPoliciaAt = this.cadence(this.nextPoliciaAt, CONFIG.policiaUnlockSec, CONFIG.policiaEvery, this.firePolicia);
+    this.nextCharcoAt = this.cadence(this.nextCharcoAt, CONFIG.charcoUnlockSec, CONFIG.charcoEvery, this.fireCharco);
+    this.nextCartAt = this.cadence(this.nextCartAt, CONFIG.cartUnlockSec, CONFIG.cartEvery, this.fireCart);
+    this.nextPowerupAt = this.cadence(this.nextPowerupAt, CONFIG.powerupUnlockSec, CONFIG.powerupEvery, this.firePowerup);
+    this.nextTrailAt = this.cadence(this.nextTrailAt, CONFIG.platanoTrailUnlockSec, CONFIG.platanoTrailEvery, this.fireTrail);
+  }
+
+  // Cadence callbacks, bound once so the 120 Hz step allocates nothing.
+  private readonly fireHoyo = (): void => {
+    const x = ROAD.laneCenters[Math.floor(Math.random() * 4)] + rand(-0.6, 0.6);
+    const z = this.sameBase();
+    if (!this.vehicleNear(x, z, 14)) this.spawnObstacle('hoyo', x, z);
+  };
+
+  private readonly firePolicia = (): void => {
+    const z = this.sameBase() + 10;
+    if (!this.spawnObstacle('policia', 0, z)) return;
+    if (Math.random() < 0.45) {
+      // a short ground line into the bump; the arc itself follows the real
+      // jump (spawnJumpArc) once the rider launches
+      const x = ROAD.laneCenters[Math.floor(Math.random() * 4)];
+      for (let i = 1; i <= CONFIG.policiaLeadIn; i++) {
+        const pz = z - i * CONFIG.platanoLineSpacingM;
+        if (this.pickupClear(x, pz)) this.spawnPickup('platano', x, pz);
       }
-    });
-    this.nextCartAt = this.cadence(this.nextCartAt, CONFIG.cartUnlockSec, CONFIG.cartEvery, () => {
-      this.spawnVehicle('cart', Math.random() < 0.6 ? -1 : 4, this.sameBase(), 1);
-    });
-    this.nextPowerupAt = this.cadence(this.nextPowerupAt, CONFIG.powerupUnlockSec, CONFIG.powerupEvery, () => {
-      this.schedulePowerupNow(this.sameBase());
-    });
+    }
+  };
+
+  private readonly fireCharco = (): void => {
+    const x = ROAD.laneCenters[Math.floor(Math.random() * 4)] + rand(-0.5, 0.5);
+    const z = this.sameBase();
+    if (!this.vehicleNear(x, z, 10)) this.spawnObstacle('charco', x, z);
+  };
+
+  private readonly fireCart = (): void => {
+    this.spawnVehicle('cart', Math.random() < 0.6 ? -1 : 4, this.sameBase(), 1);
+  };
+
+  private readonly firePowerup = (): void => {
+    this.schedulePowerupNow(this.sameBase());
+  };
+
+  // A drought filler: a short trail only when nothing else laid plátanos lately.
+  private readonly fireTrail = (): void => {
+    if (this.elapsed - this.lastPlatanoAt < CONFIG.platanoTrailDroughtSec) return;
+    this.layLaneLine(this.sameBase(), CONFIG.platanoTrailLen, 3, 0.5, 1.1);
+  };
+
+  // Do two vehicles' bodies overlap sideways? A car out on el rebase still
+  // owns its home line: it comes back to it, so it keeps following whatever
+  // is there (and whatever is behind that line keeps following it).
+  private sharesLine(a: Vehicle, b: Vehicle): boolean {
+    const w = a.halfW + b.halfW + 0.05;
+    if (Math.abs(a.x - b.x) < w) return true;
+    if (a.overtakeT >= 0 && Math.abs(a.baseX - b.x) < w) return true;
+    if (b.overtakeT >= 0 && Math.abs(a.x - b.baseX) < w) return true;
+    return false;
+  }
+
+  // Rebase candidates: a moving inner-lane car arriving inside
+  // rebaseLeadSec, the soonest one whose swing path is clear.
+  private pickRebase(): Vehicle | null {
+    let best: Vehicle | null = null;
+    let bestT = Infinity;
+    for (const v of this.vehicles) {
+      if (!v.active || v.speed === 0 || v.overtakeT >= 0 || v.noRebase) continue;
+      if (v.lane !== 1 && v.lane !== 2) continue;
+      const t = this.arrivalTime(v.z, v.dir, v.speed);
+      if (t < CONFIG.rebaseLeadSec[0] || t > CONFIG.rebaseLeadSec[1] || t >= bestT) continue;
+      if (!this.rebaseClear(v)) continue;
+      best = v;
+      bestT = t;
+    }
+    return best;
+  }
+
+  // A rebase into the side of another vehicle looks exactly like the
+  // ghosting car-following exists to prevent, and one swept across a plátano
+  // line would bury it: sample the swing and refuse either.
+  private rebaseClear(v: Vehicle): boolean {
+    const sx = this.swingX(v);
+    const lo = Math.min(v.baseX, sx) - v.halfW - v.driftAmp;
+    const hi = Math.max(v.baseX, sx) + v.halfW + v.driftAmp;
+    const vVel = v.dir * v.speed;
+    for (const o of this.vehicles) {
+      if (o === v || !o.active) continue;
+      const w = o.halfW + o.driftAmp + 0.2;
+      if (o.x + w < lo || o.x - w > hi) continue;
+      const oVel = o.dir * o.speed;
+      for (let t = 0; t <= CONFIG.overtakeSec + 0.01; t += 0.325) {
+        if (Math.abs(o.z + oVel * t - (v.z + vVel * t)) < o.halfL + v.halfL + 3) return false;
+      }
+    }
+    const vr = Math.max(this.lastPlayerSpeed, 1);
+    for (const p of this.pickups) {
+      if (!p.active || p.z <= 0 || p.x < lo - 0.5 || p.x > hi + 0.5) continue;
+      const tp = p.z / vr;
+      if (tp > CONFIG.overtakeSec + 0.5) continue;
+      if (Math.abs(v.z - (vr - vVel) * tp) < v.halfL * HIT + 1.5) return false;
+    }
+    return true;
   }
 
   private cadence(
@@ -1133,8 +1888,8 @@ export class Traffic {
       if (!v.active) continue;
       const dzAbs = Math.abs(v.z - pz);
       if (dzAbs > v.halfL + 1.5) continue;
-      const hw = v.halfW * CONFIG.vehicleHitboxScale;
-      const hl = v.halfL * CONFIG.vehicleHitboxScale;
+      const hw = v.halfW * HIT;
+      const hl = v.halfL * HIT;
       const dx = Math.max(Math.abs(px - v.x) - hw, 0);
       const dz = Math.max(dzAbs - hl, 0);
       if (dx * dx + dz * dz < pr * pr) return true;
@@ -1151,8 +1906,17 @@ export class Traffic {
     return this.spawnObstacle(kind, x, z);
   }
 
-  debugSpawnVehicle(type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number): boolean {
-    return this.spawnVehicle(type, lane, z, dir, undefined, exactX);
+  debugSpawnVehicle(type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number, speed?: number): boolean {
+    return this.spawnVehicle(type, lane, z, dir, speed, exactX) !== null;
+  }
+
+  debugRunPattern(kind: PatternKind): void {
+    this.runPattern(kind);
+  }
+
+  debugRunSetPiece(kind: SetPieceKind): void {
+    this.lastPiece = kind;
+    this.runSetPiece(kind);
   }
 
   // Test probe: active vehicle pairs whose boxes materially interpenetrate.
@@ -1200,5 +1964,22 @@ export class Traffic {
     this.nextCharcoAt = -1;
     this.nextCartAt = -1;
     this.nextPowerupAt = -1;
+    this.nextTrailAt = -1;
+    this.lastPlatanoAt = 0;
+    this.bagIdx = this.bag.length;
+    this.firstPowerupDue = false;
+    this.openingPending = false;
+    this.tier = 0;
+    this.setPhase = 'build';
+    this.setBuilds = 0;
+    this.lastPiece = null;
+    this.sawT = 0;
+    this.horaPicoUntil = 0;
+    this.campSide = 0;
+    this.campT = 0;
+    this.nextCampAt = 0;
+    this.lastCafecito = false;
+    this.lastShielded = false;
+    this.elapsed = 0;
   }
 }
