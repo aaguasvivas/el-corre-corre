@@ -35,6 +35,7 @@ export const STRINGS = {
     share: 'COMPARTIR',
     shareFailed: '¡NO SE PUDO!', // the share sheet could not take the card
     resumeBtn: 'SEGUIR',
+    privacy: 'Privacidad',
     newRecord: '¡NUEVO RÉCORD!',
     tapeRecord: 'TU RÉCORD',
     pause: 'PAUSA',
@@ -182,6 +183,7 @@ export const STRINGS = {
     share: 'SHARE',
     shareFailed: 'SHARE FAILED',
     resumeBtn: 'RESUME',
+    privacy: 'Privacy',
     newRecord: 'NEW RECORD!',
     tapeRecord: 'YOUR RECORD',
     pause: 'PAUSED',
@@ -506,6 +508,10 @@ const CLOSE_SVG =
 // the share text stays URL-free while it is empty.
 export const SHARE_URL = '';
 
+// App Review 5.1.1(i): the privacy policy must be reachable inside the app.
+// The published site page; Capacitor hands off-site links to Safari.
+export const PRIVACY_URL = 'https://aaguasvivas.github.io/el-corre-corre-site/privacy.html';
+
 // The share photo, 3:2: wide enough for the rider, the ride and what hit them.
 const SNAP_W = 900;
 const SNAP_H = 600;
@@ -661,6 +667,7 @@ export class UI {
   private mandaoChipEl: HTMLElement;
   private mandaoSheetEl: HTMLElement;
   private pauseMandaosEl: HTMLElement;
+  private btnPrivacyEl: HTMLElement;
   // The share card's photo: the game frame at the crash, cropped around
   // the rider. Taken by captureScene; cleared when a new run starts.
   private snap: HTMLCanvasElement | null = null;
@@ -803,6 +810,7 @@ export class UI {
           <button id="btn-resume" class="btn-big" type="button"></button>
           <button id="btn-pause-menu" class="btn-mid" type="button"></button>
         </div>
+        <button id="btn-privacy" class="link-privacy" type="button"></button>
       </div>`;
 
     const q = (sel: string): HTMLElement => root.querySelector(sel)!;
@@ -871,6 +879,7 @@ export class UI {
     this.pauseLevelEl = q('#pause-level');
     this.btnResume = q('#btn-resume');
     this.btnPauseMenu = q('#btn-pause-menu');
+    this.btnPrivacyEl = q('#btn-privacy');
     this.mandaoChipEl = q('#mandao-chip');
     this.mandaoSheetEl = q('#mandao-sheet');
     this.pauseMandaosEl = q('#pause-mandaos');
@@ -938,6 +947,9 @@ export class UI {
     this.press(this.btnShare, () => this.cb.onShare());
     this.press(this.btnResume, () => this.cb.onResume(), false);
     this.press(this.btnPauseMenu, () => this.cb.onMenu());
+    this.press(this.btnPrivacyEl, () => {
+      window.open(PRIVACY_URL, '_blank', 'noopener');
+    });
     this.press(q('#hud-pause'), () => this.cb.onPause());
     // Los Mandaos on the title: the chip opens the list, any tap closes it,
     // and neither starts a run.
@@ -1183,6 +1195,7 @@ export class UI {
     this.pauseTitle.textContent = t.pause;
     this.btnResume.textContent = t.resumeBtn;
     this.btnPauseMenu.textContent = t.menu;
+    this.btnPrivacyEl.textContent = t.privacy;
     if (this.lastResult) {
       this.goTitleEl.textContent = t.gameOverTitles[this.goTitleIdx];
     }

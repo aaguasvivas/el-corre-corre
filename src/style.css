@@ -997,6 +997,25 @@ body {
   }
 }
 
+.link-privacy {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 16px;
+  border: 0;
+  background: none;
+  color: var(--white);
+  font-family: inherit;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.9;
+}
+
+.link-privacy:active {
+  opacity: 0.6;
+}
+
 .pause-btns {
   display: flex;
   flex-direction: column;
