@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { textTexture, worldMaterial, paint, getGradientMap } from './world';
+import { textTexture, worldMaterial, paint, getGradientMap, addCobrador, SIGN_FONT } from './world';
 
 export type VehicleType = 'sedan' | 'guagua' | 'camion' | 'civic' | 'motoconcho' | 'guaguaParada' | 'cart';
 export type PowerupKind = 'cafecito' | 'bendicion' | 'iman';
@@ -455,6 +455,8 @@ function guaguaAssets(banner: THREE.Texture, parked: boolean): TypeAssets {
     addExtras: (group) => {
       group.add(new THREE.Mesh(bannerGeo, bannerMat));
       if (!parked) return [];
+      // el cobrador hangs off the back step on the sidewalk side (world.ts)
+      addCobrador(group);
       // hazard blinkers over the tail lamps, both in one mesh
       const blink = new THREE.Mesh(blinkGeo, blinkMat);
       group.add(blink);
@@ -943,7 +945,7 @@ export class Traffic {
 
   constructor(scene: THREE.Scene, events: TrafficEvents) {
     this.events = events;
-    const banner = textTexture('DIOS ES MI GUÍA', 256, 40, '#ffffff', '#002d62', 'bold 26px sans-serif');
+    const banner = textTexture('DIOS ES MI GUÍA', 256, 40, '#ffffff', '#002d62', `26px ${SIGN_FONT}`);
 
     const defs: Array<[VehicleType, TypeAssets]> = [
       ['sedan', sedanAssets()],
