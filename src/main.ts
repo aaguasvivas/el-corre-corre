@@ -383,7 +383,7 @@ function startRun(): void {
   resetRunState();
   // The tour restarts from the Malecon; traffic's mix follows it explicitly
   // because the world does not announce the start line.
-  world.startRun();
+  world.startRun(score.recordDist, ui.tapeLabel(score.recordDist));
   traffic.setTramo('malecon');
   state = 'playing';
   ui.showPlaying(score.record);
@@ -463,7 +463,6 @@ resize();
 function stepSim(h: number): void {
   if (state === 'title') {
     world.step(CONFIG.baseSpeed * 0.45 * h, h, true); // attract mode: scenery moves, the tour holds still
-    world.updateTape(null);
     return;
   }
   if (state !== 'playing' && state !== 'crashing') return;
@@ -557,21 +556,14 @@ function stepSim(h: number): void {
       }
     }
 
-    // La Cinta del Récord
-    let remain: number | null = null;
-    if (!tapeBurst && score.recordDist > 0) {
-      const r = score.recordDist - score.distance;
-      if (r <= 0) {
-        tapeBurst = true;
-        world.burstTape();
-        ui.bannerNewRecord();
-        audio.recordBreak();
-        haptics.heavy();
-      } else {
-        remain = r;
-      }
+    // La Cinta del Récord (the world places it; this is the burst)
+    if (!tapeBurst && score.recordDist > 0 && score.distance >= score.recordDist) {
+      tapeBurst = true;
+      world.burstTape();
+      ui.bannerNewRecord();
+      audio.recordBreak();
+      haptics.heavy();
     }
-    world.updateTape(remain);
   } else {
     player.updateTumble(h);
   }
@@ -738,6 +730,7 @@ let testGod = false;
   },
   setRecordDist: (m: number) => {
     score.recordDist = m;
+    world.setTape(m, ui.tapeLabel(m));
   },
   setDistance: (m: number) => {
     score.distance = m;

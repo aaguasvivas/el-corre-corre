@@ -29,6 +29,7 @@ const STRINGS = {
     share: 'COMPARTIR',
     resumeBtn: 'SEGUIR',
     newRecord: '¡NUEVO RÉCORD!',
+    tapeRecord: 'TU RÉCORD',
     pause: 'PAUSA',
     resume: 'Toca pa’ seguir',
     closeCall: (n: number) => `¡Te quedaste a ${n}!`,
@@ -76,6 +77,7 @@ const STRINGS = {
     share: 'SHARE',
     resumeBtn: 'RESUME',
     newRecord: 'NEW RECORD!',
+    tapeRecord: 'YOUR RECORD',
     pause: 'PAUSED',
     resume: 'Tap to resume',
     closeCall: (n: number) => `Only ${n} short!`,
@@ -745,6 +747,11 @@ export class UI {
     this.multEl.classList.remove('bump');
     void this.multEl.offsetWidth;
     this.multEl.classList.add('bump');
+  }
+
+  // La Cinta's banner text for a record distance: TU RÉCORD · 1,234 m.
+  tapeLabel(m: number): string {
+    return `${this.t().tapeRecord} · ${Math.round(m).toLocaleString('en-US')} m`;
   }
 
   nextNearMissText(): string {

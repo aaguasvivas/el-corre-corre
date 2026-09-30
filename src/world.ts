@@ -18,13 +18,63 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { tramoFor, nextObeliscoAfter, type Tramo } from './tour';
+import { tramoFor, nextObeliscoAfter, lapLength, TRAMO_ORDER, type Tramo } from './tour';
 import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 
 const CHUNK_LEN = 30;
 const CHUNK_COUNT = 7;
+const ROAD_SLICES = 5; // 30 m chunk / 6 m lane-dash period
+// Scenery past fog far + this is not drawn at all: fully fogged and curled
+// under the horizon, it would cost draws and show nothing.
+const FOG_CULL_MARGIN = 30;
 const RECYCLE_Z = -35;
-const CONFETTI_COUNT = 46;
+const CONFETTI_COUNT = 150;
+const TAPE_POST_X = 8.7; // the arch stands on the curbs, clear of every lane
+// The banner hangs high: at the moment the rider bursts the ribbon the arch
+// is about 6 m ahead of the camera, and anything lower than this fills the
+// top of the frame (and covers the HUD) right when ¡NUEVO RÉCORD! lands.
+const TAPE_BEAM_Y = 8.2;
+
+// The bundled display font (Lilita One, vendored through @fontsource) letters
+// every canvas sign in the world. Canvas text drawn before the face has
+// loaded silently falls back to a system font, so anything that draws text
+// draws once now and again when the font is in.
+export const SIGN_FONT = "'Lilita One', 'Arial Black', sans-serif";
+const fontRedraws: Array<() => void> = [];
+let signFontReady = false;
+function whenSignFontReady(redraw: () => void): void {
+  if (!signFontReady) fontRedraws.push(redraw);
+}
+if (typeof document !== 'undefined' && document.fonts) {
+  const done = (): void => {
+    signFontReady = true;
+    for (const f of fontRedraws.splice(0)) f();
+  };
+  document.fonts.load("48px 'Lilita One'").then(done, done);
+}
+
+// La Cinta's cloth: the ribbon flutters (harder near the tape) and, once
+// burst, each half swings down from its post to hang and lie on the road.
+const TAPE_CLOTH_PARS = /* glsl */ `
+uniform float uTapeTime;
+uniform float uFlutter;
+uniform float uBreak;
+attribute float aWave;
+attribute float aPart;
+`;
+const TAPE_CLOTH_CHUNK = /* glsl */ `
+#include <begin_vertex>
+float eccPh = uTapeTime * ( aPart > 0.5 ? 9.0 : 3.0 ) + position.x * 0.9;
+transformed.z += sin( eccPh ) * 0.13 * uFlutter * aWave;
+transformed.y += sin( eccPh * 0.8 + 1.3 ) * 0.035 * uFlutter * aWave;
+if ( aPart > 0.5 && uBreak > 0.0 ) {
+  float side = position.x >= 0.0 ? 1.0 : -1.0;
+  float rel = abs( position.x ) - ${TAPE_POST_X.toFixed(2)};
+  float th = uBreak * 1.45;
+  transformed.x = side * ( ${TAPE_POST_X.toFixed(2)} + rel * cos( th ) );
+  transformed.y = max( 0.03, transformed.y + rel * sin( th ) );
+}
+`;
 const BELT_COUNT = 3;
 // Belts start slightly behind the camera so the scenery beside the player is
 // never missing. That offset also fixes their phase forever: belt starts land
@@ -62,12 +112,18 @@ interface Atmo {
   rim: THREE.Color; // premultiplied by CONFIG.rimStrength
 }
 
-function atmo(fog: number, fogFar: number, sun: number, sunI: number, hemiSky: number, hemiGround: number, rim: number): Atmo {
+// Intensities are authored in the old units and scaled by CONFIG.lightExposure
+// here, so one knob moves the whole scene and the per-tramo lerp in step()
+// never pulls a light back to its unscaled value. The sun colors stay close to
+// white on purpose: a saturated orange key light dragged every palette hex
+// toward brown (pinks went salmon, the teal shirt went olive). The golden
+// hour lives in the sky, the fog and the rim instead.
+function atmo(tramo: Tramo, fog: number, sun: number, sunI: number, hemiSky: number, hemiGround: number, rim: number): Atmo {
   return {
     fog: new THREE.Color(fog),
-    fogFar,
+    fogFar: CONFIG.tramoFogFar[tramo],
     sun: new THREE.Color(sun),
-    sunI,
+    sunI: sunI * CONFIG.lightExposure,
     hemiSky: new THREE.Color(hemiSky),
     hemiGround: new THREE.Color(hemiGround),
     rim: new THREE.Color(rim).multiplyScalar(CONFIG.rimStrength),
@@ -75,10 +131,20 @@ function atmo(fog: number, fogFar: number, sun: number, sunI: number, hemiSky: n
 }
 
 const ATMOS: Record<Tramo, Atmo> = {
-  malecon: atmo(PALETTE.skyHorizon, 140, 0xffe3b3, 1.7, 0xbfe3ef, 0xe8c39a, PALETTE.skyHorizon),
-  zona: atmo(0xf7c6ab, 140, 0xffd7a8, 1.62, 0xb7d0e6, 0xe0b691, 0xffc79f),
-  campo: atmo(0xeed7a4, 156, 0xffeabf, 1.78, 0xc9e2da, 0xdcc18c, 0xffe3ae),
+  malecon: atmo('malecon', PALETTE.skyHorizon, 0xffecd0, 1.7, 0xbfe3ef, 0xe8c39a, PALETTE.skyHorizon),
+  zona: atmo('zona', 0xf7c6ab, 0xffe3c6, 1.62, 0xb7d0e6, 0xe0b691, 0xffc79f),
+  campo: atmo('campo', 0xeed7a4, 0xfff0d6, 1.78, 0xc9e2da, 0xdcc18c, 0xffe3ae),
 };
+const HEMI_I = 0.85 * CONFIG.lightExposure;
+
+// Where the low sun sits, as a direction from the rider: a little left of
+// straight ahead and a few degrees up, so it hangs over the sea inside a
+// portrait frame with either camera height. Celestial, so the dome draws it
+// at infinity and nothing on the road parallaxes against it.
+const SUN_DIR = new THREE.Vector3(0.176, 0.07, 0.985).normalize();
+// The water's reflection of that sun, on the ground plane, runs out from the
+// rider along the same bearing.
+const SUN_BEARING = Math.atan2(SUN_DIR.x, SUN_DIR.z);
 
 // ---------------------------------------------------------------------------
 // The bend field
@@ -157,7 +223,8 @@ function rimBendPatch(shader: {
 
 // Every world-space material goes through this so the whole Malecon bends as
 // one. Toon materials additionally get the rim light; unlit materials (glint,
-// kites, banners) just bend. Celestial things (sun, halo, sky) are NOT wrapped.
+// kites, banners) just bend. Celestial things (sky dome, clouds, the mountain
+// backdrop) are NOT wrapped.
 export function worldMaterial<T extends THREE.Material>(m: T): T {
   if ((m as unknown as THREE.MeshToonMaterial).isMeshToonMaterial) {
     m.onBeforeCompile = rimBendPatch as unknown as (shader: unknown) => void;
@@ -167,6 +234,37 @@ export function worldMaterial<T extends THREE.Material>(m: T): T {
     m.customProgramCacheKey = () => 'eccbend';
   }
   return m;
+}
+
+type ShaderPatch = (shader: THREE.WebGLProgramParametersWithUniforms) => void;
+
+// Chain one more shader edit onto a material that already went through
+// worldMaterial. The key keeps each variant in its own cached program.
+function extendPatch<T extends THREE.Material>(m: T, key: string, patch: ShaderPatch): T {
+  const base = m.onBeforeCompile.bind(m);
+  const baseKey = m.customProgramCacheKey();
+  m.onBeforeCompile = (shader, renderer) => {
+    base(shader, renderer);
+    patch(shader);
+  };
+  m.customProgramCacheKey = () => `${baseKey}-${key}`;
+  return m;
+}
+
+// A per-material fog reach. Some things belong to a longer view than the
+// road: the open sea should stay turquoise out to the horizon, and La Cinta's
+// arch should rise out of the haze instead of popping in. Same fog color and
+// near distance, only the far end moves.
+function farFog<T extends THREE.Material>(m: T, far: number): T {
+  return extendPatch(m, `fog${far}`, (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <fog_fragment>',
+      `#ifdef USE_FOG
+        float fogFactor = smoothstep( fogNear, ${far.toFixed(1)}, vFogDepth );
+        gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+      #endif`,
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +297,8 @@ export function toonMaterial(color: number): THREE.MeshToonMaterial {
   return m;
 }
 
+// A one-line text texture. Pass a font built on SIGN_FONT to letter it in the
+// game's display face; it redraws itself once that face has loaded.
 export function textTexture(
   text: string,
   w: number,
@@ -211,15 +311,20 @@ export function textTexture(
   c.width = w;
   c.height = h;
   const g = c.getContext('2d')!;
-  g.fillStyle = bg;
-  g.fillRect(0, 0, w, h);
-  g.fillStyle = fg;
-  g.font = font;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, w / 2, h / 2 + 1);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  const draw = (): void => {
+    g.fillStyle = bg;
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = fg;
+    g.font = font;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, w / 2, h / 2 + 1);
+    tex.needsUpdate = true;
+  };
+  draw();
+  whenSignFontReady(draw);
   return tex;
 }
 
@@ -300,6 +405,27 @@ function cgeo(
   parts.push(paint(g, color));
 }
 
+// A flat triangle with a face on each side (separate vertices, so each face
+// keeps its own flat normal), shaped to merge with the box parts (indexed,
+// with normals and uvs).
+function sailGeometry(a: [number, number], b: [number, number], c: [number, number]): THREE.BufferGeometry {
+  const t = 0.03;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      [a[0], a[1], t, b[0], b[1], t, c[0], c[1], t, a[0], a[1], -t, b[0], b[1], -t, c[0], c[1], -t],
+      3,
+    ),
+  );
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
+  // wind both faces outward whatever the corner order was
+  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  g.setIndex(cross > 0 ? [0, 1, 2, 3, 5, 4] : [0, 2, 1, 3, 4, 5]);
+  g.computeVertexNormals();
+  return g;
+}
+
 // ---------------------------------------------------------------------------
 // Scenery atlas: signs, awnings, the flag. One texture, one material.
 // ---------------------------------------------------------------------------
@@ -316,79 +442,159 @@ interface Atlas {
   rects: Record<string, AtlasRect>;
 }
 
+// In-world signage is hand-painted Dominican street lettering: it stays
+// Spanish in EN mode, like the colmado names. Every business is fictional.
+const COLMADO_NAMES = ['LA FE', 'EL PROGRESO', 'DOÑA TATICA'];
+const STOREFRONTS: Array<{ top: string; name: string; bg: string; ink: string; big: string; edge: string; cross?: boolean }> = [
+  { top: 'BANCA DE LOTERÍA', name: 'LA SUERTE', bg: '#f4c430', ink: '#002d62', big: '#ce1126', edge: '#002d62' },
+  { top: 'SE VENDE', name: 'EMPANADA', bg: '#fffaf0', ink: '#ce1126', big: '#002d62', edge: '#e63946' },
+  { top: 'FARMACIA', name: 'SAN JOSÉ', bg: '#ffffff', ink: '#1b7a3a', big: '#1b7a3a', edge: '#1b7a3a', cross: true },
+  { top: 'REPUESTOS', name: 'EL PRIMO', bg: '#1e3a66', ink: '#ffffff', big: '#f4c430', edge: '#f4c430' },
+];
+// Awnings in the colmado and shop colors; blue, white and red never touch.
+const AWNINGS = ['#0f7a3d', hex(PALETTE.colmadoRed), '#2b7bb9', '#f4c430'];
+// Flat swatches for anything painted from the atlas without its own art:
+// poles, pennants, laundry.
+const SWATCHES: Record<string, string> = {
+  white: '#ffffff',
+  gray: '#8d8d8d',
+  red: '#e63946',
+  yellow: '#f4c430',
+  teal: '#2a9d8f',
+  lilac: '#cdb4db',
+  peach: '#ffd3b6',
+  sky: '#b3d9ff',
+  wood: '#6e5d4e',
+  wire: '#1f1b19',
+};
+// Pasacalles: the cloth banners strung across Dominican streets. Fictional,
+// no brands, no politicians.
+const PASACALLES = [
+  '¡FELICIDADES, PROMOCIÓN 2026!',
+  'SE VENDE ESTE SOLAR',
+  'FIESTAS PATRONALES: ¡TODOS INVITADOS!',
+  '¡DALE, QUE VAMO’ TARDE!',
+];
+
 function buildAtlas(): Atlas {
-  const S = 512;
+  const W = 1024;
+  const H = 512;
   const c = document.createElement('canvas');
-  c.width = S;
-  c.height = S;
+  c.width = W;
+  c.height = H;
   const g = c.getContext('2d')!;
-  g.clearRect(0, 0, S, S);
   const rects: Record<string, AtlasRect> = {};
   const put = (name: string, x: number, y: number, w: number, h: number): void => {
-    rects[name] = { u0: x / S, v0: 1 - (y + h) / S, u1: (x + w) / S, v1: 1 - y / S };
+    rects[name] = { u0: x / W, v0: 1 - (y + h) / H, u1: (x + w) / W, v1: 1 - y / H };
   };
-
-  const signNames = ['LA FE', 'EL PROGRESO', 'DOÑA TATICA'];
-  signNames.forEach((name, i) => {
-    const x = 8;
-    const y = 8 + i * 60;
-    g.fillStyle = hex(PALETTE.sunGlow);
-    g.fillRect(x, y, 300, 52);
-    g.strokeStyle = hex(PALETTE.colmadoRed);
-    g.lineWidth = 5;
-    g.strokeRect(x + 3, y + 3, 294, 46);
-    g.fillStyle = hex(PALETTE.flagBlue);
-    g.font = 'bold 15px sans-serif';
+  const two = (x: number, y: number, top: string, name: string, ink: string, big: string): void => {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('COLMADO', x + 150, y + 14);
-    g.fillStyle = hex(PALETTE.colmadoRed);
-    g.font = 'bold 25px sans-serif';
+    g.fillStyle = ink;
+    g.font = `15px ${SIGN_FONT}`;
+    g.fillText(top, x + 150, y + 14);
+    g.fillStyle = big;
+    g.font = `26px ${SIGN_FONT}`;
     g.fillText(name, x + 150, y + 35);
-    put(`sign${i}`, x, y, 300, 52);
-  });
-
-  const stripes = (x: number, y: number, color: string): void => {
-    g.fillStyle = '#ffffff';
-    g.fillRect(x, y, 300, 48);
-    g.fillStyle = color;
-    for (let i = 0; i < 10; i += 2) g.fillRect(x + i * 30, y, 30, 48);
   };
-  stripes(8, 196, '#0f7a3d'); // presidente-green, no branding
-  put('awningA', 8, 196, 300, 48);
-  stripes(8, 252, hex(PALETTE.colmadoRed));
-  put('awningB', 8, 252, 300, 48);
 
-  g.fillStyle = '#2e7d32';
-  g.fillRect(8, 310, 300, 44);
-  g.strokeStyle = '#ffffff';
-  g.lineWidth = 3;
-  g.strokeRect(11, 313, 294, 38);
-  g.fillStyle = '#ffffff';
-  g.font = 'bold 21px sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('Av. George Washington', 158, 333);
-  put('street', 8, 310, 300, 44);
+  const draw = (): void => {
+    g.clearRect(0, 0, W, H);
+    COLMADO_NAMES.forEach((name, i) => {
+      const x = 8;
+      const y = 8 + i * 60;
+      g.fillStyle = hex(PALETTE.sunGlow);
+      g.fillRect(x, y, 300, 52);
+      g.strokeStyle = hex(PALETTE.colmadoRed);
+      g.lineWidth = 5;
+      g.strokeRect(x + 3, y + 3, 294, 46);
+      two(x, y, 'COLMADO', name, hex(PALETTE.flagBlue), hex(PALETTE.colmadoRed));
+      put(`sign${i}`, x, y, 300, 52);
+    });
+    STOREFRONTS.forEach((s, i) => {
+      const x = 320;
+      const y = 8 + i * 60;
+      g.fillStyle = s.bg;
+      g.fillRect(x, y, 300, 52);
+      g.strokeStyle = s.edge;
+      g.lineWidth = 4;
+      g.strokeRect(x + 3, y + 3, 294, 46);
+      if (s.cross) {
+        g.fillStyle = s.big;
+        g.fillRect(x + 22, y + 14, 8, 24);
+        g.fillRect(x + 14, y + 22, 24, 8);
+        g.fillRect(x + 262, y + 14, 8, 24);
+        g.fillRect(x + 254, y + 22, 24, 8);
+      }
+      two(x, y, s.top, s.name, s.ink, s.big);
+      put(`sign${COLMADO_NAMES.length + i}`, x, y, 300, 52);
+    });
 
-  // La bandera, escudo and all (see flag.ts for why the escudo is not optional)
-  const fx = 340;
-  const fy = 8;
-  const fw = 160;
-  const fh = fw / FLAG_ASPECT;
-  drawDominicanFlag(g, fx, fy, fw);
-  put('flag', fx, fy, fw, fh);
+    AWNINGS.forEach((color, i) => {
+      const x = i < 2 ? 8 : 320;
+      const y = i < 2 ? 196 + i * 56 : 256 + (i - 2) * 56;
+      g.fillStyle = '#ffffff';
+      g.fillRect(x, y, 300, 48);
+      g.fillStyle = color;
+      for (let k = 0; k < 10; k += 2) g.fillRect(x + k * 30, y, 30, 48);
+      put(`awning${i}`, x, y, 300, 48);
+    });
 
-  g.fillStyle = '#ffffff';
-  g.fillRect(430, 130, 24, 24);
-  put('white', 434, 134, 16, 16);
-  g.fillStyle = '#8d8d8d';
-  g.fillRect(430, 170, 24, 24);
-  put('gray', 434, 174, 16, 16);
+    g.fillStyle = '#2e7d32';
+    g.fillRect(8, 310, 300, 44);
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 3;
+    g.strokeRect(11, 313, 294, 38);
+    g.fillStyle = '#ffffff';
+    g.font = `22px ${SIGN_FONT}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('Av. George Washington', 158, 333);
+    put('street', 8, 310, 300, 44);
 
+    // La bandera, escudo and all (see flag.ts for why the escudo is not optional)
+    const fw = 160;
+    drawDominicanFlag(g, 640, 8, fw);
+    put('flag', 640, 8, fw, fw / FLAG_ASPECT);
+
+    Object.entries(SWATCHES).forEach(([name, color], i) => {
+      const x = 820 + (i % 8) * 24;
+      const y = 8 + Math.floor(i / 8) * 24;
+      g.fillStyle = color;
+      g.fillRect(x, y, 24, 24);
+      put(name, x + 4, y + 4, 16, 16);
+    });
+
+    PASACALLES.forEach((text, i) => {
+      const x = 640;
+      const y = 120 + i * 54;
+      g.fillStyle = i % 2 ? '#fffaf0' : '#f4c430';
+      g.fillRect(x, y, 376, 48);
+      g.fillStyle = i % 2 ? '#e63946' : '#2a9d8f';
+      g.fillRect(x, y, 376, 5);
+      g.fillRect(x, y + 43, 376, 5);
+      g.fillStyle = i % 2 ? '#002d62' : '#ce1126';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      let size = 28;
+      g.font = `${size}px ${SIGN_FONT}`;
+      const tw = g.measureText(text).width;
+      if (tw > 350) {
+        size = Math.floor((size * 350) / tw);
+        g.font = `${size}px ${SIGN_FONT}`;
+      }
+      g.fillText(text, x + 188, y + 25);
+      put(`pasacalle${i}`, x, y, 376, 48);
+    });
+  };
+  draw();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
+  whenSignFontReady(() => {
+    draw();
+    tex.needsUpdate = true;
+  });
   return { tex, rects };
 }
 
@@ -420,6 +626,7 @@ const WINDOW = 0x22333d;
 interface Sized {
   geo: THREE.BufferGeometry;
   width: number;
+  shopZ?: number; // one-storey fronts: where the door is, for a shop sign above it
 }
 
 function makeFacade(width: number, floors: number, cols: number, balcony: boolean): Sized {
@@ -430,11 +637,13 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
   cbox(parts, depth + 0.35, 0.4, width + 0.35, 0, H + 0.15, 0, TRIM);
   const fx = depth / 2 + 0.05;
   const span = width - 2.2;
+  let doorZ = 0;
   for (let f = 0; f < floors; f++) {
     const wy = f === 0 ? 1.9 : 5.6;
     for (let i = 0; i < cols; i++) {
       const wz = -span / 2 + (span / (cols - 1)) * i;
       if (f === 0 && i === Math.floor(cols / 2)) {
+        doorZ = wz;
         cbox(parts, 0.14, 2.3, 1.15, fx, 1.15, wz, 0x53616b); // la puerta
         cbox(parts, 0.2, 0.16, 1.45, fx, 2.4, wz, TRIM);
       } else {
@@ -465,7 +674,7 @@ function makeFacade(width: number, floors: number, cols: number, balcony: boolea
     cbox(parts, 0.04, 0.04, 0.7, 1.4, roofY + 2.05, az, 0x2a2624);
     cbox(parts, 0.04, 0.04, 0.5, 1.75, roofY + 1.7, az, 0x2a2624);
   }
-  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
+  return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width, shopZ: floors === 1 ? doorZ : undefined };
 }
 
 function makeColmadoBody(width: number): Sized {
@@ -484,34 +693,53 @@ function makeColmadoBody(width: number): Sized {
   return { geo: gradeAO(mergeGeometries(parts)!, H * 0.6), width };
 }
 
-// La Zona Colonial: taller openings, wooden shutters, a wrought-iron balcony
-// running the full front, heavier cornice. Body stays white for instance tint.
-function makeZonaFacade(width: number, cols: number): Sized {
+// La Zona Colonial: tall painted doors, wooden shutters, wrought-iron
+// balconies running the full front, heavy cornices. One-storey casas, two-
+// and three-storey houses, so the roofline steps instead of running as one
+// wall. The body stays white for the instance tint; the doors carry their
+// own paint (teal, red, navy or wood), baked per variant, because a tint
+// cannot reach them.
+function makeZonaFacade(width: number, cols: number, floors: 1 | 2 | 3, door: number): Sized {
   const parts: THREE.BufferGeometry[] = [];
   const depth = 7;
-  const H = 7.2;
+  const FLOOR = 3.3;
+  const H = floors === 1 ? 4.6 : floors === 2 ? 7.2 : 10;
   const IRON = 0x241f1d;
   const SHUTTER = 0x2f5d3a;
+  const STONE = 0xf2ead8;
   cbox(parts, depth, H, width, 0, H / 2, 0, 0xffffff);
-  cbox(parts, depth + 0.4, 0.5, width + 0.4, 0, H + 0.2, 0, 0xf2ead8); // cornice
-  cbox(parts, depth + 0.2, 0.25, width + 0.2, 0, 3.62, 0, 0xf2ead8); // string course
+  cbox(parts, depth + 0.4, 0.5, width + 0.4, 0, H + 0.2, 0, STONE); // cornice
   const fx = depth / 2 + 0.05;
   const span = width - 2.0;
   for (let i = 0; i < cols; i++) {
     const wz = -span / 2 + (span / Math.max(1, cols - 1)) * i;
-    // ground floor: tall arched doors (a box with a small header reads arched enough)
-    cbox(parts, 0.14, 2.7, 1.05, fx, 1.35, wz, 0x3a2c22);
-    cbox(parts, 0.2, 0.18, 1.3, fx, 2.85, wz, 0xf2ead8);
-    // upper floor: shuttered French windows onto the balcony
-    cbox(parts, 0.12, 2.0, 0.5, fx, 5.1, wz - 0.29, SHUTTER);
-    cbox(parts, 0.12, 2.0, 0.5, fx, 5.1, wz + 0.29, SHUTTER);
+    if (floors === 1 && i % 2 === 1) {
+      // a casa's street window behind its iron reja
+      cbox(parts, 0.12, 1.5, 0.95, fx, 1.75, wz, 0x2a2a2e);
+      for (let b = -2; b <= 2; b++) cbox(parts, 0.05, 1.6, 0.04, fx + 0.1, 1.75, wz + b * 0.2, IRON);
+      cbox(parts, 0.2, 0.14, 1.15, fx, 2.6, wz, STONE);
+    } else {
+      // ground floor: tall painted doors (a box with a header reads arched enough)
+      cbox(parts, 0.14, 2.7, 1.05, fx, 1.35, wz, door);
+      cbox(parts, 0.2, 0.18, 1.3, fx, 2.85, wz, STONE);
+    }
+    // upper floors: shuttered French windows onto the balconies
+    for (let f = 1; f < floors; f++) {
+      const y = 1.8 + f * FLOOR;
+      cbox(parts, 0.12, 2.0, 0.5, fx, y, wz - 0.29, SHUTTER);
+      cbox(parts, 0.12, 2.0, 0.5, fx, y, wz + 0.29, SHUTTER);
+    }
   }
-  // the balcony: slab, top rail, and iron pickets across the whole front
-  cbox(parts, 0.9, 0.1, width - 0.6, fx + 0.4, 4.1, 0, 0xf2ead8);
-  cbox(parts, 0.05, 0.06, width - 0.7, fx + 0.82, 5.0, 0, IRON);
-  const pickets = Math.max(6, Math.round(width * 1.4));
-  for (let b = 0; b <= pickets; b++) {
-    cbox(parts, 0.045, 0.9, 0.045, fx + 0.82, 4.6, -(width - 0.8) / 2 + ((width - 0.8) / pickets) * b, IRON);
+  for (let f = 1; f < floors; f++) {
+    const base = 0.8 + f * FLOOR; // 4.1 for the first balcony
+    cbox(parts, depth + 0.2, 0.25, width + 0.2, 0, base - 0.48, 0, STONE); // string course
+    // the balcony: slab, top rail, and iron pickets across the whole front
+    cbox(parts, 0.9, 0.1, width - 0.6, fx + 0.4, base, 0, STONE);
+    cbox(parts, 0.05, 0.06, width - 0.7, fx + 0.82, base + 0.9, 0, IRON);
+    const pickets = Math.max(6, Math.round(width * 1.4));
+    for (let b = 0; b <= pickets; b++) {
+      cbox(parts, 0.045, 0.9, 0.045, fx + 0.82, base + 0.5, -(width - 0.8) / 2 + ((width - 0.8) / pickets) * b, IRON);
+    }
   }
   // farolito: a little iron lantern beside the center door
   cbox(parts, 0.3, 0.05, 0.05, fx + 0.15, 3.2, 0.85, IRON);
@@ -593,16 +821,52 @@ function makeFritura(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
-function makeSignSet(rects: Record<string, AtlasRect>, nameIdx: number): THREE.BufferGeometry {
+// Every shop front in a belt (colmados and storefronts alike) is one
+// instanced sign + awning. The geometry is mapped to the first sign and
+// awning in the atlas; each instance carries its own offsets to the sign and
+// awning it shows (aSignOff, aAwnOff), and aSel says which part a vertex
+// belongs to. One draw per belt for every sign on the street.
+function makeSignSet(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
   const depth = 6.5;
-  const sign = quadUV(3.5, 0.75, rects[`sign${nameIdx}`]);
+  const sign = quadUV(3.5, 0.75, rects.sign0);
   sign.rotateY(Math.PI / 2);
   sign.translate(depth / 2 + 0.08, 3.82, 0);
-  const awning = quadUV(4.6, 1.25, rects[nameIdx % 2 === 0 ? 'awningA' : 'awningB']);
+  const awning = quadUV(4.6, 1.25, rects.awning0);
   awning.rotateY(Math.PI / 2);
   awning.rotateZ(0.55);
   awning.translate(depth / 2 + 0.6, 2.62, 0);
-  return mergeGeometries([sign, awning])!;
+  const sel = (g: THREE.BufferGeometry, s: number, a: number): THREE.BufferGeometry => {
+    const n = g.getAttribute('position').count;
+    const arr = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      arr[i * 2] = s;
+      arr[i * 2 + 1] = a;
+    }
+    g.setAttribute('aSel', new THREE.BufferAttribute(arr, 2));
+    return g;
+  };
+  return mergeGeometries([sel(sign, 1, 0), sel(awning, 0, 1)])!;
+}
+
+const SIGN_VERT_PARS = /* glsl */ `
+attribute vec2 aSel;
+attribute vec2 aSignOff;
+attribute vec2 aAwnOff;
+`;
+
+function signMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+  return extendPatch(
+    worldMaterial(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })),
+    'signs',
+    (shader) => {
+      shader.vertexShader =
+        SIGN_VERT_PARS +
+        shader.vertexShader.replace(
+          '#include <uv_vertex>',
+          '#include <uv_vertex>\nvMapUv += aSel.x * aSignOff + aSel.y * aAwnOff;',
+        );
+    },
+  );
 }
 
 // A real palm reads as one smooth lean, not a staircase: the trunk is a chain
@@ -666,8 +930,8 @@ function makePalm(lean: number): THREE.BufferGeometry {
 
 function makeSeawallPost(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  cbox(parts, 0.2, 0.7, 0.2, 0, 0.85, 0, 0xf6efdf);
-  cbox(parts, 0.3, 0.1, 0.3, 0, 1.24, 0, 0xf6efdf);
+  cbox(parts, 0.18, 0.46, 0.18, 0, 0.6, 0, 0xf6efdf);
+  cbox(parts, 0.27, 0.08, 0.27, 0, 0.84, 0, 0xf6efdf);
   return mergeGeometries(parts)!;
 }
 
@@ -696,17 +960,69 @@ function makePowerPole(): THREE.BufferGeometry {
   return mergeGeometries(parts)!;
 }
 
+// Remap a plane's 0..1 uvs into an atlas rect, whatever its segment count.
+function mapUV(g: THREE.BufferGeometry, r: AtlasRect): THREE.BufferGeometry {
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, r.u0 + uv.getX(i) * (r.u1 - r.u0), r.v0 + uv.getY(i) * (r.v1 - r.v0));
+  }
+  return g;
+}
+
+// La bandera on a plane cut into strips, carrying aWave: 0 at the hoist
+// (pinned to the pole) rising to 1 at the fly, so the seaside wind can move
+// it. Used by the roadside flagpoles and the Obelisco's banner.
+function waveFlag(w: number, h: number, rects: Record<string, AtlasRect>): THREE.BufferGeometry {
+  const flag = mapUV(new THREE.PlaneGeometry(w, h, 8, 1), rects.flag);
+  const pos = flag.getAttribute('position') as THREE.BufferAttribute;
+  const wave = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) wave[i] = (pos.getX(i) + w / 2) / w;
+  flag.setAttribute('aWave', new THREE.BufferAttribute(wave, 1));
+  return flag;
+}
+
 function makeFlagpole(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
-  const pole = uvFill(new THREE.CylinderGeometry(0.05, 0.07, 5, 6), rects.white);
+  const still = (g: THREE.BufferGeometry): THREE.BufferGeometry => {
+    g.setAttribute('aWave', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count), 1));
+    return g;
+  };
+  const pole = still(uvFill(new THREE.CylinderGeometry(0.05, 0.07, 5, 6), rects.white));
   pole.translate(0, 2.5, 0);
-  const ball = uvFill(new THREE.SphereGeometry(0.09, 6, 5), rects.white);
+  const ball = still(uvFill(new THREE.SphereGeometry(0.09, 6, 5), rects.white));
   ball.translate(0, 5.05, 0);
-  const flag = quadUV(1.52, 0.95, rects.flag); // 8:5, la bandera's real ratio
+  const flag = waveFlag(1.52, 0.95, rects); // 8:5, la bandera's real ratio
   flag.translate(0.78, 4.45, 0);
   flag.rotateY(0.5);
   return mergeGeometries([pole, ball, flag])!;
 }
 
+// The wave runs from hoist to fly along the cloth's own normal, so the same
+// material works for every flag whatever way it faces.
+function flagMaterial(tex: THREE.Texture): THREE.MeshBasicMaterial {
+  return extendPatch(
+    worldMaterial(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })),
+    'flagwave',
+    (shader) => {
+      shader.uniforms.uWorldTime = WORLD_TIME;
+      shader.vertexShader =
+        'uniform float uWorldTime;\nattribute float aWave;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            float eccPh = instanceMatrix[3][2] * 0.23;
+          #else
+            float eccPh = 0.0;
+          #endif
+          transformed += normal * sin( uWorldTime * 6.0 - aWave * 7.0 + eccPh ) * 0.09 * aWave;`,
+        );
+    },
+  );
+}
+
+// The domino table: four players, and one of them winds up and slams his
+// tile down on a loop (the arm carries aArm, the shader lifts it; see
+// dominoMaterial). Everything else in the set stays still.
 function makeDominoSet(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   cgeo(parts, new THREE.CylinderGeometry(0.8, 0.8, 0.07, 10), 0xfdfdf8, 0, 0.78, 0);
@@ -723,7 +1039,41 @@ function makeDominoSet(): THREE.BufferGeometry {
   for (let d = 0; d < 5; d++) {
     cbox(parts, 0.16, 0.03, 0.09, rand(-0.4, 0.4), 0.83, rand(-0.4, 0.4), 0xffffff, 0, rand(0, 3), 0);
   }
-  return mergeGeometries(parts)!;
+  const still = mergeGeometries(parts)!;
+  still.setAttribute('aArm', new THREE.BufferAttribute(new Float32Array(still.getAttribute('position').count), 1));
+  // the slapping arm of player 0, reaching from his shoulder over the table
+  const a0 = 0.4;
+  const armParts: THREE.BufferGeometry[] = [];
+  cbox(armParts, 0.1, 0.1, 0.55, Math.cos(a0) * 0.72, 1.02, Math.sin(a0) * 0.72, PALETTE.colmadoTeal, 0, -a0 + Math.PI / 2, 0);
+  cbox(armParts, 0.13, 0.05, 0.1, Math.cos(a0) * 0.46, 1.0, Math.sin(a0) * 0.46, 0xffffff, 0, -a0, 0); // the tile
+  const arm = mergeGeometries(armParts)!;
+  arm.setAttribute('aArm', new THREE.BufferAttribute(new Float32Array(arm.getAttribute('position').count).fill(1), 1));
+  return mergeGeometries([still, arm])!;
+}
+
+// Wind up slowly over two seconds, then SLAM in a blink; each table keeps
+// its own rhythm (phase from its position in the belt).
+function dominoMaterial(): THREE.MeshToonMaterial {
+  return extendPatch(
+    worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+    'domino',
+    (shader) => {
+      shader.uniforms.uWorldTime = WORLD_TIME;
+      shader.vertexShader =
+        'uniform float uWorldTime;\nattribute float aArm;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            float eccF = fract( uWorldTime * 0.4 + instanceMatrix[3][2] * 0.37 );
+          #else
+            float eccF = fract( uWorldTime * 0.4 );
+          #endif
+          float eccLift = eccF < 0.85 ? eccF / 0.85 : ( 1.0 - eccF ) / 0.15;
+          transformed.y += aArm * eccLift * eccLift * 0.34;`,
+        );
+    },
+  );
 }
 
 function makeFruitStand(): THREE.BufferGeometry {
@@ -771,12 +1121,16 @@ interface BeltAssets {
   atlasMat: THREE.MeshBasicMaterial;
   facades: Sized[];
   colmados: Sized[];
-  signSets: THREE.BufferGeometry[];
+  signSet: THREE.BufferGeometry;
+  signMat: THREE.MeshBasicMaterial;
+  rects: Record<string, AtlasRect>;
   palms: THREE.BufferGeometry[];
   post: THREE.BufferGeometry;
   pole: THREE.BufferGeometry;
   flag: THREE.BufferGeometry;
+  flagMat: THREE.MeshBasicMaterial;
   domino: THREE.BufferGeometry;
+  dominoMat: THREE.MeshToonMaterial;
   fruit: THREE.BufferGeometry;
   chair: THREE.BufferGeometry;
   street: THREE.BufferGeometry;
@@ -806,16 +1160,26 @@ function buildBeltAssets(atlas: Atlas): BeltAssets {
       makeFacade(11, 2, 3, true),
     ],
     colmados: [makeColmadoBody(8), makeColmadoBody(10)],
-    signSets: [0, 1, 2].map((i) => makeSignSet(atlas.rects, i)),
+    signSet: makeSignSet(atlas.rects),
+    signMat: signMaterial(atlas.tex),
+    rects: atlas.rects,
     palms: [makePalm(0.55), makePalm(-0.3)],
     post: makeSeawallPost(),
     pole: makePowerPole(),
     flag: makeFlagpole(atlas.rects),
+    flagMat: flagMaterial(atlas.tex),
     domino: makeDominoSet(),
+    dominoMat: dominoMaterial(),
     fruit: makeFruitStand(),
     chair: makeChair(),
     street: makeStreetSign(atlas.rects),
-    zonaFacades: [makeZonaFacade(9, 3), makeZonaFacade(12, 4), makeZonaFacade(7.5, 2)],
+    zonaFacades: [
+      makeZonaFacade(9, 3, 2, 0x2a9d8f),
+      makeZonaFacade(12, 4, 2, 0xe63946),
+      makeZonaFacade(7.5, 3, 1, 0x002d62),
+      makeZonaFacade(10, 3, 3, 0x6b4a33),
+      makeZonaFacade(8, 3, 1, 0x2a9d8f),
+    ],
     ironLamp: makeIronLamp(),
     campoHouses: [
       makeCampoHouse(4.2, 0x6fc7be, 0xffffff),
@@ -849,10 +1213,16 @@ function stripMaterial(): THREE.MeshBasicMaterial {
   return _stripMat;
 }
 
-const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0xffffff, 0xa8c6a1, 0xf2d0a4];
+// Coral stone, ochre and terracotta, with the locked palette's teal, blue,
+// pink and yellow between them: the Zona's real color, and no longer one
+// sand-colored wall under the rosy haze.
+const ZONA_TINTS = [0xf5e6c8, 0xe8b04b, 0xd77a61, 0x2a9d8f, 0xb3d9ff, 0xff8b94, 0xffeaa7];
 
 const PASTELS = PALETTE.buildingPastels;
 const COLMADO_TINTS = [PALETTE.colmadoTeal, PALETTE.colmadoRed, 0xf4c430, 0xffffff];
+const SIGN_CAP = 8; // shop fronts per belt: two colmados and the storefronts
+// banca: yellow, empanadas: red, farmacia: blue, repuestos: green
+const STOREFRONT_AWNING = [3, 1, 2, 0];
 
 const _dummy = new THREE.Object3D();
 const _color = new THREE.Color();
@@ -862,7 +1232,9 @@ class Belt {
   tramo: Tramo = 'malecon'; // what this belt was last dressed as (test probe)
   private facadeIMs: THREE.InstancedMesh[] = [];
   private colmadoIMs: THREE.InstancedMesh[] = [];
-  private signIMs: THREE.InstancedMesh[] = [];
+  private signIM: THREE.InstancedMesh;
+  private signOff: THREE.InstancedBufferAttribute;
+  private awnOff: THREE.InstancedBufferAttribute;
   private palmIMs: THREE.InstancedMesh[] = [];
   private postIM: THREE.InstancedMesh;
   private poleIM: THREE.InstancedMesh;
@@ -900,12 +1272,19 @@ class Belt {
     };
     for (const f of assets.facades) this.facadeIMs.push(im(f.geo, assets.vcMat, 4));
     for (const cB of assets.colmados) this.colmadoIMs.push(im(cB.geo, assets.vcMat, 2));
-    for (const s of assets.signSets) this.signIMs.push(im(s, assets.atlasMat, 2));
+    const signGeo = assets.signSet.clone();
+    this.signOff = new THREE.InstancedBufferAttribute(new Float32Array(SIGN_CAP * 2), 2);
+    this.awnOff = new THREE.InstancedBufferAttribute(new Float32Array(SIGN_CAP * 2), 2);
+    this.signOff.setUsage(THREE.DynamicDrawUsage);
+    this.awnOff.setUsage(THREE.DynamicDrawUsage);
+    signGeo.setAttribute('aSignOff', this.signOff);
+    signGeo.setAttribute('aAwnOff', this.awnOff);
+    this.signIM = im(signGeo, assets.signMat, SIGN_CAP);
     for (const p of assets.palms) this.palmIMs.push(im(p, assets.vcMat, 8, true));
     this.postIM = im(assets.post, assets.vcMat, 21);
     this.poleIM = im(assets.pole, assets.vcMat, 5);
-    this.flagIM = im(assets.flag, assets.atlasMat, 3, true);
-    this.dominoIM = im(assets.domino, assets.vcMat, 2);
+    this.flagIM = im(assets.flag, assets.flagMat, 3, true);
+    this.dominoIM = im(assets.domino, assets.dominoMat, 2);
     this.fruitIM = im(assets.fruit, assets.vcMat, 2);
     this.chairIM = im(assets.chair, assets.vcMat, 4);
     this.streetIM = im(assets.street, assets.atlasMat, 2);
@@ -949,9 +1328,9 @@ class Belt {
       ry = 0,
       scale = 1,
       tint?: number,
-    ): void => {
+    ): number => {
       const i = counts.get(mesh) ?? 0;
-      if (i >= (mesh.instanceMatrix.count as number)) return;
+      if (i >= (mesh.instanceMatrix.count as number)) return -1;
       _dummy.position.set(x, y, z);
       _dummy.rotation.set(0, ry, 0);
       _dummy.scale.setScalar(scale);
@@ -960,6 +1339,17 @@ class Belt {
       if (tint !== undefined) mesh.setColorAt(i, _color.set(tint));
       else if (mesh.instanceColor) mesh.setColorAt(i, _color.set(0xffffff));
       counts.set(mesh, i + 1);
+      return i;
+    };
+    // A shop front: which sign and which awning this instance shows
+    const rects = this.assets.rects;
+    const shopSign = (z: number, sign: number, awning: number): void => {
+      const i = place(this.signIM, -12.3 - 3.25, 0, z);
+      if (i < 0) return;
+      const r = rects[`sign${sign}`];
+      const a = rects[`awning${awning}`];
+      this.signOff.setXY(i, r.u0 - rects.sign0.u0, r.v0 - rects.sign0.v0);
+      this.awnOff.setXY(i, a.u0 - rects.awning0.u0, a.v0 - rects.awning0.v0);
     };
 
     // Buildings along the far side, fronts flush at x = -12.3. Which buildings
@@ -977,7 +1367,8 @@ class Belt {
           const z = cursor + v.width / 2;
           const tint = COLMADO_TINTS[Math.floor(Math.random() * COLMADO_TINTS.length)];
           place(this.colmadoIMs[vi], -12.3 - 3.25, 0, z, 0, 1, tint);
-          place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, z);
+          const name = this.signCursor % 3;
+          shopSign(z, name, name % 2);
           this.signCursor++;
           colmadosUsed++;
           cursor += v.width + rand(0.4, 2.4);
@@ -988,6 +1379,12 @@ class Belt {
           const z = cursor + v.width / 2;
           place(this.facadeIMs[vi], -12.3 - 3.5, 0, z, 0, 1, PASTELS[pastelIdx % PASTELS.length]);
           pastelIdx++;
+          // most one-storey fronts are a business: la banca, the empanada
+          // window, the farmacia, the repuestos
+          if (v.shopZ !== undefined && Math.random() < 0.6) {
+            const shop = Math.floor(Math.random() * STOREFRONTS.length);
+            shopSign(z + v.shopZ, COLMADO_NAMES.length + shop, STOREFRONT_AWNING[shop]);
+          }
           cursor += v.width + rand(0, 2.2);
         }
       }
@@ -1001,7 +1398,8 @@ class Belt {
           const v = this.assets.colmados[vi];
           if (cursor + v.width > L - 2) break;
           place(this.colmadoIMs[vi], -12.3 - 3.25, 0, cursor + v.width / 2, 0, 1, 0xffffff);
-          place(this.signIMs[this.signCursor % 3], -12.3 - 3.25, 0, cursor + v.width / 2);
+          const name = this.signCursor % 3;
+          shopSign(cursor + v.width / 2, name, name % 2);
           this.signCursor++;
           colmadosUsed++;
           cursor += v.width + rand(0.2, 0.9);
@@ -1015,22 +1413,33 @@ class Belt {
         }
       }
     } else {
-      // El campo: houses breathe, and the platanal fills the land behind them
+      // El campo: houses breathe, and the platanal fills the land around
+      // them. The first row stands close and big, leaves over the shoulder,
+      // so a portrait frame actually sees green; no plant grows inside a
+      // house.
+      const houses: Array<[number, number]> = [];
       while (cursor < L - 6) {
         const vi = Math.floor(Math.random() * this.assets.campoHouses.length);
         const v = this.assets.campoHouses[vi];
         if (cursor + v.width > L - 4) break;
         place(this.campoHouseIMs[vi], -12.3 - 2.5, 0, cursor + v.width / 2, rand(-0.08, 0.08));
+        houses.push([cursor - 1.2, cursor + v.width + 1.2]);
         cursor += v.width + rand(7, 15);
       }
+      let friturZ = -99;
       if (Math.random() < 0.6) {
-        place(this.frituraIM, -10.6, 0, rand(8, L - 8), rand(-0.4, 0.4) + Math.PI / 2);
+        friturZ = rand(8, L - 8);
+        place(this.frituraIM, -10.6, 0, friturZ, rand(-0.4, 0.4) + Math.PI / 2);
       }
+      const inHouse = (z: number): boolean => houses.some(([a, b]) => z > a && z < b);
       // field rows, jittered so they read planted, not printed
       for (let row = 0; row < 3; row++) {
-        const rx = -15.5 - row * 3.1;
+        const rx = -13.4 - row * 3.1;
         for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
-          place(this.platanoIM, rx + rand(-0.7, 0.7), 0, z, rand(0, 6.3), rand(0.8, 1.25));
+          if (row < 2 && inHouse(z)) continue;
+          if (row === 0 && Math.abs(z - friturZ) < 2.5) continue;
+          const big = row === 0 ? rand(1.2, 1.5) : rand(0.8, 1.25);
+          place(this.platanoIM, rx + rand(-0.4, 0.4), 0, z, rand(0, 6.3), big);
         }
       }
     }
@@ -1082,17 +1491,24 @@ class Belt {
         sx += v.width + rand(0, 0.8);
       }
     } else {
-      // el platanal on both shoulders, and the fence that keeps it there
+      // el platanal on both shoulders, and the fence that keeps it there;
+      // the first row leans over the shoulder, inside the portrait frame
       for (let i = 0; i <= 20; i++) place(this.postIM, 11.85, 0, i * 6, 0, 0.85, 0x9a7b52);
-      for (let row = 0; row < 3; row++) {
-        const rx = 13.2 + row * 3.1; // close enough to read at phone FOV
-        for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
-          place(this.platanoIM, rx + rand(-0.7, 0.7), 0, z, rand(0, 6.3), rand(0.8, 1.25));
-        }
-      }
+      let seaHouse: [number, number] = [-99, -99];
       if (Math.random() < 0.5) {
         const vi = Math.floor(Math.random() * this.assets.campoHouses.length);
-        place(this.campoHouseIMs[vi], 12.3 + 2.5, 0, rand(8, L - 8), Math.PI + rand(-0.08, 0.08));
+        const hz = rand(8, L - 8);
+        place(this.campoHouseIMs[vi], 12.3 + 2.5, 0, hz, Math.PI + rand(-0.08, 0.08));
+        const half = this.assets.campoHouses[vi].width / 2 + 1.2;
+        seaHouse = [hz - half, hz + half];
+      }
+      for (let row = 0; row < 3; row++) {
+        const rx = row === 0 ? 11.2 : 12.3 + row * 3.1;
+        for (let z = rand(1, 3); z < L - 1; z += rand(3.4, 4.6)) {
+          if (row > 0 && z > seaHouse[0] && z < seaHouse[1]) continue;
+          const big = row === 0 ? rand(1.2, 1.5) : rand(0.8, 1.25);
+          place(this.platanoIM, rx + rand(-0.25, 0.25), 0, z, rand(0, 6.3), big);
+        }
       }
     }
     if (tramo === 'zona') {
@@ -1129,6 +1545,8 @@ class Belt {
       imMesh.instanceMatrix.needsUpdate = true;
       if (imMesh.instanceColor) imMesh.instanceColor.needsUpdate = true;
     }
+    this.signOff.needsUpdate = true;
+    this.awnOff.needsUpdate = true;
   }
 }
 
@@ -1459,6 +1877,781 @@ class Gallina {
 }
 
 // ---------------------------------------------------------------------------
+// Sky, clouds and the mountain backdrop: celestial, never bent, never fogged
+// by the scene fog (the dome and backdrop fade to the fog color themselves).
+// ---------------------------------------------------------------------------
+
+const DEG = Math.PI / 180;
+
+const SKY_VERT = /* glsl */ `
+varying vec3 vDir;
+void main() {
+  vDir = position;
+  // centered on the camera, so the sky never parallaxes and never clips
+  gl_Position = projectionMatrix * viewMatrix * vec4( cameraPosition + position, 1.0 );
+}
+`;
+
+const SKY_FRAG = /* glsl */ `
+uniform vec3 uTop;
+uniform vec3 uMid;
+uniform vec3 uCream;
+uniform vec3 uHorizon;
+uniform vec3 uSunDir;
+uniform vec3 uSun;
+uniform vec3 uGlow;
+varying vec3 vDir;
+void main() {
+  vec3 d = normalize( vDir );
+  float e = d.y;
+  // peach on the horizon (the fog color), a cream band, then blue overhead
+  vec3 c = mix( uHorizon, uCream, smoothstep( 0.0, 0.07, e ) );
+  c = mix( c, uMid, smoothstep( 0.05, 0.24, e ) );
+  c = mix( c, uTop, smoothstep( 0.22, 0.46, e ) );
+  float s = max( dot( d, uSunDir ), 0.0 );
+  // bloom: a warm peach ring hugging the disc and a wide soft wash, kept
+  // below the disc's own brightness so the sun still reads as a shape
+  c = mix( c, uGlow, pow( s, 260.0 ) * 0.75 + pow( s, 14.0 ) * 0.28 );
+  // the flare lying along the horizon under the sun
+  vec2 hz = normalize( d.xz + vec2( 1e-5 ) );
+  vec2 sz = normalize( uSunDir.xz );
+  c = mix( c, uGlow, exp( -abs( e - 0.012 ) * 36.0 ) * pow( max( dot( hz, sz ), 0.0 ), 50.0 ) * 0.4 );
+  // the disc: crisp, with a hairline of softness so it never shimmers
+  c = mix( c, uSun, smoothstep( 0.99881, 0.99894, s ) );
+  gl_FragColor = vec4( c, 1.0 );
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+// Cel clouds: overlapping solid circles, cream underneath and white on top
+// with the white nudged toward the sun (screen left), a flat-cut base and a
+// thin peach rim along it. No gradients: they have to sit with the toon world.
+function cloudAtlas(): { tex: THREE.CanvasTexture; big: AtlasRect; small: AtlasRect } {
+  const W = 512;
+  const H = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const cloud = (ox: number, oy: number, w: number, h: number, blobs: Array<[number, number, number]>): void => {
+    const base = oy + h * 0.86;
+    const circle = (cx: number, cy: number, r: number): void => {
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fill();
+    };
+    g.save();
+    g.beginPath();
+    g.rect(ox, oy, w, base - oy);
+    g.clip();
+    g.fillStyle = '#ffe3c0';
+    for (const [x, y, r] of blobs) circle(ox + x * w, oy + y * h, r * h);
+    g.fillStyle = '#ffffff';
+    for (const [x, y, r] of blobs) circle(ox + x * w - r * h * 0.08, oy + y * h - r * h * 0.16, r * h * 0.86);
+    g.restore();
+    // the flat base's rim, only where the cloud actually touches the cut
+    g.fillStyle = '#ffd3b6';
+    for (const [x, y, r] of blobs) {
+      const dy = base - (oy + y * h);
+      const rr = r * h;
+      if (Math.abs(dy) < rr) {
+        const half = Math.sqrt(rr * rr - dy * dy);
+        g.fillRect(ox + x * w - half, base - 3, half * 2, 3);
+      }
+    }
+  };
+  // big cumulus: 512 x 150
+  cloud(4, 4, 504, 146, [
+    [0.06, 0.8, 0.12],
+    [0.16, 0.7, 0.22],
+    [0.3, 0.6, 0.32],
+    [0.41, 0.46, 0.26],
+    [0.52, 0.5, 0.44],
+    [0.62, 0.42, 0.25],
+    [0.7, 0.6, 0.34],
+    [0.84, 0.7, 0.24],
+    [0.94, 0.8, 0.12],
+  ]);
+  // small puff: 256 x 96
+  cloud(4, 156, 248, 96, [
+    [0.12, 0.76, 0.16],
+    [0.28, 0.62, 0.28],
+    [0.48, 0.52, 0.4],
+    [0.68, 0.6, 0.3],
+    [0.86, 0.72, 0.18],
+  ]);
+  const rect = (x: number, y: number, w: number, h: number): AtlasRect => ({
+    u0: x / W,
+    v0: 1 - (y + h) / H,
+    u1: (x + w) / W,
+    v1: 1 - y / H,
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { tex, big: rect(4, 4, 504, 146), small: rect(4, 156, 248, 96) };
+}
+
+const BACKDROP_VERT = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+}
+`;
+
+// Three rows of 128 px in a 384 px canvas: row 0 on top (v 2/3..1).
+const BACKDROP_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uRowA;
+uniform float uRowB;
+uniform float uMix;
+uniform vec3 uHaze;
+varying vec2 vUv;
+void main() {
+  vec4 a = texture2D( uMap, vec2( vUv.x, ( vUv.y + 2.0 - uRowA ) / 3.0 ) );
+  vec4 b = texture2D( uMap, vec2( vUv.x, ( vUv.y + 2.0 - uRowB ) / 3.0 ) );
+  vec4 c = mix( a, b, uMix );
+  if ( c.a < 0.004 ) discard;
+  // the same air as the road: lean toward the live fog color
+  c.rgb = mix( c.rgb, uHaze, 0.32 );
+  gl_FragColor = c;
+  #include <colorspace_fragment>
+}
+`;
+
+const BACKDROP_ROWS: Record<Tramo, number> = { malecon: 0, zona: 1, campo: 2 };
+
+// Low-poly ridges painted flat: each ridge is a jagged polyline filled in its
+// haze color, then split into facets from every peak down to the base, with
+// the sun side (screen left) a shade lighter. Everything sits on the land
+// side of the canvas; the sea half stays clear so the water meets the sky.
+function backdropCanvas(): HTMLCanvasElement {
+  const W = 1024;
+  const ROW = 128;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = ROW * 3;
+  const g = c.getContext('2d')!;
+  const ridge = (
+    row: number,
+    x0: number,
+    x1: number,
+    base: number,
+    peakMin: number,
+    peakMax: number,
+    step: number,
+    lit: string,
+    shade: string,
+  ): void => {
+    const top = row * ROW;
+    const yb = top + ROW - 4;
+    const pts: Array<[number, number]> = [[x0, yb - base]];
+    for (let x = x0 + step * 0.5; x < x1; x += step * (0.6 + Math.random() * 0.8)) {
+      const peak = peakMin + Math.random() * (peakMax - peakMin);
+      // taper toward both ends so a range rises and falls instead of stopping
+      const t = Math.min(1, (x - x0) / 120, (x1 - x) / 90);
+      pts.push([x, yb - base - peak * t]);
+    }
+    pts.push([x1, yb - base]);
+    g.fillStyle = shade;
+    g.beginPath();
+    g.moveTo(x0, yb);
+    for (const [x, y] of pts) g.lineTo(x, y);
+    g.lineTo(x1, yb);
+    g.closePath();
+    g.fill();
+    // sun-side facets: from each peak down-left to the base
+    g.fillStyle = lit;
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = pts[i];
+      const [qx, qy] = pts[i - 1];
+      g.beginPath();
+      g.moveTo(qx, qy);
+      g.lineTo(px, py);
+      g.lineTo(px - (yb - py) * 0.35, yb);
+      g.lineTo(qx, yb);
+      g.closePath();
+      g.fill();
+    }
+  };
+  // Row 0, el Malecon: two hazy ridges far inland and the city's towers.
+  ridge(0, 520, 1024, 0, 30, 52, 76, '#ecd3b8', '#dfc0a4');
+  g.fillStyle = '#dcbc9f';
+  for (let x = 548; x < 760; x += 12 + Math.random() * 16) {
+    const w = 7 + Math.random() * 10;
+    const h = 16 + Math.random() * 26;
+    g.fillRect(x, ROW - 4 - h, w, h);
+  }
+  ridge(0, 640, 1024, 0, 16, 30, 58, '#e3c4a6', '#d4ae92');
+  // Row 1, la Zona: the ridges alone; the colonial walls hide the low city.
+  ridge(1, 520, 1024, 0, 32, 54, 76, '#efcdb8', '#e2b9a3');
+  ridge(1, 610, 1024, 0, 18, 32, 58, '#e5bca4', '#d7a78f');
+  // Row 2, el campo: the Cordillera Central, taller and green, with a nearer
+  // line of lomas in front.
+  ridge(2, 500, 1024, 0, 44, 70, 84, '#bfd197', '#a8c085');
+  ridge(2, 540, 1024, 0, 20, 36, 54, '#a3c276', '#8fb064');
+  return c;
+}
+
+// ---------------------------------------------------------------------------
+// Overhead spans: what crosses above a Dominican street. Pasacalles (cloth
+// banners on two poles), strings of fiesta banderitas, and in the Zona
+// laundry hung between the balconies. They fill the empty sky band and give
+// the fastest parallax on screen as they sweep over the rider. A handful of
+// spans leapfrog ahead of the rider as one InstancedMesh; each instance picks
+// its variant (the others' vertices collapse to a point) and, for a
+// pasacalle, which banner it flies. Banners and pennants hang above 7 m (so
+// they sweep out of the frame early), the lowest laundry above 4 m, all
+// clear of the tallest guagua cargo (about 3 m), and none of it collides.
+// ---------------------------------------------------------------------------
+
+const OVERHEAD_COUNT = 5;
+const OV_PASACALLE = 0;
+const OV_BANDERITAS = 1;
+const OV_LAUNDRY = 2;
+const OV_NONE = -9;
+const OV_FAR_X = -11.7; // the far-side pole line
+const OV_SEA_X = 10.85; // between the flags and the promenade's walking line
+const WORLD_TIME = { value: 0 };
+
+// Box segments along a sagging line between two points in the x-y plane.
+function sagLine(x0: number, y0: number, x1: number, y1: number, sag: number, segs: number, thick: number): THREE.BufferGeometry[] {
+  const out: THREE.BufferGeometry[] = [];
+  const at = (t: number): [number, number] => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - sag * 4 * t * (1 - t)];
+  for (let k = 0; k < segs; k++) {
+    const [ax, ay] = at(k / segs);
+    const [bx, by] = at((k + 1) / segs);
+    const len = Math.hypot(bx - ax, by - ay) + thick;
+    const b = new THREE.BoxGeometry(len, thick, thick);
+    b.rotateZ(Math.atan2(by - ay, bx - ax));
+    b.translate((ax + bx) / 2, (ay + by) / 2, 0);
+    out.push(b);
+  }
+  return out;
+}
+
+function overheadGeometry(rects: Record<string, AtlasRect>): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  // tag a part with its variant, whether it flies a banner, and how much of
+  // it the wind may move (by height: attachment points stay put)
+  const add = (g: THREE.BufferGeometry, variant: number, rect: AtlasRect, sway: 'none' | 'hang', ban = 0): void => {
+    if (rect !== rects.pasacalle0) uvFill(g, rect);
+    const pos = g.getAttribute('position') as THREE.BufferAttribute;
+    const n = pos.count;
+    let top = -Infinity;
+    let bottom = Infinity;
+    for (let i = 0; i < n; i++) {
+      top = Math.max(top, pos.getY(i));
+      bottom = Math.min(bottom, pos.getY(i));
+    }
+    const aVar = new Float32Array(n).fill(variant);
+    const aBan = new Float32Array(n).fill(ban);
+    const aSway = new Float32Array(n);
+    if (sway === 'hang') {
+      for (let i = 0; i < n; i++) aSway[i] = top > bottom ? (top - pos.getY(i)) / (top - bottom) : 0;
+    }
+    g.setAttribute('aVar', new THREE.BufferAttribute(aVar, 1));
+    g.setAttribute('aBan', new THREE.BufferAttribute(aBan, 1));
+    g.setAttribute('aSway', new THREE.BufferAttribute(aSway, 1));
+    parts.push(g);
+  };
+  const pole = (x: number, variant: number): void => {
+    const p = new THREE.BoxGeometry(0.16, 8.8, 0.16);
+    p.translate(x, 4.4, 0);
+    add(p, variant, rects.wood, 'none');
+  };
+
+  // Pasacalle: two poles, ropes to the banner's corners, the banner itself
+  pole(OV_FAR_X, OV_PASACALLE);
+  pole(OV_SEA_X, OV_PASACALLE);
+  for (const s of sagLine(OV_FAR_X, 8.6, -4.45, 8.35, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
+  for (const s of sagLine(4.05, 8.35, OV_SEA_X, 8.6, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
+  const banner = quadUV(8.5, 1.1, rects.pasacalle0);
+  banner.rotateY(Math.PI); // face the rider; the canvas's left stays screen left
+  banner.translate(-0.2, 7.8, 0);
+  add(banner, OV_PASACALLE, rects.pasacalle0, 'none', 1);
+
+  // Banderitas: two sagging strings of pennants. Blue, white and red never
+  // sit side by side, so a string can never read as a French tricolor.
+  pole(OV_FAR_X, OV_BANDERITAS);
+  pole(OV_SEA_X, OV_BANDERITAS);
+  const pennantColors = [rects.red, rects.yellow, rects.teal, rects.white, rects.lilac];
+  const strings: Array<[number, number, number, number]> = [
+    [8.6, 8.4, 0.8, 0],
+    [8.1, 8.0, 0.65, 1.4],
+  ];
+  let ci = 0;
+  for (const [y0, y1, sag, z] of strings) {
+    for (const s of sagLine(OV_FAR_X, y0, OV_SEA_X, y1, sag, 8, 0.035)) {
+      s.translate(0, 0, z);
+      add(s, OV_BANDERITAS, rects.wire, 'none');
+    }
+    const N = 18;
+    for (let k = 0; k < N; k++) {
+      const t = (k + 0.5) / N;
+      const x = OV_FAR_X + (OV_SEA_X - OV_FAR_X) * t;
+      const y = y0 + (y1 - y0) * t - sag * 4 * t * (1 - t);
+      const tri = sailGeometry([x - 0.19, y], [x + 0.19, y], [x, y - 0.44]);
+      tri.translate(0, 0, z);
+      add(tri, OV_BANDERITAS, pennantColors[ci++ % pennantColors.length], 'hang');
+    }
+  }
+
+  // Laundry across the Zona: tied to the balconies, no poles
+  const clothes = [rects.white, rects.sky, rects.peach, rects.yellow, rects.lilac, rects.red, rects.teal, rects.white];
+  for (const [y0, y1, sag, z] of [
+    [5.4, 5.3, 0.45, 0],
+    [6.0, 5.9, 0.4, 2.2],
+  ] as Array<[number, number, number, number]>) {
+    for (const s of sagLine(-12.3, y0, 12.3, y1, sag, 8, 0.045)) {
+      s.translate(0, 0, z);
+      add(s, OV_LAUNDRY, rects.wire, 'none');
+    }
+    // a sheet, a shirt with its sleeves out, a pair of pants: shapes that
+    // read as la ropa tendida and not as colored squares
+    const garment = (x: number, y: number, kind: number): THREE.BufferGeometry => {
+      const pieces: THREE.BufferGeometry[] = [];
+      const quad = (w: number, h: number, cx: number, cy: number): void => {
+        const q = new THREE.PlaneGeometry(w, h);
+        q.rotateY(Math.PI);
+        q.translate(cx, cy, 0);
+        pieces.push(q);
+      };
+      if (kind === 0) quad(0.95, 0.8, x, y - 0.42);
+      else if (kind === 1) {
+        quad(0.82, 0.18, x, y - 0.11); // shoulders and sleeves
+        quad(0.48, 0.5, x, y - 0.44);
+      } else {
+        quad(0.46, 0.14, x, y - 0.09); // waistband
+        quad(0.19, 0.62, x - 0.13, y - 0.46);
+        quad(0.19, 0.62, x + 0.13, y - 0.46);
+      }
+      return mergeGeometries(pieces)!;
+    };
+    for (let k = 0; k < 8; k++) {
+      const t = 0.12 + k * 0.105 + (z > 0 ? 0.04 : 0);
+      const x = -12.3 + 24.6 * t;
+      const y = y0 + (y1 - y0) * t - sag * 4 * t * (1 - t);
+      const g = garment(x, y - 0.02, (k + (z > 0 ? 1 : 0)) % 3);
+      g.translate(0, 0, z);
+      add(g, OV_LAUNDRY, clothes[(k + (z > 0 ? 3 : 0)) % clothes.length], 'hang');
+    }
+  }
+  return mergeGeometries(parts)!;
+}
+
+const OVERHEAD_PARS = /* glsl */ `
+uniform float uWorldTime;
+attribute float aVar;
+attribute float aBan;
+attribute float aSway;
+attribute float iVar;
+attribute vec2 iBan;
+`;
+
+class Overhead {
+  private im: THREE.InstancedMesh;
+  private iVar: THREE.InstancedBufferAttribute;
+  private iBan: THREE.InstancedBufferAttribute;
+  private z = new Float32Array(OVERHEAD_COUNT);
+  private hushed = new Uint8Array(OVERHEAD_COUNT); // cleared away for La Cinta or the gate
+  private rects: Record<string, AtlasRect>;
+
+  constructor(scene: THREE.Scene, atlas: Atlas) {
+    this.rects = atlas.rects;
+    const geo = overheadGeometry(atlas.rects);
+    this.iVar = new THREE.InstancedBufferAttribute(new Float32Array(OVERHEAD_COUNT), 1);
+    this.iBan = new THREE.InstancedBufferAttribute(new Float32Array(OVERHEAD_COUNT * 2), 2);
+    geo.setAttribute('iVar', this.iVar);
+    geo.setAttribute('iBan', this.iBan);
+    const mat = extendPatch(
+      worldMaterial(new THREE.MeshToonMaterial({ map: atlas.tex, gradientMap: getGradientMap() })),
+      'overhead',
+      (shader) => {
+        shader.uniforms.uWorldTime = WORLD_TIME;
+        shader.vertexShader =
+          OVERHEAD_PARS +
+          shader.vertexShader
+            .replace(
+              '#include <begin_vertex>',
+              `#include <begin_vertex>
+              transformed.z += sin( uWorldTime * 2.6 + position.x * 0.8 ) * 0.1 * aSway;
+              if ( abs( aVar - iVar ) > 0.5 ) transformed = vec3( 0.0 );`,
+            )
+            .replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv += aBan * iBan;');
+      },
+    );
+    this.im = new THREE.InstancedMesh(geo, mat, OVERHEAD_COUNT);
+    this.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    scene.add(this.im);
+    for (let i = 0; i < OVERHEAD_COUNT; i++) {
+      this.z[i] = 45 + i * 62;
+      this.dress(i, 'malecon');
+    }
+  }
+
+  private dress(i: number, tramo: Tramo): void {
+    const r = Math.random();
+    const v =
+      tramo === 'malecon'
+        ? r < 0.4 ? OV_PASACALLE : r < 0.75 ? OV_BANDERITAS : OV_NONE
+        : tramo === 'zona'
+          ? r < 0.65 ? OV_LAUNDRY : r < 0.9 ? OV_PASACALLE : OV_NONE
+          : r < 0.35 ? OV_BANDERITAS : OV_NONE; // el campo: the odd fiesta string
+    this.iVar.setX(i, v);
+    const b = this.rects[`pasacalle${Math.floor(Math.random() * PASACALLES.length)}`];
+    this.iBan.setXY(i, b.u0 - this.rects.pasacalle0.u0, b.v0 - this.rects.pasacalle0.v0);
+    this.iVar.needsUpdate = true;
+    this.iBan.needsUpdate = true;
+  }
+
+  // A new run starts at home: spans out in the fog re-dress with the belts.
+  redressBeyond(zMin: number, runDistance: number): void {
+    for (let i = 0; i < OVERHEAD_COUNT; i++) {
+      if (this.z[i] > zMin) this.dress(i, tramoFor(runDistance + this.z[i]));
+    }
+  }
+
+  // runDistance: where the run is, so a recycled span dresses for the tramo
+  // it will stand in. Leapfrogs ahead once it is behind the camera.
+  // tapeZ, gateZ: where La Cinta and La Puerta del Conde stand (NaN when
+  // they do not). A span never hangs in front of the record banner or
+  // inside the gate: those moments belong to them.
+  update(ds: number, runDistance: number, tapeZ: number, gateZ: number): void {
+    let far = -Infinity;
+    for (let i = 0; i < OVERHEAD_COUNT; i++) far = Math.max(far, this.z[i]);
+    for (let i = 0; i < OVERHEAD_COUNT; i++) {
+      this.z[i] -= ds;
+      if (this.z[i] < -25) {
+        far += 50 + Math.random() * 30;
+        this.z[i] = far;
+        this.dress(i, tramoFor(runDistance + far));
+        this.hushed[i] = 0;
+      }
+      // once cleared away it stays away until it recycles, so nothing pops
+      // back in over the rider after the tape is burst
+      if (Math.abs(this.z[i] - tapeZ) < 30 || Math.abs(this.z[i] - gateZ) < 12) this.hushed[i] = 1;
+      _dummy.position.set(0, 0, this.z[i]);
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.setScalar(this.hushed[i] ? 0 : 1);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Transeúntes: people walking the sidewalks. Never collidable: they walk the
+// far sidewalk in front of the shops (x -12.0) and the sea-side promenade
+// (x 11.25), both well past where the rider can ever reach (|x| < 8.45),
+// the same law as the viralata. One InstancedMesh for all of them; the
+// shader swings legs and arms, paints each shirt (instance color) and skin
+// tone (iSkin) on the parts flagged by aPart.
+// ---------------------------------------------------------------------------
+
+const WALKER_CAP = 14;
+const WALK_FAR_X = -12.0;
+const WALK_SEA_X = 11.25;
+const WALKERS_PER_TRAMO: Record<Tramo, number> = { malecon: 12, zona: 10, campo: 4 };
+const SHIRTS = [0xe63946, 0x2a9d8f, 0xf4c430, 0xffffff, 0xb3d9ff, 0xff8b94, 0xa8e6cf, 0xcdb4db, 0xffd3b6];
+const SKINS = [0x8d5524, 0xc68642, 0xe0ac69, 0x6b3e1f, 0xa0662f];
+
+function walkerGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  // part: 0 fixed color, 1 shirt, 2 skin; leg: swing weight and side
+  const add = (g: THREE.BufferGeometry, color: number, part: number, leg: number): void => {
+    paint(g, color);
+    const n = g.getAttribute('position').count;
+    g.setAttribute('aPart', new THREE.BufferAttribute(new Float32Array(n).fill(part), 1));
+    g.setAttribute('aLeg', new THREE.BufferAttribute(new Float32Array(n).fill(leg), 1));
+    parts.push(g);
+  };
+  const box = (w: number, h: number, d: number, x: number, y: number, z: number): THREE.BufferGeometry => {
+    const b = new THREE.BoxGeometry(w, h, d);
+    b.translate(x, y, z);
+    return b;
+  };
+  add(box(0.14, 0.8, 0.15, -0.09, 0.4, 0), 0x2f4a6f, 0, 1); // jeans
+  add(box(0.14, 0.8, 0.15, 0.09, 0.4, 0), 0x2f4a6f, 0, -1);
+  add(box(0.36, 0.56, 0.22, 0, 1.08, 0), 0xffffff, 1, 0); // shirt
+  add(box(0.09, 0.5, 0.1, -0.23, 1.06, 0), 0xffffff, 1, -0.6); // sleeves swing against the legs
+  add(box(0.09, 0.5, 0.1, 0.23, 1.06, 0), 0xffffff, 1, 0.6);
+  const head = new THREE.SphereGeometry(0.13, 8, 6);
+  head.translate(0, 1.5, 0);
+  add(head, 0xffffff, 2, 0);
+  add(box(0.25, 0.07, 0.25, 0, 1.62, 0), 0x2a2624, 0, 0); // hair
+  return mergeGeometries(parts)!;
+}
+
+const WALKER_CHUNK = /* glsl */ `
+#include <begin_vertex>
+float eccSwing = sin( uWorldTime * 7.0 + float( gl_InstanceID ) * 1.7 );
+float eccPivot = abs( aLeg ) > 0.8 ? 0.8 : 1.32;
+transformed.z += aLeg * eccSwing * max( 0.0, eccPivot - position.y ) * 0.5;
+`;
+
+class Walkers {
+  private im: THREE.InstancedMesh;
+  private skin: THREE.InstancedBufferAttribute;
+  private x = new Float32Array(WALKER_CAP);
+  private z = new Float32Array(WALKER_CAP);
+  private dir = new Float32Array(WALKER_CAP);
+  private live = new Uint8Array(WALKER_CAP);
+  private spawnT = 0;
+
+  constructor(scene: THREE.Scene) {
+    const geo = walkerGeometry();
+    this.skin = new THREE.InstancedBufferAttribute(new Float32Array(WALKER_CAP * 3), 3);
+    geo.setAttribute('iSkin', this.skin);
+    const mat = extendPatch(
+      worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+      'walkers',
+      (shader) => {
+        shader.uniforms.uWorldTime = WORLD_TIME;
+        shader.vertexShader =
+          'uniform float uWorldTime;\nattribute float aPart;\nattribute float aLeg;\nattribute vec3 iSkin;\n' +
+          shader.vertexShader
+            .replace('#include <begin_vertex>', WALKER_CHUNK)
+            .replace(
+              '#include <color_vertex>',
+              `#include <color_vertex>
+              vColor.rgb = aPart > 1.5 ? iSkin : aPart > 0.5 ? color * instanceColor.rgb : color;`,
+            );
+      },
+    );
+    this.im = new THREE.InstancedMesh(geo, mat, WALKER_CAP);
+    this.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    this.im.count = WALKER_CAP;
+    for (let i = 0; i < WALKER_CAP; i++) {
+      this.im.setColorAt(i, _color.set(SHIRTS[i % SHIRTS.length]));
+      this.hide(i);
+    }
+    scene.add(this.im);
+  }
+
+  private hide(i: number): void {
+    this.live[i] = 0;
+    _dummy.position.set(0, -50, 0);
+    _dummy.scale.setScalar(0);
+    _dummy.updateMatrix();
+    this.im.setMatrixAt(i, _dummy.matrix);
+  }
+
+  private spawn(i: number, z: number, tramo: Tramo): void {
+    this.live[i] = 1;
+    // the promenade belongs to the Malecon and the Zona; in el campo the
+    // platanal grows right up to the fence, so people keep to the far side
+    const sea = tramo === 'malecon' ? Math.random() < 0.45 : tramo === 'zona' && Math.random() < 0.3;
+    this.x[i] = sea ? WALK_SEA_X : WALK_FAR_X;
+    this.z[i] = z;
+    this.dir[i] = Math.random() < 0.5 ? 1 : -1;
+    this.im.setColorAt(i, _color.set(SHIRTS[Math.floor(Math.random() * SHIRTS.length)]));
+    _color.set(SKINS[Math.floor(Math.random() * SKINS.length)]);
+    this.skin.setXYZ(i, _color.r, _color.g, _color.b);
+    this.skin.needsUpdate = true;
+    if (this.im.instanceColor) this.im.instanceColor.needsUpdate = true;
+  }
+
+  // obZ, gateZ: where the Obelisco and La Puerta del Conde stand, so
+  // promenade walkers step out of their plinths instead of walking through
+  update(ds: number, dt: number, tramo: Tramo, attract: boolean, obZ: number | null, gateZ: number | null): void {
+    let alive = 0;
+    for (let i = 0; i < WALKER_CAP; i++) alive += this.live[i];
+    const want = WALKERS_PER_TRAMO[tramo];
+    // top the street back up out in the haze, one person at a time, or
+    // scattered along it on the title screen so it never starts empty
+    this.spawnT -= dt;
+    let spawnOne = alive < want && this.spawnT <= 0;
+    for (let i = 0; i < WALKER_CAP; i++) {
+      if (!this.live[i]) {
+        if (spawnOne) {
+          this.spawn(i, attract && alive < want / 2 ? rand(10, 150) : rand(120, 200), tramo);
+          this.spawnT = rand(0.2, 0.5);
+          spawnOne = false;
+        }
+        continue;
+      }
+      this.z[i] += -ds + this.dir[i] * 1.25 * dt;
+      if (this.z[i] < -12 || this.z[i] > 230) {
+        this.hide(i);
+        continue;
+      }
+      const inPlinth =
+        this.x[i] > 0 &&
+        ((obZ !== null && Math.abs(this.z[i] - obZ) < 2.4) || (gateZ !== null && Math.abs(this.z[i] - gateZ) < 2.1));
+      _dummy.position.set(this.x[i], Math.abs(Math.sin(WORLD_TIME.value * 7 + i * 1.7)) * 0.04, this.z[i]);
+      _dummy.rotation.set(0, this.dir[i] > 0 ? 0 : Math.PI, 0);
+      _dummy.scale.setScalar(inPlinth ? 0 : 1);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// El cobrador: hanging off the back step of a parked guagua, one hand on
+// the rail, waving people on and shouting ¡SÚBETE! at the sidewalk. Call once
+// on a stopped guagua's group (the guagua's addExtras in traffic.ts). The
+// geometry holds him on both sides; the shader keeps only the sidewalk side
+// (the guagua's x says which shoulder it is parked on), so he never hangs
+// into a lane and the rider can never ride through him. He rides the rear
+// corner because that is the corner the camera can see past. In-world
+// flavor, so the shout stays Spanish.
+let _cobradorGeo: THREE.BufferGeometry | null = null;
+let _cobradorMat: THREE.MeshToonMaterial | null = null;
+let _bubbleMat: THREE.MeshBasicMaterial | null = null;
+const COBRADOR_Z = -3.3;
+const SIDEWALK_SIDE = /* glsl */ `
+float eccSide = modelMatrix[3][0] > 0.0 ? 1.0 : -1.0;
+`;
+export function addCobrador(guagua: THREE.Object3D): void {
+  if (!_cobradorGeo) {
+    const figure = (s: number): THREE.BufferGeometry => {
+      const parts: THREE.BufferGeometry[] = [];
+      const z = COBRADOR_Z;
+      cbox(parts, 0.34, 0.55, 0.24, s * 1.32, 1.5, z, PALETTE.colmadoRed, 0, 0, -s * 0.32); // shirt, leaning out
+      cbox(parts, 0.14, 0.62, 0.15, s * 1.2, 0.9, z + 0.1, 0x2f4a6f, 0, 0, -s * 0.12); // legs on the step
+      cbox(parts, 0.14, 0.62, 0.15, s * 1.2, 0.9, z - 0.1, 0x2f4a6f, 0, 0, -s * 0.12);
+      cbox(parts, 0.09, 0.55, 0.1, s * 1.16, 1.98, z + 0.16, PALETTE.colmadoRed, 0, 0, s * 0.2); // hand on the rail
+      cbox(parts, 0.09, 0.45, 0.1, s * 1.66, 1.5, z - 0.18, PALETTE.colmadoRed, 0, 0, -s * 0.9); // arm out, waving
+      cgeo(parts, new THREE.SphereGeometry(0.14, 8, 6), PALETTE.skin, s * 1.5, 1.94, z);
+      cbox(parts, 0.26, 0.08, 0.26, s * 1.52, 2.06, z, 0x2a2624); // gorra
+      const g = mergeGeometries(parts)!;
+      g.setAttribute('aSide', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count).fill(s), 1));
+      return g;
+    };
+    _cobradorGeo = mergeGeometries([figure(-1), figure(1)])!;
+    _cobradorMat = extendPatch(
+      worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+      'cobrador',
+      (shader) => {
+        shader.vertexShader =
+          'attribute float aSide;\n' +
+          shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            '#include <begin_vertex>\n' + SIDEWALK_SIDE + 'if ( aSide != eccSide ) transformed = vec3( 0.0 );',
+          );
+      },
+    );
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const draw = (): void => {
+      g.clearRect(0, 0, 256, 128);
+      g.fillStyle = '#ffffff';
+      g.strokeStyle = '#002d62';
+      g.lineWidth = 6;
+      // a rounded bubble with its tail pointing down at him (drawn by hand:
+      // older iOS WebViews lack CanvasRenderingContext2D.roundRect)
+      const r = 34;
+      g.beginPath();
+      g.moveTo(8 + r, 8);
+      g.arcTo(248, 8, 248, 92, r);
+      g.arcTo(248, 92, 8, 92, r);
+      g.lineTo(130, 92);
+      g.lineTo(70, 122);
+      g.lineTo(96, 92);
+      g.arcTo(8, 92, 8, 8, r);
+      g.arcTo(8, 8, 248, 8, r);
+      g.closePath();
+      g.fill();
+      g.stroke();
+      g.fillStyle = '#ce1126';
+      g.font = `46px ${SIGN_FONT}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('¡SÚBETE!', 128, 52);
+      tex.needsUpdate = true;
+    };
+    draw();
+    whenSignFontReady(draw);
+    _bubbleMat = extendPatch(
+      worldMaterial(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })),
+      'bubble',
+      (shader) => {
+        // hops to his side of the guagua by translation, never by a mirror,
+        // so the words always read the right way round
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n' + SIDEWALK_SIDE + 'transformed.x += eccSide * 1.85;',
+        );
+      },
+    );
+  }
+  const man = new THREE.Mesh(_cobradorGeo, _cobradorMat!);
+  // the bubble's own geometry is centered at x 0; the shader offsets it
+  const bubbleGeo = new THREE.PlaneGeometry(1.5, 0.75);
+  bubbleGeo.rotateY(Math.PI); // face the riders coming up behind
+  bubbleGeo.translate(0, 2.9, COBRADOR_Z);
+  const bubble = new THREE.Mesh(bubbleGeo, _bubbleMat!);
+  guagua.add(man, bubble);
+}
+
+// ---------------------------------------------------------------------------
+// Wind motes: thin warm streaks in a tube around the rider that only show at
+// real speed and stretch with it, so a fondo reads as fast in the part of
+// the frame the road texture cannot fill. One instanced draw, only when on.
+// ---------------------------------------------------------------------------
+
+const MOTE_COUNT = 40;
+const MOTE_FROM_MPS = 28; // start showing above this speed...
+const MOTE_FULL_MPS = 44; // ...fully visible here
+
+class WindMotes {
+  private im: THREE.InstancedMesh;
+  private mat: THREE.MeshBasicMaterial;
+  private px = new Float32Array(MOTE_COUNT);
+  private py = new Float32Array(MOTE_COUNT);
+  private pz = new Float32Array(MOTE_COUNT);
+
+  constructor(scene: THREE.Scene) {
+    this.mat = worldMaterial(
+      new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow, transparent: true, opacity: 0, depthWrite: false }),
+    );
+    this.im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.03, 1.2), this.mat, MOTE_COUNT);
+    this.im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    this.im.visible = false;
+    for (let i = 0; i < MOTE_COUNT; i++) this.respawn(i, Math.random() * 42 - 1.5);
+    scene.add(this.im);
+  }
+
+  // A ring around the camera's line of sight, never in the rider's face
+  private respawn(i: number, z: number): void {
+    const a = Math.random() * Math.PI * 2;
+    const r = 1.8 + Math.random() * 4.5;
+    this.px[i] = Math.cos(a) * r;
+    this.py[i] = Math.max(0.25, 2.6 + Math.sin(a) * r * 0.6);
+    this.pz[i] = z;
+  }
+
+  update(ds: number, speed: number, live: boolean): void {
+    const k = live ? Math.min(1, Math.max(0, (speed - MOTE_FROM_MPS) / (MOTE_FULL_MPS - MOTE_FROM_MPS))) : 0;
+    this.mat.opacity += (k * 0.55 - this.mat.opacity) * 0.08;
+    this.im.visible = this.mat.opacity > 0.01;
+    if (!this.im.visible) return;
+    const stretch = 1 + speed * 0.05;
+    for (let i = 0; i < MOTE_COUNT; i++) {
+      this.pz[i] -= ds;
+      if (this.pz[i] < -1.5) this.respawn(i, 34 + Math.random() * 10); // gone before it fills the lens
+      _dummy.position.set(this.px[i], this.py[i], this.pz[i]);
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.set(1, 1, stretch);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 interface Confetto {
   im: THREE.InstancedMesh;
@@ -1479,10 +2672,20 @@ interface Confetto {
 export class World {
   private chunks: THREE.Mesh[] = [];
   private tape!: THREE.Group;
+  private tapeCanvas!: HTMLCanvasElement;
+  private tapeTex!: THREE.CanvasTexture;
+  private tapeLabel = '';
+  private tapeAt = 0; // meters into the run; 0 = no tape this run
+  private tapeBroken = false;
+  private tapeU = { time: { value: 0 }, flutter: { value: 1 }, brk: { value: 0 } };
+  private lastSpeed: number = CONFIG.baseSpeed;
   private confetti: Confetto[] = [];
   private confettiMeshes: THREE.InstancedMesh[] = [];
   private belts: Belt[] = [];
   private viralata!: Viralata;
+  private motes!: WindMotes;
+  private overhead!: Overhead;
+  private walkers!: Walkers;
   private chichiguas: Chichigua[] = [];
   private pelicans: Pelican[] = [];
   private obelisco!: THREE.Group;
@@ -1492,11 +2695,14 @@ export class World {
   // Malecon and a crossing is an achievement of THIS run.
   private runOrigin = 0;
   private obeliscoPassed = false;
+  private puerta!: THREE.Group;
+  private nextPuertaAt = 0;
   onObeliscoPass: (() => void) | null = null;
   private shimmerA!: THREE.CanvasTexture;
   private shimmerB!: THREE.CanvasTexture;
   private glintMat!: THREE.MeshBasicMaterial;
-  private roadMats!: Record<Tramo, THREE.MeshToonMaterial>;
+  private roadMats!: Record<Tramo, THREE.MeshToonMaterial[]>;
+  private crosswalkMat!: THREE.MeshToonMaterial;
   // The water, and everything that sparkles on it, so el campo can turn it
   // into farmland instead of leaving the Caribbean parked next to a
   // plantain field.
@@ -1506,8 +2712,16 @@ export class World {
   private fogRef!: THREE.Fog;
   private hemi!: THREE.HemisphereLight;
   private sunLight!: THREE.DirectionalLight;
-  private clouds: Array<{ mesh: THREE.Mesh; speed: number }> = [];
-  private boats: Array<{ mesh: THREE.Mesh; phase: number; drift: number }> = [];
+  private cloudLayer!: THREE.Mesh;
+  private cloudPeriod = 600;
+  private boats!: THREE.Mesh;
+  private backdropU!: {
+    uMap: { value: THREE.Texture };
+    uRowA: { value: number };
+    uRowB: { value: number };
+    uMix: { value: number };
+    uHaze: { value: THREE.Color };
+  };
   private tramoNow: Tramo = 'malecon';
   onTramoChange: ((t: Tramo) => void) | null = null;
   private gallinas: Gallina[] = [];
@@ -1531,7 +2745,10 @@ export class World {
   // few seconds); belts beyond it are re-dressed for the fresh tour, so the
   // player rides out of wherever they died and into home. The announcement
   // is deliberately not fired: you did not "arrive" at the start line.
-  startRun(): void {
+  // La Cinta stands tapeAtM into the run (0 = no tape) and reads tapeLabel,
+  // for example "TU RÉCORD · 1,234 m" or "LA META".
+  startRun(tapeAtM: number, tapeLabel: string): void {
+    this.setTape(tapeAtM, tapeLabel);
     this.runOrigin = this.D;
     this.tramoNow = 'malecon';
     for (const belt of this.belts) {
@@ -1541,6 +2758,9 @@ export class World {
     }
     this.obelisco.visible = false;
     this.scheduleObelisco();
+    this.puerta.visible = false;
+    this.schedulePuerta();
+    this.overhead.redressBeyond(CONFIG.fogFar, this.runDistance);
   }
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
@@ -1548,7 +2768,7 @@ export class World {
     this.buildLights(scene);
     this.buildGround(scene);
     this.buildSea(scene);
-    this.buildMountains(scene);
+    this.buildBackdrop(scene);
     this.buildRoad(scene, renderer);
     this.buildTape(scene);
     this.buildConfetti(scene);
@@ -1563,139 +2783,125 @@ export class World {
     }
 
     this.viralata = new Viralata(scene);
+    this.motes = new WindMotes(scene);
     this.chichiguas.push(new Chichigua(scene, PALETTE.flagRed), new Chichigua(scene, 0xf4c430));
     for (let i = 0; i < 3; i++) this.pelicans.push(new Pelican(scene));
     for (let i = 0; i < 3; i++) this.gallinas.push(new Gallina(scene, i));
     this.buildObelisco(scene, atlas);
+    this.buildPuerta(scene, atlas);
+    this.schedulePuerta();
+    this.overhead = new Overhead(scene, atlas);
+    this.walkers = new Walkers(scene);
   }
 
   private buildSky(scene: THREE.Scene): void {
-    const c = document.createElement('canvas');
-    c.width = 2;
-    c.height = 512;
-    const g = c.getContext('2d')!;
-    const grad = g.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, hex(PALETTE.skyTop));
-    grad.addColorStop(0.68, hex(PALETTE.skyHorizon));
-    grad.addColorStop(1, '#ffe9bc');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 2, 512);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    scene.background = tex;
-
     scene.fog = new THREE.Fog(PALETTE.skyHorizon, CONFIG.fogNear, CONFIG.fogFar);
     this.fogRef = scene.fog as THREE.Fog;
 
-    // Clouds: a few cream puffs drifting high and far, one shared texture.
-    // Not bend-patched and not fogged: they belong to the sky, not the road.
-    const cc = document.createElement('canvas');
-    cc.width = 256;
-    cc.height = 128;
-    const cg = cc.getContext('2d')!;
-    const puff = (x: number, y: number, r: number): void => {
-      const rg = cg.createRadialGradient(x, y, 0, x, y, r);
-      rg.addColorStop(0, 'rgba(255,248,236,0.92)');
-      rg.addColorStop(0.62, 'rgba(255,248,236,0.5)');
-      rg.addColorStop(1, 'rgba(255,248,236,0)');
-      cg.fillStyle = rg;
-      cg.fillRect(x - r, y - r, r * 2, r * 2);
-    };
-    puff(70, 74, 50);
-    puff(118, 60, 62);
-    puff(172, 74, 46);
-    puff(104, 86, 38);
-    const cloudTex = new THREE.CanvasTexture(cc);
-    const cloudMat = new THREE.MeshBasicMaterial({
-      map: cloudTex,
-      transparent: true,
-      fog: false,
-      depthWrite: false,
-      opacity: 0.8,
-      side: THREE.DoubleSide, // the plane's +z normal points away from the camera
-    });
-    for (let i = 0; i < 6; i++) {
-      const w = 36 + Math.random() * 30;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.42), cloudMat);
-      m.position.set(-170 + Math.random() * 340, 30 + Math.random() * 30, 238 + i * 13);
-      scene.add(m);
-      this.clouds.push({ mesh: m, speed: 0.35 + Math.random() * 0.5 });
-    }
+    // The sky is a dome that rides with the camera, colored by elevation, so
+    // the peach band sits exactly on the real horizon at any aspect ratio.
+    // Its horizon uniform IS the fog color object: every tramo mood the fog
+    // glides into, the sky glides into with it, and fogged scenery melts into
+    // the sky instead of standing in front of it as a cutout. The sun, its
+    // bloom and the flare along the horizon are drawn in the same pass.
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(385, 32, 16),
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uTop: { value: new THREE.Color(PALETTE.skyTop) },
+          uMid: { value: new THREE.Color(0xa9dcea) },
+          uCream: { value: new THREE.Color(PALETTE.sunGlow) },
+          uHorizon: { value: this.fogRef.color },
+          uSunDir: { value: SUN_DIR },
+          uSun: { value: new THREE.Color(0xfffaea) },
+          uGlow: { value: new THREE.Color(0xffc987) },
+        },
+        vertexShader: SKY_VERT,
+        fragmentShader: SKY_FRAG,
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    dome.renderOrder = -10; // first in the opaque pass; everything paints over it
+    dome.frustumCulled = false;
+    scene.add(dome);
 
-    // Celestial: deliberately NOT bend-patched.
-    const sun = new THREE.Mesh(
-      new THREE.CircleGeometry(14, 32),
-      new THREE.MeshBasicMaterial({ color: PALETTE.sunGlow, fog: false, side: THREE.DoubleSide }),
+    // Clouds: flat cel cumulus, two big ones low over the horizon and a few
+    // small ones higher up, all in one merged geometry drawn once. Two copies
+    // of the set sit one period apart, so the whole layer drifts as a single
+    // group and wraps without a seam. Not bend-patched and not fogged: they
+    // belong to the sky, not the road.
+    const { tex: cloudTex, big, small } = cloudAtlas();
+    const PERIOD = 600;
+    const parts: THREE.BufferGeometry[] = [];
+    for (const copy of [0, -PERIOD]) {
+      const layout: Array<[number, number, number, AtlasRect]> = [
+        // [x, elevation deg, width, shape]
+        [-150, 5.2, 104, big],
+        [95, 6.4, 92, big],
+        [-60, 11.5, 44, small],
+        [30, 15.5, 36, small],
+        [170, 12.5, 40, small],
+        [-230, 16.5, 34, small],
+        [250, 9.5, 50, small],
+        [-10, 14, 30, small],
+      ];
+      for (const [x, el, w, r] of layout) {
+        const z = 300 + ((x * 7) % 40 + 40) % 40; // a little depth jitter, deterministic
+        const h = w * ((r.v1 - r.v0) / (r.u1 - r.u0)) * 0.5; // atlas is 2:1
+        const q = quadUV(w, h, r);
+        q.rotateY(Math.PI); // face the camera; the texture's left stays screen left
+        q.translate(x + copy, 3 + Math.tan(el * DEG) * z + h / 2, z);
+        parts.push(q);
+      }
+    }
+    this.cloudLayer = new THREE.Mesh(
+      mergeGeometries(parts)!,
+      new THREE.MeshBasicMaterial({ map: cloudTex, transparent: true, fog: false, depthWrite: false }),
     );
-    sun.position.set(58, 11, 155);
-    scene.add(sun);
-    const halo = new THREE.Mesh(
-      new THREE.CircleGeometry(27, 32),
-      new THREE.MeshBasicMaterial({
-        color: PALETTE.sunGlow,
-        fog: false,
-        side: THREE.DoubleSide,
-        // A flat camera-facing disc has no front/back ordering to resolve, so
-        // skip the two-pass transparency three.js would otherwise do here.
-        forceSinglePass: true,
-        transparent: true,
-        opacity: 0.35,
-      }),
-    );
-    halo.position.set(58, 11, 157);
-    scene.add(halo);
-    // The soft outer bloom and a wide flare hugging the horizon: the closest
-    // a mobile toon game gets to bloom for the price of two quads.
-    const glow2 = new THREE.Mesh(
-      new THREE.CircleGeometry(44, 32),
-      new THREE.MeshBasicMaterial({
-        color: PALETTE.sunGlow,
-        fog: false,
-        side: THREE.DoubleSide,
-        forceSinglePass: true,
-        transparent: true,
-        opacity: 0.16,
-      }),
-    );
-    glow2.position.set(58, 11, 159);
-    scene.add(glow2);
-    const flare = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 32),
-      new THREE.MeshBasicMaterial({
-        color: 0xffefc8,
-        fog: false,
-        side: THREE.DoubleSide,
-        forceSinglePass: true,
-        transparent: true,
-        opacity: 0.12,
-      }),
-    );
-    flare.scale.set(120, 7, 1);
-    flare.position.set(45, 6, 161);
-    scene.add(flare);
+    this.cloudLayer.frustumCulled = false;
+    this.cloudLayer.renderOrder = -6; // behind the mountain backdrop, drawn first
+    this.cloudPeriod = PERIOD;
+    scene.add(this.cloudLayer);
   }
 
   private buildLights(scene: THREE.Scene): void {
-    const hemi = new THREE.HemisphereLight(0xbfe3ef, 0xe8c39a, 0.85);
+    const hemi = new THREE.HemisphereLight(0xbfe3ef, 0xe8c39a, HEMI_I);
     this.hemi = hemi;
     scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xffe3b3, 1.7);
+    // The key light comes from the sea side, a little behind the rider and
+    // about 28 degrees up, so the faces the camera actually sees (the rider's
+    // back, car rears, oncoming fronts) land on the middle toon step and the
+    // tops and sea-facing sides go full: the classic three-tone read. The
+    // visible sun hangs ahead in the dome; nobody can see that it lies.
+    const sun = new THREE.DirectionalLight(ATMOS.malecon.sun, ATMOS.malecon.sunI);
     this.sunLight = sun;
-    sun.position.set(40, 22, 90);
+    sun.position.set(55, 30, 2);
     sun.target.position.set(0, 0, 10);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
+    // The light looks across the road now, so the shadow box's width runs
+    // along the road: about 15 m behind the rider to 80 m ahead, and from
+    // the sea wall up over the rooftops on the far side.
     const sc = sun.shadow.camera;
-    sc.left = -45;
-    sc.right = 45;
-    sc.top = 45;
-    sc.bottom = -45;
+    sc.left = -78;
+    sc.right = 26;
+    sc.top = 28;
+    sc.bottom = -12;
     sc.near = 10;
     sc.far = 220;
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.6;
     scene.add(sun, sun.target);
+
+    // Shadowless fill from over the camera's shoulder: lifts what the key
+    // light leaves on the dark step without flattening the form.
+    const fill = new THREE.DirectionalLight(0xffeedd, CONFIG.fillLight * CONFIG.lightExposure);
+    fill.position.set(-15, 12, -30);
+    fill.target.position.set(0, 0, 10);
+    scene.add(fill, fill.target);
   }
 
   private buildGround(scene: THREE.Scene): void {
@@ -1726,14 +2932,16 @@ export class World {
       scene.add(walk);
     }
 
-    // El malecon: base wall and rail; the balusters are instanced in the belts
-    const baseGeo = new THREE.BoxGeometry(0.5, 0.6, 420, 1, 1, 24);
+    // El malecon: base wall and rail; the balusters are instanced in the belts.
+    // Kept low (the rail tops out under a metre) so a phone-height camera sees
+    // open water over it instead of a cream wall.
+    const baseGeo = new THREE.BoxGeometry(0.5, 0.4, 420, 1, 1, 24);
     const base = new THREE.Mesh(baseGeo, toonMaterial(PALETTE.seawallCream));
-    base.position.set(11.85, 0.3, 120);
+    base.position.set(11.85, 0.2, 120);
     scene.add(base);
-    const railGeo = new THREE.BoxGeometry(0.42, 0.14, 420, 1, 1, 24);
+    const railGeo = new THREE.BoxGeometry(0.42, 0.12, 420, 1, 1, 24);
     const rail = new THREE.Mesh(railGeo, toonMaterial(0xf6efdf));
-    rail.position.set(11.85, 1.28, 120);
+    rail.position.set(11.85, 0.88, 120);
     scene.add(rail);
   }
 
@@ -1741,7 +2949,12 @@ export class World {
     const flat = (w: number, l: number, color: number, x: number, y: number): void => {
       const geo = new THREE.PlaneGeometry(w, l, 1, 24);
       geo.rotateX(-Math.PI / 2);
-      const mat = toonMaterial(color);
+      // Its own material, not the shared toon cache: the water keeps its
+      // turquoise far past the road's haze, out to the horizon.
+      const mat = farFog(
+        worldMaterial(new THREE.MeshToonMaterial({ color, gradientMap: getGradientMap() })),
+        CONFIG.seaFogFar,
+      );
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, 120);
       scene.add(m);
@@ -1750,8 +2963,9 @@ export class World {
       // leaving the Malecon.
       this.seaMats.push({ mat, sea: new THREE.Color(color) });
     };
-    flat(33, 420, PALETTE.seaNear, 12 + 16.5, -0.5);
-    flat(195, 420, PALETTE.seaDeep, 45 + 97.5, -0.55);
+    // Just under the promenade, so the water shows over the low rail.
+    flat(33, 420, PALETTE.seaNear, 12 + 16.5, -0.15);
+    flat(195, 420, PALETTE.seaDeep, 45 + 97.5, -0.2);
 
     // Shimmer: two drifting fleck layers
     const fleckCanvas = (count: number, alpha: number): THREE.CanvasTexture => {
@@ -1783,10 +2997,13 @@ export class World {
       scene.add(m);
       this.waterFx.push({ mat, base: opacity }); // fades out when the water does
     };
-    mkShimmer(this.shimmerA, 0.22, -0.42);
-    mkShimmer(this.shimmerB, 0.15, -0.4);
+    mkShimmer(this.shimmerA, 0.22, -0.08);
+    mkShimmer(this.shimmerB, 0.15, -0.06);
 
-    // The sun's glint road on the water
+    // The sun's glint road on the water: a tapering strip laid along the
+    // sun's bearing from the rider, so it points straight at the disc in the
+    // dome. Its near end starts behind the rail; the far end fades into the
+    // horizon. Additive and unfogged, so it glows through the haze.
     const gc = document.createElement('canvas');
     gc.width = 128;
     gc.height = 256;
@@ -1797,9 +3014,18 @@ export class World {
     grad.addColorStop(1, 'rgba(255,243,196,0)');
     gg.fillStyle = grad;
     gg.fillRect(0, 0, 128, 256);
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < 52; i++) {
       gg.clearRect(0, Math.random() * 256, 128, 1 + Math.random() * 3);
     }
+    // fade both ends (canvas top is the far end)
+    gg.globalCompositeOperation = 'destination-in';
+    const along = gg.createLinearGradient(0, 0, 0, 256);
+    along.addColorStop(0, 'rgba(0,0,0,0)');
+    along.addColorStop(0.35, 'rgba(0,0,0,1)');
+    along.addColorStop(0.85, 'rgba(0,0,0,1)');
+    along.addColorStop(1, 'rgba(0,0,0,0)');
+    gg.fillStyle = along;
+    gg.fillRect(0, 0, 128, 256);
     const glintTex = new THREE.CanvasTexture(gc);
     this.glintMat = worldMaterial(
       new THREE.MeshBasicMaterial({
@@ -1808,77 +3034,195 @@ export class World {
         opacity: 0.42,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        fog: false,
       }),
     );
-    const glintGeo = new THREE.PlaneGeometry(13, 150, 1, 16);
-    glintGeo.rotateX(-Math.PI / 2);
+    const R0 = 70; // meters from the rider along the bearing
+    const R1 = 330;
+    const glintGeo = new THREE.BufferGeometry();
+    glintGeo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([-2.5, 0, R0, 2.5, 0, R0, -16, 0, R1, 16, 0, R1], 3),
+    );
+    glintGeo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+    glintGeo.setIndex([0, 2, 1, 1, 2, 3]);
+    glintGeo.rotateY(SUN_BEARING);
     const glint = new THREE.Mesh(glintGeo, this.glintMat);
-    glint.position.set(56, -0.38, 100);
+    glint.position.set(0, -0.04, -6);
+    glint.frustumCulled = false;
     scene.add(glint);
     this.waterFx.push({ mat: this.glintMat, base: 0.42 });
 
-    // Veleros: three small sails far out, bobbing, drifting along the coast.
-    // They vanish with the water when el campo takes over.
+    // Veleros: three small sails out on the sun's road, one merged mesh that
+    // bobs as a whole. They vanish with the water when el campo takes over.
+    const boatParts: THREE.BufferGeometry[] = [];
     for (let i = 0; i < 3; i++) {
       const parts: THREE.BufferGeometry[] = [];
       cbox(parts, 2.2, 0.5, 0.8, 0, 0.25, 0, i === 1 ? 0xce1126 : 0xf2e9dc); // hull
       cgeo(parts, new THREE.CylinderGeometry(0.05, 0.05, 3.2, 6), 0x6b5645, 0.2, 1.85, 0);
-      const sail = new THREE.BoxGeometry(1.6, 2.6, 0.06);
-      sail.translate(0.9, 1.9, 0); // hangs off the mast
-      parts.push(paint(sail, i === 2 ? 0xffd3b6 : 0xffffff));
-      const m = new THREE.Mesh(mergeGeometries(parts)!, vcToonMaterial());
-      m.position.set(52 + i * 17, -0.3, 110 + i * 55);
-      m.rotation.y = 0.5 + i * 0.4;
-      m.scale.setScalar(1.6);
-      scene.add(m);
-      this.boats.push({ mesh: m, phase: i * 2.1, drift: 0.35 + i * 0.12 });
+      // A mainsail and a jib: triangles are what make a sail read as a sail
+      // at 150 m; rectangles read as billboards.
+      parts.push(paint(sailGeometry([0.25, 0.6], [0.25, 3.35], [1.7, 0.6]), i === 2 ? 0xffd3b6 : 0xffffff));
+      parts.push(paint(sailGeometry([0.15, 3.1], [0.15, 0.6], [-0.95, 0.6]), 0xffffff));
+      const boat = mergeGeometries(parts)!;
+      boat.scale(1.6, 1.6, 1.6);
+      boat.rotateY(0.5 + i * 0.4);
+      boat.translate(18 + i * 8, 0, 90 + i * 45);
+      boatParts.push(boat);
     }
+    this.boats = new THREE.Mesh(
+      mergeGeometries(boatParts)!,
+      farFog(
+        worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+        CONFIG.seaFogFar,
+      ),
+    );
+    scene.add(this.boats);
   }
 
-  private buildMountains(scene: THREE.Scene): void {
-    // Distant loma silhouettes inland. Static: they read as infinitely far.
-    const mat = toonMaterial(PALETTE.mountainHaze);
-    const ridge = (x: number, z: number, w: number, h: number, ry: number): void => {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(w, h, 4), mat);
-      m.position.set(x, h / 2 - 1, z);
-      m.rotation.y = ry;
-      m.scale.z = 0.55;
-      scene.add(m);
+  // Distant lomas inland: one backdrop plane holding a row per tramo (the
+  // Malecon's ridges with the city's towers, the Zona's, and the taller green
+  // Cordillera for el campo). Unfogged but pre-hazed, and pulled toward the
+  // live fog color in the shader, so it sits in the same air as the road.
+  // Crossing a border crossfades one row into the next.
+  private buildBackdrop(scene: THREE.Scene): void {
+    const tex = new THREE.CanvasTexture(backdropCanvas());
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = false; // rows share one canvas; mips would bleed them together
+    tex.minFilter = THREE.LinearFilter;
+    this.backdropU = {
+      uMap: { value: tex },
+      uRowA: { value: 0 },
+      uRowB: { value: 0 },
+      uMix: { value: 0 },
+      uHaze: { value: this.fogRef.color },
     };
-    ridge(-62, 40, 42, 15, 0.4);
-    ridge(-58, 95, 55, 21, 0.9);
-    ridge(-70, 150, 48, 17, 0.2);
-    ridge(-85, 215, 70, 26, 0.7);
-    ridge(-95, 300, 80, 24, 0.5);
+    const geo = new THREE.PlaneGeometry(520, 60);
+    geo.rotateY(Math.PI); // face the camera; the canvas's left stays screen left (the sea)
+    const m = new THREE.Mesh(
+      geo,
+      new THREE.ShaderMaterial({
+        uniforms: this.backdropU,
+        vertexShader: BACKDROP_VERT,
+        fragmentShader: BACKDROP_FRAG,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    m.position.set(0, 22, 250); // bottom edge at y -8, under the horizon
+    m.renderOrder = -4; // after the clouds (-6), which sit behind it
+    m.frustumCulled = false;
+    scene.add(m);
   }
 
   // One road texture per tramo, all built at boot: warm asphalt on the
-  // Malecon, cobble-toned stone in the Zona, faded patchy blacktop with dirt
-  // shoulders out in el campo. Chunks swap materials as they recycle, and all
-  // three share one shader program, so the swap costs nothing.
+  // Malecon, cobble-toned stone in the Zona, faded patchy blacktop with red
+  // dirt shoulders out in el campo, plus one Malecon variant with a zebra
+  // crossing. The textures tile along the road, so every chunk can show its
+  // own slice of one (see buildRoad) and the features never march past in
+  // lockstep. The features are sized to read at phone scale: manholes, patch
+  // outlines, cracks and tar seams streaming under the rider are most of
+  // what makes 40 m/s look like 40 m/s.
   private roadTexture(
     renderer: THREE.WebGLRenderer,
     base: number,
     shoulder: number,
     tramo: Tramo,
+    crosswalk = false,
   ): THREE.CanvasTexture {
     const c = document.createElement('canvas');
     c.width = 512;
     c.height = 1024;
+    const H = c.height;
     const g = c.getContext('2d')!;
     const pmx = c.width / ROAD.fullWidth;
-    const pmy = c.height / CHUNK_LEN;
+    const pmy = H / CHUNK_LEN;
+    const laneX = (lane: number): number => CONFIG.shoulderWidth + CONFIG.laneWidth * (lane + 0.5);
+    // Anything that may cross the top or bottom edge is drawn again one tile
+    // over, so the texture wraps without a seam.
+    const wrapped = (yPx: number, reachPx: number, draw: (dy: number) => void): void => {
+      draw(0);
+      if (yPx - reachPx < 0) draw(H);
+      if (yPx + reachPx > H) draw(-H);
+    };
+    // A repair in the road: a jittered hexagon (a pothole fill) or a jittered
+    // rectangle (a utility cut), with a darker hairline outline, so it reads
+    // as a patch and not as a tiling glitch.
+    const patch = (xM: number, zM: number, wM: number, hM: number, fill: string, edge: string, sides = 6): void => {
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k < sides; k++) {
+        const a = (k / sides) * Math.PI * 2 + (sides === 4 ? Math.PI / 4 + (Math.random() - 0.5) * 0.12 : Math.random() * 0.5);
+        const rx = (wM / 2) * (0.75 + Math.random() * 0.25);
+        const ry = (hM / 2) * (0.75 + Math.random() * 0.25);
+        pts.push([(xM + Math.cos(a) * rx) * pmx, (zM + Math.sin(a) * ry) * pmy]);
+      }
+      wrapped(zM * pmy, (hM / 2) * pmy, (dy) => {
+        g.beginPath();
+        for (const [px, py] of pts) g.lineTo(px, py + dy);
+        g.closePath();
+        g.fillStyle = fill;
+        g.fill();
+        g.strokeStyle = edge;
+        g.lineWidth = 1.2;
+        g.stroke();
+      });
+    };
+    const crack = (xM: number, zM: number, alpha: number): void => {
+      const pts: Array<[number, number]> = [[xM * pmx, zM * pmy]];
+      let a = Math.random() * Math.PI * 2;
+      for (let k = 0; k < 7; k++) {
+        a += (Math.random() - 0.5) * 1.3;
+        const [px, py] = pts[pts.length - 1];
+        pts.push([px + Math.cos(a) * 0.35 * pmx, py + Math.sin(a) * 0.35 * pmy]);
+      }
+      wrapped(zM * pmy, 3 * pmy, (dy) => {
+        g.beginPath();
+        for (const [px, py] of pts) g.lineTo(px, py + dy);
+        g.strokeStyle = `rgba(0,0,0,${alpha})`;
+        g.lineWidth = 1.5;
+        g.stroke();
+      });
+    };
+    // A manhole is a flush iron plate: LIGHTER than the road with a dark
+    // seam, the reverse of a hoyo (a dark hole with a pale lip), so decor
+    // can never be mistaken for the hazard.
+    const manhole = (xM: number, zM: number): void => {
+      const cx = xM * pmx;
+      const cy = zM * pmy;
+      wrapped(cy, 0.5 * pmy, (dy) => {
+        g.beginPath();
+        g.ellipse(cx, cy + dy, 0.4 * pmx, 0.4 * pmy, 0, 0, Math.PI * 2);
+        g.fillStyle = '#7d766f';
+        g.fill();
+        g.strokeStyle = '#241f1d';
+        g.lineWidth = 2;
+        g.stroke();
+        g.strokeStyle = 'rgba(36,31,29,0.45)';
+        g.lineWidth = 1.2;
+        for (const k of [-0.18, 0, 0.18]) {
+          g.beginPath();
+          g.moveTo(cx - 0.3 * pmx, cy + dy + k * pmy);
+          g.lineTo(cx + 0.3 * pmx, cy + dy + k * pmy);
+          g.stroke();
+          g.beginPath();
+          g.moveTo(cx + k * pmx, cy + dy - 0.3 * pmy);
+          g.lineTo(cx + k * pmx, cy + dy + 0.3 * pmy);
+          g.stroke();
+        }
+      });
+    };
 
     g.fillStyle = hex(base);
-    g.fillRect(0, 0, c.width, c.height);
+    g.fillRect(0, 0, c.width, H);
     g.fillStyle = hex(shoulder);
-    g.fillRect(0, 0, CONFIG.shoulderWidth * pmx, c.height);
-    g.fillRect(c.width - CONFIG.shoulderWidth * pmx, 0, CONFIG.shoulderWidth * pmx, c.height);
+    g.fillRect(0, 0, CONFIG.shoulderWidth * pmx, H);
+    g.fillRect(c.width - CONFIG.shoulderWidth * pmx, 0, CONFIG.shoulderWidth * pmx, H);
 
     for (let i = 0; i < 900; i++) {
       g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.06)';
       const s = 1 + Math.random() * 2.2;
-      g.fillRect(Math.random() * c.width, Math.random() * c.height, s, s);
+      g.fillRect(Math.random() * c.width, Math.random() * H, s, s);
     }
 
     if (tramo === 'zona') {
@@ -1892,17 +3236,43 @@ export class World {
           g.fillRect(col * cw + off + 1, row * ch + 1, cw - 2, ch - 2);
         }
       }
+      manhole(laneX(Math.floor(Math.random() * 4)), 4 + Math.random() * 22);
     } else if (tramo === 'campo') {
-      // patched blacktop: big faded blotches and a dusting near the shoulders
-      for (let i = 0; i < 26; i++) {
-        g.fillStyle = Math.random() < 0.5 ? 'rgba(217,199,167,0.08)' : 'rgba(0,0,0,0.1)';
-        const w = (1 + Math.random() * 3) * pmx;
-        const h = (1.5 + Math.random() * 4) * pmy;
-        g.fillRect(Math.random() * c.width, Math.random() * c.height, w, h);
+      // red dirt creeping onto the shoulders
+      g.fillStyle = 'rgba(215,122,97,0.35)';
+      g.fillRect(0, 0, CONFIG.shoulderWidth * pmx * 1.15, H);
+      g.fillRect(c.width - CONFIG.shoulderWidth * pmx * 1.15, 0, CONFIG.shoulderWidth * pmx * 1.15, H);
+      // patched blacktop: faded repairs with ragged edges, hairline cracks
+      for (let i = 0; i < 10; i++) {
+        const lighter = Math.random() < 0.5;
+        patch(
+          CONFIG.shoulderWidth + Math.random() * (ROAD.fullWidth - 2 * CONFIG.shoulderWidth),
+          Math.random() * CHUNK_LEN,
+          1.0 + Math.random() * 1.6,
+          1.4 + Math.random() * 2.4,
+          lighter ? 'rgba(217,199,167,0.1)' : 'rgba(0,0,0,0.13)',
+          'rgba(0,0,0,0.22)',
+        );
       }
-      g.fillStyle = 'rgba(217,199,167,0.22)';
-      g.fillRect(0, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
-      g.fillRect(c.width - CONFIG.shoulderWidth * pmx * 1.25, 0, CONFIG.shoulderWidth * pmx * 1.25, c.height);
+      for (let i = 0; i < 7; i++) crack(2 + Math.random() * 12.8, Math.random() * CHUNK_LEN, 0.3);
+    } else {
+      // El Malecon: utility patches, cracks, one manhole, and transverse tar
+      // seams every 7.5 m, the small things that stream past the rider.
+      for (let i = 0; i < 4; i++) {
+        patch(laneX(Math.floor(Math.random() * 4)) + (Math.random() - 0.5) * 1.2, Math.random() * CHUNK_LEN,
+          1.4 + Math.random() * 1.6, 1.5 + Math.random() * 1.5, 'rgba(120,112,104,0.24)', 'rgba(0,0,0,0.28)', 4);
+      }
+      for (let i = 0; i < 5; i++) crack(2 + Math.random() * 12.8, Math.random() * CHUNK_LEN, 0.25);
+      manhole(laneX(Math.floor(Math.random() * 4)), 4 + Math.random() * 22);
+      g.strokeStyle = 'rgba(0,0,0,0.25)';
+      g.lineWidth = 1.2;
+      for (let zM = 3.75; zM < CHUNK_LEN; zM += 7.5) {
+        const skew = (Math.random() - 0.5) * 6;
+        g.beginPath();
+        g.moveTo(CONFIG.shoulderWidth * pmx, zM * pmy - skew);
+        g.lineTo(c.width - CONFIG.shoulderWidth * pmx, zM * pmy + skew);
+        g.stroke();
+      }
     }
 
     // Tire wear: two soft dark tracks in every lane. Reads as a road that
@@ -1933,37 +3303,68 @@ export class World {
       }
     }
 
+    if (crosswalk) {
+      // el paso de peatones: six bars per direction, painted over the lines
+      g.fillStyle = hex(PALETTE.laneDash);
+      for (const half of [0, 1]) {
+        const x0 = CONFIG.shoulderWidth + half * ROAD.halfRoad + 0.4;
+        for (let k = 0; k < 6; k++) {
+          g.fillRect((x0 + k * 1.1) * pmx, 13 * pmy, 0.5 * pmx, 4 * pmy);
+        }
+      }
+    }
+
+    if (tramo !== 'campo') {
+      // the painted curb: 1 m red, 1 m white along both edges. At speed it
+      // strobes past, which sells the speed as much as anything on screen.
+      const w = 0.3 * pmx;
+      for (let zM = 0; zM < CHUNK_LEN; zM += 2) {
+        g.fillStyle = hex(PALETTE.colmadoRed);
+        g.fillRect(0, zM * pmy, w, pmy);
+        g.fillRect(c.width - w, zM * pmy, w, pmy);
+        g.fillStyle = '#f6f1e7';
+        g.fillRect(0, (zM + 1) * pmy, w, pmy);
+        g.fillRect(c.width - w, (zM + 1) * pmy, w, pmy);
+      }
+    }
+
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapT = THREE.RepeatWrapping; // chunks show different slices of it
     tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     return tex;
   }
 
+  // Each tramo's texture is shown through ROAD_SLICES materials, each looking
+  // at the tile from a different 6 m step (a lane-dash period, so the dashes
+  // never break). A recycled chunk picks one at random, so the manhole and
+  // the patches do not come round every 30 m like a metronome. The clones
+  // share their image, so this costs materials, not texture memory.
   private buildRoad(scene: THREE.Scene, renderer: THREE.WebGLRenderer): void {
-    this.roadMats = {
-      malecon: worldMaterial(
-        new THREE.MeshToonMaterial({
-          map: this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon'),
-          gradientMap: getGradientMap(),
-        }),
-      ),
-      zona: worldMaterial(
-        new THREE.MeshToonMaterial({
-          map: this.roadTexture(renderer, 0x45414a, 0x4f4a50, 'zona'),
-          gradientMap: getGradientMap(),
-        }),
-      ),
-      campo: worldMaterial(
-        new THREE.MeshToonMaterial({
-          map: this.roadTexture(renderer, 0x4a443c, 0x5a4f42, 'campo'),
-          gradientMap: getGradientMap(),
-        }),
-      ),
+    const slices = (tex: THREE.CanvasTexture): THREE.MeshToonMaterial[] => {
+      const out: THREE.MeshToonMaterial[] = [];
+      for (let k = 0; k < ROAD_SLICES; k++) {
+        const t = k === 0 ? tex : tex.clone();
+        t.offset.y = k / ROAD_SLICES;
+        out.push(worldMaterial(new THREE.MeshToonMaterial({ map: t, gradientMap: getGradientMap() })));
+      }
+      return out;
     };
+    this.roadMats = {
+      malecon: slices(this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon')),
+      zona: slices(this.roadTexture(renderer, 0x45414a, 0x4f4a50, 'zona')),
+      campo: slices(this.roadTexture(renderer, 0x4a443c, 0x5a4f42, 'campo')),
+    };
+    this.crosswalkMat = worldMaterial(
+      new THREE.MeshToonMaterial({
+        map: this.roadTexture(renderer, PALETTE.asphalt, PALETTE.asphaltShoulder, 'malecon', true),
+        gradientMap: getGradientMap(),
+      }),
+    );
     const geo = new THREE.PlaneGeometry(ROAD.fullWidth, CHUNK_LEN, 1, 8);
     geo.rotateX(-Math.PI / 2);
     for (let i = 0; i < CHUNK_COUNT; i++) {
-      const chunk = new THREE.Mesh(geo, this.roadMats.malecon);
+      const chunk = new THREE.Mesh(geo, this.roadMats.malecon[i % ROAD_SLICES]);
       chunk.position.z = -CHUNK_LEN + i * CHUNK_LEN;
       chunk.receiveShadow = true;
       scene.add(chunk);
@@ -1971,41 +3372,131 @@ export class World {
     }
   }
 
+  // La Cinta del Récord: a finish arch over the road (red posts with white
+  // bands, a gold beam, the banner hanging from it) and the breakable ribbon
+  // across the lanes. Readable from afar, which is the whole point: the
+  // record is a place on the road you can see coming. The banner and the
+  // ribbon share one canvas and one draw; the ribbon flutters, harder in the
+  // last 60 m, and on the burst its halves swing down from the posts while
+  // the arch stays standing for you to ride under.
   private buildTape(scene: THREE.Scene): void {
     this.tape = new THREE.Group();
-    const postGeo = new THREE.CylinderGeometry(0.07, 0.07, 1.5, 8);
+    const parts: THREE.BufferGeometry[] = [];
     for (const sx of [-1, 1]) {
-      const post = new THREE.Mesh(postGeo, toonMaterial(PALETTE.colmadoRed));
-      post.position.set(sx * 7.3, 0.75, 0);
-      this.tape.add(post);
+      const x = sx * TAPE_POST_X;
+      cgeo(parts, new THREE.CylinderGeometry(0.15, 0.18, TAPE_BEAM_Y, 10), PALETTE.colmadoRed, x, TAPE_BEAM_Y / 2, 0);
+      for (const y of [1.3, 3.3, 5.3]) cgeo(parts, new THREE.CylinderGeometry(0.185, 0.185, 0.3, 10), 0xffffff, x, y, 0);
+      cgeo(parts, new THREE.SphereGeometry(0.28, 10, 8), PALETTE.gold, x, TAPE_BEAM_Y + 0.25, 0);
+      cbox(parts, 0.05, 0.36, 0.05, sx * 6.1, TAPE_BEAM_Y - 0.2, 0, 0xf2e9dc); // the banner's cords
     }
-    const c = document.createElement('canvas');
-    c.width = 1024;
-    c.height = 48;
-    const g = c.getContext('2d')!;
-    // Finish-line tape, not a flag: white with gold edges (blue top + red
-    // bottom made it a horizontal tricolor at speed).
-    g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, 1024, 48);
-    g.fillStyle = hex(PALETTE.centerLine);
-    g.fillRect(0, 0, 1024, 7);
-    g.fillRect(0, 41, 1024, 7);
-    g.fillStyle = hex(PALETTE.flagRed);
-    g.font = 'bold 30px sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    for (const x of [170, 512, 854]) g.fillText('TU RÉCORD', x, 26);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const ribbon = new THREE.Mesh(
-      new THREE.PlaneGeometry(14.6, 0.46),
-      worldMaterial(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })),
+    cbox(parts, TAPE_POST_X * 2, 0.26, 0.26, 0, TAPE_BEAM_Y, 0, PALETTE.gold); // beam
+    const arch = new THREE.Mesh(
+      mergeGeometries(parts)!,
+      farFog(
+        worldMaterial(new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() })),
+        CONFIG.cintaShowM * 1.3,
+      ),
     );
-    ribbon.position.y = 1.12;
-    ribbon.rotation.y = Math.PI; // face the approaching player
-    this.tape.add(ribbon);
+    arch.castShadow = true;
+    this.tape.add(arch);
+
+    this.tapeCanvas = document.createElement('canvas');
+    this.tapeCanvas.width = 1024;
+    this.tapeCanvas.height = 256;
+    this.tapeTex = new THREE.CanvasTexture(this.tapeCanvas);
+    this.tapeTex.colorSpace = THREE.SRGBColorSpace;
+    this.tapeTex.anisotropy = 4;
+
+    // part 0 = banner, 1 = ribbon; wave = how far each vertex may move
+    const cloth = (w: number, h: number, segs: number, y: number, v0: number, v1: number, part: number): THREE.BufferGeometry => {
+      const g = new THREE.PlaneGeometry(w, h, segs, 1);
+      const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+      const pos = g.getAttribute('position') as THREE.BufferAttribute;
+      const wave = new Float32Array(pos.count);
+      const partA = new Float32Array(pos.count).fill(part);
+      for (let i = 0; i < pos.count; i++) {
+        uv.setY(i, v0 + uv.getY(i) * (v1 - v0));
+        wave[i] = part === 0 ? 0.25 : Math.sin((Math.PI * (pos.getX(i) + w / 2)) / w);
+      }
+      g.setAttribute('aWave', new THREE.BufferAttribute(wave, 1));
+      g.setAttribute('aPart', new THREE.BufferAttribute(partA, 1));
+      g.rotateY(Math.PI); // face the approaching rider; the canvas's left stays screen left
+      g.translate(0, y, 0);
+      return g;
+    };
+    const clothGeo = mergeGeometries([
+      cloth(12.4, 1.45, 16, TAPE_BEAM_Y - 1.1, 1 - 120 / 256, 1, 0),
+      cloth(TAPE_POST_X * 2, 0.46, 32, 1.1, 1 - 184 / 256, 1 - 136 / 256, 1),
+    ])!;
+    const tapeU = this.tapeU;
+    const clothMat = extendPatch(
+      farFog(
+        worldMaterial(new THREE.MeshBasicMaterial({ map: this.tapeTex, side: THREE.DoubleSide })),
+        CONFIG.cintaShowM * 1.3,
+      ),
+      'cloth',
+      (shader) => {
+        shader.uniforms.uTapeTime = tapeU.time;
+        shader.uniforms.uFlutter = tapeU.flutter;
+        shader.uniforms.uBreak = tapeU.brk;
+        shader.vertexShader =
+          TAPE_CLOTH_PARS + shader.vertexShader.replace('#include <begin_vertex>', TAPE_CLOTH_CHUNK);
+      },
+    );
+    const clothMesh = new THREE.Mesh(clothGeo, clothMat);
+    clothMesh.frustumCulled = false;
+    this.tape.add(clothMesh);
     this.tape.visible = false;
     scene.add(this.tape);
+    this.drawTape();
+    whenSignFontReady(() => this.drawTape());
+  }
+
+  // The banner reads the full label (TU RÉCORD · 1,234 m, or LA META); the
+  // ribbon repeats its first part. Flags flank the banner text.
+  private drawTape(): void {
+    const g = this.tapeCanvas.getContext('2d')!;
+    const label = this.tapeLabel;
+    g.clearRect(0, 0, 1024, 256);
+    // banner
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 1024, 120);
+    g.fillStyle = hex(PALETTE.centerLine);
+    g.fillRect(0, 0, 1024, 10);
+    g.fillRect(0, 110, 1024, 10);
+    const fw = 84;
+    drawDominicanFlag(g, 22, 60 - fw / FLAG_ASPECT / 2, fw);
+    drawDominicanFlag(g, 1024 - 22 - fw, 60 - fw / FLAG_ASPECT / 2, fw);
+    g.fillStyle = hex(PALETTE.flagRed);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    let size = 80;
+    g.font = `${size}px ${SIGN_FONT}`;
+    const room = 1024 - 2 * (fw + 44);
+    const wText = g.measureText(label).width;
+    if (wText > room) {
+      size = Math.floor((size * room) / wText);
+      g.font = `${size}px ${SIGN_FONT}`;
+    }
+    g.fillText(label, 512, 64);
+    // ribbon: white with gold edges (not a flag: blue over red at speed read
+    // as a tricolor), the short label stretched to undo the strip's squash
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 136, 1024, 48);
+    g.fillStyle = hex(PALETTE.centerLine);
+    g.fillRect(0, 136, 1024, 7);
+    g.fillRect(0, 177, 1024, 7);
+    const short = label.split(' · ')[0];
+    g.fillStyle = hex(PALETTE.flagRed);
+    g.font = `26px ${SIGN_FONT}`;
+    for (const x of [170, 512, 854]) {
+      g.save();
+      g.translate(x, 161);
+      g.scale(1.75, 1);
+      g.fillText(short, 0, 0);
+      g.restore();
+    }
+    this.tapeTex.needsUpdate = true;
   }
 
   // One InstancedMesh per flag color: three draw calls instead of 46, and the
@@ -2037,6 +3528,58 @@ export class World {
     }
   }
 
+  // La Puerta del Conde, the Zona's landmark, as a gate the road passes
+  // through: two brick bastions on stone plinths standing on the sidewalks
+  // (inner faces on the road edge, never in a lane), a brick arch with a
+  // cream cornice across the road high above the tallest guagua, the gable,
+  // and la bandera flying on top. Scheduled once per lap like the Obelisco.
+  private buildPuerta(scene: THREE.Scene, atlas: Atlas): void {
+    this.puerta = new THREE.Group();
+    const BRICK = 0xd77a61;
+    const STONE = 0xf5e6c8;
+    const parts: THREE.BufferGeometry[] = [];
+    for (const s of [-1, 1]) {
+      const x = s * 10.1;
+      cbox(parts, 3.4, 0.8, 3.4, x, 0.4, 0, STONE); // plinth: inner face on the road edge
+      cbox(parts, 3.0, 7.2, 3.0, x, 4.4, 0, BRICK);
+      cbox(parts, 3.4, 0.35, 3.4, x, 8.15, 0, STONE); // cornice
+      for (const mz of [-1.1, 0, 1.1]) cbox(parts, 0.6, 0.6, 0.6, x + s * 1.1, 8.6, mz, BRICK); // merlons
+      cbox(parts, 0.9, 1.3, 0.12, x - s * 1.2, 2.6, -1.52, 0x3a2c22); // a small door in each bastion
+    }
+    // the arch across the road, its underside stepping down into the bastions
+    cbox(parts, 17.4, 1.6, 2.4, 0, 9.0, 0, BRICK);
+    cbox(parts, 17.8, 0.3, 2.8, 0, 9.95, 0, STONE);
+    for (const s of [-1, 1]) {
+      cbox(parts, 0.9, 1.1, 2.4, s * 8.1, 7.7, 0, BRICK);
+      cbox(parts, 0.9, 0.5, 2.4, s * 7.2, 8.0, 0, BRICK);
+      cbox(parts, 0.9, 0.2, 2.4, s * 6.3, 8.15, 0, BRICK);
+    }
+    // the gable, and the flagpole standing on it
+    const gable = new THREE.CylinderGeometry(1.7, 1.7, 2.6, 3);
+    gable.rotateX(Math.PI / 2);
+    gable.rotateZ(Math.PI); // apex up
+    gable.scale(1, 0.75, 1);
+    cgeo(parts, gable, STONE, 0, 10.74, 0);
+    cgeo(parts, new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6), 0xffffff, 0, 13.2, 0);
+    const body = new THREE.Mesh(mergeGeometries(parts)!, vcToonMaterial());
+    body.castShadow = true;
+    this.puerta.add(body);
+    const flag = new THREE.Mesh(waveFlag(2.4, 1.5, atlas.rects), flagMaterial(atlas.tex));
+    flag.position.set(-1.25, 14.0, 0); // hoist on the pole, flying out to screen right
+    flag.rotation.y = Math.PI; // faces the rider; its hoist stays on the pole
+    this.puerta.add(flag);
+    this.puerta.visible = false;
+    scene.add(this.puerta);
+  }
+
+  // Once per lap, puertaOffsetM into the Zona stretch.
+  private schedulePuerta(): void {
+    const lap = lapLength();
+    const d = Math.max(0, this.runDistance);
+    const at = Math.floor(d / lap) * lap + TRAMO_ORDER.indexOf('zona') * CONFIG.tramoLengthM + CONFIG.puertaOffsetM;
+    this.nextPuertaAt = at > d ? at : at + lap;
+  }
+
   private buildObelisco(scene: THREE.Scene, atlas: Atlas): void {
     this.obelisco = new THREE.Group();
     const cream = toonMaterial(PALETTE.obeliscoCream);
@@ -2062,16 +3605,7 @@ export class World {
     });
     // And la bandera itself, correct with el escudo, as a banner facing the
     // road the player rides on.
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.76, 1.1),
-      worldMaterial(new THREE.MeshBasicMaterial({ map: atlas.tex, side: THREE.DoubleSide })),
-    );
-    const fr = atlas.rects.flag;
-    const uv = banner.geometry.attributes.uv as THREE.BufferAttribute;
-    uv.setXY(0, fr.u0, fr.v1);
-    uv.setXY(1, fr.u1, fr.v1);
-    uv.setXY(2, fr.u0, fr.v0);
-    uv.setXY(3, fr.u1, fr.v0);
+    const banner = new THREE.Mesh(waveFlag(1.76, 1.1, atlas.rects), flagMaterial(atlas.tex));
     banner.position.set(-1.15, 5.2, 0);
     banner.rotation.y = -Math.PI / 2; // face the road
     this.obelisco.add(banner);
@@ -2080,32 +3614,39 @@ export class World {
     scene.add(this.obelisco);
   }
 
-  updateTape(remain: number | null): void {
-    if (remain === null || remain > 165) {
-      this.tape.visible = false;
-      return;
+  // Where this run's tape stands (meters into the run; 0 or less = no tape)
+  // and what it says. startRun sets it; the test rig moves it mid-run.
+  setTape(atM: number, label: string): void {
+    this.tapeAt = atM;
+    this.tapeBroken = false;
+    this.tapeU.brk.value = 0;
+    if (label !== this.tapeLabel) {
+      this.tapeLabel = label;
+      this.drawTape();
     }
-    this.tape.visible = true;
-    this.tape.position.z = remain;
   }
 
+  // The rider burst through: the ribbon's halves swing down from the posts,
+  // the arch stays, and flag-color confetti fills the air ahead of the rider
+  // and rides along with them, so it hangs in the frame instead of whipping
+  // past the camera.
   burstTape(): void {
-    const z = this.tape.visible ? this.tape.position.z : 2;
+    this.tapeBroken = true;
+    const v = this.lastSpeed;
     for (const f of this.confetti) {
-      f.life = 1.5 + Math.random() * 0.6;
+      f.life = 2.2 + Math.random() * 0.6;
       f.x = (Math.random() - 0.5) * 14;
-      f.y = 1 + Math.random() * 1.6;
-      f.z = z;
-      f.vx = (Math.random() - 0.5) * 3;
-      f.vy = 2.5 + Math.random() * 3.5;
-      f.vz = -(1 + Math.random() * 3);
-      f.rx = (Math.random() - 0.5) * 12;
-      f.ry = (Math.random() - 0.5) * 12;
+      f.y = 1.5 + Math.random() * 3.5;
+      f.z = 4 + Math.random() * 14;
+      f.vx = (Math.random() - 0.5) * 2.4;
+      f.vy = 1 + Math.random() * 2;
+      f.vz = v * (0.8 + Math.random() * 0.2);
+      f.rx = (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 6);
+      f.ry = (Math.random() - 0.5) * 6;
       f.rotX = Math.random() * 3;
       f.rotY = Math.random() * 3;
     }
     for (const im of this.confettiMeshes) im.visible = true;
-    this.tape.visible = false;
   }
 
   // Test probe: confetti is instanced, so "is it on screen" is not something a
@@ -2168,6 +3709,8 @@ export class World {
     this.D += ds;
     if (attract) this.runOrigin += ds;
     this.t += dt;
+    WORLD_TIME.value = this.t;
+    if (dt > 0) this.lastSpeed = ds / dt;
     CURVE_U.dist.value = this.D;
     CURVE_U.off.value = curveOffset(this.D);
     CURVE_U.slope.value = curveSlope(this.D);
@@ -2192,17 +3735,21 @@ export class World {
     RIM_U.value.lerp(a.rim, ak);
 
     // Clouds drift on their own time, indifferent to the corre corre below
-    for (const cl of this.clouds) {
-      cl.mesh.position.x += cl.speed * dt;
-      if (cl.mesh.position.x > 200) cl.mesh.position.x = -200;
+    this.cloudLayer.position.x = (this.t * 0.5) % this.cloudPeriod;
+    // Sailboats bob; gone once the sea is fields
+    this.boats.visible = this.landBlend < 0.35;
+    this.boats.position.y = -0.3 + Math.sin(this.t * 0.9) * 0.12;
+    // The mountains crossfade to the new tramo's row after a border
+    const row = BACKDROP_ROWS[this.tramoNow];
+    const bu = this.backdropU;
+    if (bu.uRowB.value !== row) {
+      if (bu.uMix.value > 0.5) bu.uRowA.value = bu.uRowB.value;
+      bu.uRowB.value = row;
+      bu.uMix.value = 0;
     }
-    // Sailboats bob and slide along the coast; gone once the sea is fields
-    for (const b of this.boats) {
-      b.mesh.visible = this.landBlend < 0.35;
-      b.mesh.position.y = -0.3 + Math.sin(this.t * 0.9 + b.phase) * 0.18;
-      b.mesh.rotation.z = Math.sin(this.t * 0.7 + b.phase) * 0.05;
-      b.mesh.position.z -= b.drift * dt;
-      if (b.mesh.position.z < 60) b.mesh.position.z = 260;
+    if (bu.uMix.value < 1) {
+      bu.uMix.value = Math.min(1, bu.uMix.value + dt * 0.5);
+      if (bu.uMix.value >= 1) bu.uRowA.value = row;
     }
 
     // El campo is inland: the sea drains to farmland over about a second and
@@ -2228,9 +3775,17 @@ export class World {
       chunk.position.z -= ds;
       if (chunk.position.z < RECYCLE_Z) {
         chunk.position.z += CHUNK_COUNT * CHUNK_LEN;
-        // dress the recycled chunk for the tramo it will sit in
-        chunk.material = this.roadMats[tramoFor(this.runDistance + chunk.position.z)];
+        // dress the recycled chunk for the tramo it will sit in, with a
+        // random slice of that tramo's road; one Malecon chunk in five gets
+        // the zebra crossing
+        const tr = tramoFor(this.runDistance + chunk.position.z);
+        chunk.material =
+          tr === 'malecon' && Math.random() < 0.2
+            ? this.crosswalkMat
+            : this.roadMats[tr][Math.floor(Math.random() * ROAD_SLICES)];
       }
+      // a chunk wholly past the fog is fog color on fog color: skip its draw
+      chunk.visible = chunk.position.z - CHUNK_LEN / 2 < this.fogRef.far + FOG_CULL_MARGIN;
     }
 
     for (const belt of this.belts) {
@@ -2240,10 +3795,14 @@ export class World {
         belt.fill(tramoFor(this.runDistance + belt.group.position.z + CONFIG.beltLen / 2));
       }
       // The belts keep frustumCulled off, because a manual bounding sphere
-      // would have to be inflated for the bend field. One cheap z test still
-      // drops the whole belt that is already behind the camera: the bend
-      // never displaces forward, only laterally, so this cannot pop.
-      belt.group.visible = belt.group.position.z + CONFIG.beltLen > -12;
+      // would have to be inflated for the bend field. Two cheap z tests
+      // still drop a whole belt: one already behind the camera (the bend
+      // never displaces forward, only laterally, so this cannot pop), and
+      // one that starts well beyond the fog's far end, where everything in it
+      // is fog color and has sunk under the curled horizon. The margin keeps
+      // tall fogged rooftops from popping against the cream band above it.
+      const bz = belt.group.position.z;
+      belt.group.visible = bz + CONFIG.beltLen > -12 && bz < this.fogRef.far + FOG_CULL_MARGIN;
     }
 
     // El Obelisco, every ~800 m, but it is a Malecon landmark: skip the
@@ -2265,7 +3824,35 @@ export class World {
       }
     }
 
+    // La Puerta del Conde, rising ahead once per lap in the Zona
+    if (!this.puerta.visible && this.nextPuertaAt - this.runDistance < 190) {
+      this.puerta.visible = true;
+      this.puerta.position.z = this.nextPuertaAt - this.runDistance;
+    }
+    if (this.puerta.visible) {
+      this.puerta.position.z -= ds;
+      if (this.puerta.position.z < -35) {
+        this.puerta.visible = false;
+        this.schedulePuerta();
+      }
+    }
+
     this.viralata.update(ds, dt);
+    this.motes.update(ds, this.lastSpeed, !attract);
+    this.overhead.update(
+      ds,
+      this.runDistance,
+      this.tape.visible ? this.tape.position.z : NaN,
+      this.puerta.visible ? this.puerta.position.z : NaN,
+    );
+    this.walkers.update(
+      ds,
+      dt,
+      this.tramoNow,
+      attract,
+      this.obelisco.visible ? this.obelisco.position.z : null,
+      this.puerta.visible ? this.puerta.position.z : null,
+    );
     for (const k of this.chichiguas) k.update(ds, dt);
     for (const p of this.pelicans) p.update(ds, dt);
     const campoNow = this.tramoNow === 'campo';
@@ -2277,11 +3864,24 @@ export class World {
     this.shimmerA.offset.x = (this.shimmerA.offset.x + dt * 0.01) % 1;
     this.glintMat.opacity = 0.38 + Math.sin(this.t * 1.9) * 0.1;
 
+    // La Cinta: stands where this run's record is, rises out of the haze from
+    // cintaShowM away, stays up (broken ribbon and all) until it is behind
+    // the camera. Hidden on the title screen.
+    const tz = this.tapeAt - this.runDistance;
+    this.tape.visible = !attract && this.tapeAt > 0 && tz < CONFIG.cintaShowM && tz > -25;
+    if (this.tape.visible) {
+      this.tape.position.z = tz;
+      this.tapeU.time.value = this.t;
+      const flutter = tz < 60 ? 2 : 1; // the last stretch: the tape is shaking
+      this.tapeU.flutter.value += (flutter - this.tapeU.flutter.value) * Math.min(1, dt * 3);
+      if (this.tapeBroken) this.tapeU.brk.value = Math.min(1, this.tapeU.brk.value + dt * 2.2);
+    }
+
     let anyConfetti = false;
     for (const f of this.confetti) {
       if (f.life <= 0) continue;
       f.life -= dt;
-      f.vy -= 6 * dt;
+      f.vy = Math.max(-1.4, f.vy - 3.5 * dt); // paper flutters down, it never plummets
       f.x += f.vx * dt;
       f.y += f.vy * dt;
       f.z += f.vz * dt - ds;

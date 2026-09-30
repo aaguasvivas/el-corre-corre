@@ -23,6 +23,12 @@ describe('CONFIG invariants from the brief', () => {
     expect(CONFIG.fogFar / (fastestRide + fastestOncoming)).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
   });
 
+  it('no tramo pulls its fog in closer than the fog the telegraph rule was checked against', () => {
+    for (const [tramo, far] of Object.entries(CONFIG.tramoFogFar)) {
+      expect(far, `${tramo} fog far`).toBeGreaterThanOrEqual(CONFIG.fogFar);
+    }
+  });
+
   it('same-direction traffic is slower than the rider by the time that type unlocks', () => {
     // The ramp matters: civics enter at civicUnlockSec, when the rider is
     // already past their top speed. Lowering baseSpeed once broke the naive
@@ -50,6 +56,11 @@ describe('CONFIG invariants from the brief', () => {
   it('the tour is coherent: the Obelisco offset lands inside a Malecon stretch', () => {
     expect(CONFIG.obeliscoOffsetM).toBeGreaterThan(0);
     expect(CONFIG.obeliscoOffsetM).toBeLessThan(CONFIG.tramoLengthM);
+  });
+
+  it('the tour is coherent: La Puerta del Conde lands inside a Zona stretch', () => {
+    expect(CONFIG.puertaOffsetM).toBeGreaterThan(0);
+    expect(CONFIG.puertaOffsetM).toBeLessThan(CONFIG.tramoLengthM);
   });
 
   it('distance multiplier tiers ascend in both distance and multiplier', () => {
