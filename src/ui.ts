@@ -8,16 +8,19 @@ import { barrioMultFor, mandaoPerRun, type Completion, type Mandao, type MandaoK
 import { drawDominicanFlag } from './flag';
 import type { SetPieceKind } from './traffic';
 import { shareImage, type ShareResult } from './share';
+import { AnnounceQueue, announcement, type Announcement, type AnnounceKind } from './announce';
+import { Coach, type CoachId } from './coach';
+import { Popups, type Band } from './popups';
 
 type Lang = 'es' | 'en';
+type Tramo = 'malecon' | 'zona' | 'campo';
 const LANG_KEY = 'ecc.v1.lang';
 const PEDAL_SEEN_KEY = 'ecc.v1.pedalSeen'; // '1' once the gas pedal has been pressed, ever
-const POPUP_POOL = 12;
 
 // reachTramo targets are tramo borders: the copy names the place.
 const TRAMO_M = CONFIG.tramoLengthM;
 
-const STRINGS = {
+export const STRINGS = {
   es: {
     subtitle: '¡Dale, que vamo’ tarde!',
     startTouch: 'TOCA PA’ EMPEZAR',
@@ -96,16 +99,27 @@ const STRINGS = {
     streetWild: '¡La calle se puso brava!',
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: '¡Pintura nueva!',
-    tramoKicker: 'LLEGASTE A',
+    // Per place, so the article reads right: DE VUELTA EN EL MALECÓN,
+    // LLEGASTE A LA ZONA COLONIAL, YA ESTÁS EN EL CAMPO (never "A EL").
+    tramoKicker: { malecon: 'DE VUELTA EN', zona: 'LLEGASTE A', campo: 'YA ESTÁS EN' } satisfies Record<Tramo, string>,
     nearMiss: '¡Cerquita!',
     razorMiss: '¡Por un pelito!',
-    ladder: ['¡Eso!', '¡Duro!', '¡Diache!', "¡Tú ta' loco!", "¡ETE E' UN LOCO!", '¡LEYENDA DEL MALECÓN!'],
+    ladder: ['¡Eso!', '¡Duro!', '¡Diache!', '¡Tú ta’ loco!', '¡ETE E’ UN LOCO!', '¡LEYENDA DEL MALECÓN!'],
     // Records: ¡NUEVO RÉCORD! is points, La Cinta is distance.
     farRecord: '¡MÁS LEJOS QUE NUNCA!',
     goalTape: 'LA META',
     goalReached: '¡LLEGASTE A LA META!',
     recordNear: '¡Ya casi el récord!',
-    toGo: (n: number) => `FALTAN ${n}`, // raw digits, like the score and RÉCORD n beside it
+    toGo: (n: number) => `FALTAN ${fmtN(n)}`,
+    tapeToGo: (m: number) => `Faltan ${fmtN(m)} m`, // La Cinta ahead
+    // Coach chips: first-time hints, touch and keyboard
+    coachSteer: 'Arrastra el dedo pa’ esquivar',
+    coachSteerKey: 'A / D pa’ esquivar',
+    coachCv: (m: string) => `Métete en contra vía: ¡todo paga ${m}!`, // the chip draws the ← arrow
+    coachTrick: (trick: string) => `Desliza arriba y aguanta: ${trick}`,
+    coachTrickKey: (trick: string) => `Aguanta W: ${trick}`,
+    coachGas: (m: string) => `Aguanta ¡DALE! pa’ acelerar: ${m}`,
+    coachGasKey: (m: string) => `Aguanta ↑ pa’ acelerar: ${m}`,
     // Los Mandaos
     mandaos: 'LOS MANDAOS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
@@ -225,15 +239,23 @@ const STRINGS = {
     // Places keep their names in both languages
     tramoNames: { malecon: 'EL MALECÓN', zona: 'LA ZONA COLONIAL', campo: 'EL CAMPO' },
     pinturaNew: 'New paint!',
-    tramoKicker: 'YOU REACHED',
+    tramoKicker: { malecon: 'BACK ON', zona: 'YOU REACHED', campo: 'YOU REACHED' } satisfies Record<Tramo, string>,
     nearMiss: 'So close!',
     razorMiss: 'By a hair!',
-    ladder: ["Let's go!", 'Hard!', 'Insane!', "You're crazy!", 'CERTIFIED MADMAN!', 'LEGEND OF THE MALECÓN!'],
+    ladder: ['That’s it!', 'Sick!', 'Dang!', 'You’re crazy!', 'THIS GUY’S A MANIAC!', 'LEGEND OF THE MALECÓN!'],
     farRecord: 'FARTHEST EVER!',
     goalTape: 'GOAL',
     goalReached: 'GOAL REACHED!',
     recordNear: 'Record in reach!',
-    toGo: (n: number) => `${n} TO GO`,
+    toGo: (n: number) => `${fmtN(n)} TO GO`,
+    tapeToGo: (m: number) => `${fmtN(m)} m to go`,
+    coachSteer: 'Drag your finger to weave',
+    coachSteerKey: 'A / D to weave',
+    coachCv: (m: string) => `Ride the wrong way: everything pays ${m}!`,
+    coachTrick: (trick: string) => `Swipe up and hold: ${trick}`,
+    coachTrickKey: (trick: string) => `Hold W: ${trick}`,
+    coachGas: (m: string) => `Hold GAS to speed up: ${m}`,
+    coachGasKey: (m: string) => `Hold ↑ to speed up: ${m}`,
     mandaos: 'MISSIONS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
       level > 0 ? `MISSIONS ${done}/3 · LEVEL ${level} ${mult}` : `MISSIONS ${done}/3 · ${name.toUpperCase()}`,
@@ -281,6 +303,17 @@ const VEHICLE_IDS: VehicleId[] = ['pasola', 'motor', 'civic'];
 
 const BANANA_SVG =
   '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 7 C5 15 13 20 20 15 C15 22 4 19 2 9 Z" fill="#f4c430" stroke="#7cb342" stroke-width="1.4"/></svg>';
+
+// HUD glyphs. Lilita One has no arrows, so they are drawn, not typed.
+// La Cinta: a red tape between two posts.
+const TAPE_SVG =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 3v18M20 3v18" stroke="#002d62" stroke-width="2.6" stroke-linecap="round"/><path d="M4 8c4 3 12-3 16 0v5c-4-3-12 3-16 0z" fill="#ce1126" stroke="#002d62" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+// The contra vía hint points left: oncoming lanes are on screen left.
+const ARROW_SVG =
+  '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20 12H5M11 5l-7 7 7 7" fill="none" stroke="#f4c430" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// El freno caliente's label.
+const FLAME_SVG =
+  '<svg class="pedal-flame" viewBox="0 0 24 28" aria-hidden="true"><path d="M12 1c1 5 7 8 7 15a7 7 0 0 1-14 0c0-4 2-6 3-8 0 3 1 5 3 5 0-4-1-8 1-12z" fill="#fff3c4" stroke="#002d62" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 14c.5 2 3 3 3 6a3 3 0 0 1-6 0c0-2 1.5-3 3-6z" fill="#f4c430"/></svg>';
 
 // La bandera, properly: the white cross quarters it, blue at the upper hoist
 // and lower fly, red at the upper fly and lower hoist, and el escudo in the
@@ -351,6 +384,26 @@ function multTag(m: number): string {
   return `×${m}`;
 }
 
+// The widest side column in the top band (the plátano pill), which the
+// score must stay clear of.
+const HUD_SIDE_PX = 92;
+
+// The smallest a lane card's big line may shrink to (px) to fit.
+const LANE_MIN_PX = 12.5;
+
+// Restart a CSS animation class (the reflow is what restarts it).
+function restart(el: HTMLElement, cls: string): void {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+const plusLabel = (n: number): string => `+${fmtN(n)}`;
+
+// The score is rewritten nearly every frame: one formatter, built once
+// (the same 12,345 grouping as fmtN).
+const SCORE_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+
 // 12,000: grouped in the language's own locale. es-DO groups every number
 // from 1,000 up (plain 'es' leaves 4567 bare), and both read 12,000.
 let numLocale = readLang() === 'en' ? 'en-US' : 'es-DO';
@@ -366,10 +419,6 @@ function fmtMult(m: number): string {
 // The barrio multiplier moves in quarters: ×1.25, ×1.5, ×3.
 function fmtBarrio(m: number): string {
   return `×${Math.round(m * 100) / 100}`;
-}
-
-function clampPct(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v;
 }
 
 // Every card is a different run, so every card needs a different filename.
@@ -415,8 +464,11 @@ function hexCss(hex: number): string {
 }
 
 // Honours the OS setting live: the count-up, the bars and the stamps
-// all land in their final state when it is on.
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+// all land in their final state when it is on. Read at use, not at import,
+// so the module also loads outside a browser (the tests import STRINGS).
+function reducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 function easeOutCubic(t: number): number {
   const u = 1 - t;
@@ -427,37 +479,66 @@ export class UI {
   private lang: Lang = readLang();
   private cb: UICallbacks;
   private goTitleIdx = 0;
-  private lastScore = -1;
   private lastRecord = 0;
   private lastResult: RunResult | null = null;
+  private mandaoView: MandaosView | null = null;
+  private selectedVehicle: VehicleId = 'motor';
+  // ---- the in-run HUD's state; every setter writes the DOM only on change
+  private clock = 0; // real seconds, advanced by update(): rolls, the lane, popups
+  private scoreTarget = 0;
+  private scoreShown = -1; // the number on screen (rolls up toward scoreTarget)
+  private scoreFrom = 0;
+  private scoreRollT = -1; // clock time the current roll started; <0 = none
+  private scoreLen = 0; // characters in the shown score, to refit it
+  private lastPunchAt = -1;
   private comboShown = 0;
+  private comboTierShown = 0; // ladder index + 1, 0 = none
   private comboBarShown = -1;
+  private comboLow = false;
   private platShown = -1;
   private cvShown = false;
   private cabShown = false;
   private multQ = 10; // the live multiplier as shown, x10 (10 = ×1, hidden)
+  private multHeat = 0; // 0 cream, 1 hot (×3+), 2 fire (×6+)
   private recordKey = Number.NaN; // what the HUD record label says now (see setRecordLabel)
-  private mandaoView: MandaosView | null = null;
-  private toastQueue: Array<[string, string]> = [];
-  private toastBusy = false;
-  private popupIdx = 0;
-  private lastPopupAt = 0;
-  private popupBurst = 0;
-  private selectedVehicle: VehicleId = 'motor';
+  private tapeStep = -1; // La Cinta's countdown as shown, in tapeApproachStepM steps; -1 = off
+  private cafeShown = -1; // the cafecito ring, in 2.5% steps; -1 = off
+  private readonly lane = new AnnounceQueue();
+  private laneShown: Announcement | null = null;
+  private streetWildAt = -1; // an escalation waiting for its multiplier (same step)
+  private readonly coach = new Coach();
+  private coachShown: CoachId | null = null;
+  private frozen = false;
+  private bandDirty = true;
+  private readonly bandBox: Band = { left: 0, right: 0, top: 0, bottom: 0 };
+  private readonly bandNow: Band = { left: 0, right: 0, top: 0, bottom: 0 };
 
   private hud: HTMLElement;
   private title: HTMLElement;
   private gameover: HTMLElement;
   private pause: HTMLElement;
-  private vignette: HTMLElement;
-  private bannerEl: HTMLElement;
+  private cvVignette: HTMLElement;
   private countdownEl: HTMLElement;
   private flashEl: HTMLElement;
-  private popups: HTMLElement[] = [];
+  private popups: Popups;
+  private scoreBox: HTMLElement;
   private scoreEl: HTMLElement;
   private comboEl: HTMLElement;
+  private comboNEl: HTMLElement;
+  private comboTierEl: HTMLElement;
+  private comboBarEl: HTMLElement;
   private cvEl: HTMLElement;
   private cabEl: HTMLElement;
+  private pillsEl: HTMLElement;
+  private anCard: HTMLElement;
+  private anKicker: HTMLElement;
+  private anText: HTMLElement;
+  private tapeEl: HTMLElement;
+  private tapeNEl: HTMLElement;
+  private coachEl: HTMLElement;
+  private coachTextEl: HTMLElement;
+  private speedLinesEl: HTMLElement;
+  private pedalHotTextEl: HTMLElement;
   private gasShown = false;
   private brakeShown = false;
   private brakeHeatShown = -1; // heat fill, in 5% steps
@@ -535,40 +616,44 @@ export class UI {
   // The barrio level that multiplied the run on the card (a level won this
   // run pays from the next one), for the share card's honest level line.
   private shareLevel = { idx: 0, mult: 1 };
-  private toastEl: HTMLElement;
-  private toastKickerEl: HTMLElement;
-  private toastTextEl: HTMLElement;
 
   constructor(root: HTMLElement, cb: UICallbacks) {
     this.cb = cb;
     root.innerHTML = `
-      <div id="vignette"></div>
+      <div id="cv-vignette"></div>
       <div id="hud" class="hidden">
         <div id="speedlines"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <div id="hud-score">0</div>
-        <div id="hud-combo" class="hidden"><span id="combo-text"></span><i id="combo-bar"></i></div>
-        <div id="hud-cv" class="hidden">¡EN CONTRA VÍA! ×2</div>
-        <div id="hud-cab" class="hidden">¡CABALLITO! ×1.5</div>
-        <div id="hud-record"></div>
+        <div id="hud-scrim"></div>
+        <div id="hud-top">
+          <div id="hud-score"><span id="score-n">0</span></div>
+          <div id="hud-combo" class="off"><b id="combo-n"></b><span id="combo-tier"></span><i id="combo-bar"></i></div>
+          <div id="hud-pills"><div id="hud-cv" class="hud-pill"></div><div id="hud-cab" class="hud-pill"></div></div>
+          <div id="announce">
+            <div id="an-card" class="an-card" role="status" aria-live="polite"><span class="an-kicker"></span><span class="an-text"></span></div>
+            <div id="hud-tape" class="off">${TAPE_SVG}<span id="tape-n"></span></div>
+          </div>
+        </div>
         <div id="hud-left">
           <button id="hud-pause" type="button" aria-label="Pausa"><i></i><i></i></button>
-          <div id="hud-platanos">${BANANA_SVG}<span id="plat-n">0</span></div>
-          <div id="hud-mult" class="hidden">×2</div>
         </div>
+        <div id="hud-right">
+          <div id="hud-platanos">${BANANA_SVG}<span id="plat-n">0</span></div>
+          <div id="hud-mult" class="off"></div>
+        </div>
+        <div id="hud-record"></div>
+        <div id="coach" class="off" role="status" aria-live="polite">${ARROW_SVG}<span id="coach-text"></span></div>
         <div id="pedals" class="hidden">
           <div id="pedal-speed" class="pedal-speed"><b id="pedal-kmh">0</b><span>km/h</span></div>
-          <b class="pedal-mult pedal-mult-brake">${multTag(CONFIG.brakeScoreMult)}</b>
-          <b class="pedal-mult pedal-mult-gas">${multTag(CONFIG.gasScoreMult)}</b>
-          <button id="pedal-brake" class="pedal pedal-brake" type="button"><i class="pedal-heat"></i><i class="pedal-tread"></i><span class="pedal-label"></span></button>
-          <button id="pedal-gas" class="pedal pedal-gas" type="button"><i class="pedal-tread"></i><span class="pedal-label"></span></button>
+          <div class="pedal-mult pedal-mult-brake"><span>${multTag(CONFIG.brakeScoreMult)}</span></div>
+          <div class="pedal-mult pedal-hot-tag"><span id="pedal-hot-text"></span></div>
+          <div class="pedal-mult pedal-mult-gas"><span>${multTag(CONFIG.gasScoreMult)}</span></div>
+          <button id="pedal-brake" class="pedal pedal-brake" type="button"><i class="pedal-heat"></i><i class="pedal-tread"></i>${FLAME_SVG}<span class="pedal-label"></span></button>
+          <button id="pedal-gas" class="pedal pedal-gas" type="button"><i class="pedal-ring"></i><i class="pedal-tread"></i><span class="pedal-label"></span></button>
         </div>
       </div>
-      <div id="popup-layer"></div>
-      <div id="banner"></div>
+      <div id="popup-layer" aria-hidden="true"></div>
       <div id="countdown" class="hidden"></div>
       <div id="flash"></div>
-      <div id="tramo-card"><span id="tramo-kicker"></span><span id="tramo-name"></span></div>
-      <div id="mandao-toast"><span id="mandao-toast-kicker"></span><span id="mandao-toast-text"></span></div>
       <div id="title" class="screen hidden">
         <button id="lang" class="chip" type="button"></button>
         <button id="mute" class="chip chip-mute" type="button" aria-label="Sonido">
@@ -670,14 +755,27 @@ export class UI {
     this.title = q('#title');
     this.gameover = q('#gameover');
     this.pause = q('#pause');
-    this.vignette = q('#vignette');
-    this.bannerEl = q('#banner');
+    this.cvVignette = q('#cv-vignette');
     this.countdownEl = q('#countdown');
     this.flashEl = q('#flash');
-    this.scoreEl = q('#hud-score');
+    this.scoreBox = q('#hud-score');
+    this.scoreEl = q('#score-n');
     this.comboEl = q('#hud-combo');
+    this.comboNEl = q('#combo-n');
+    this.comboTierEl = q('#combo-tier');
+    this.comboBarEl = q('#combo-bar');
     this.cvEl = q('#hud-cv');
     this.cabEl = q('#hud-cab');
+    this.pillsEl = q('#hud-pills');
+    this.anCard = q('#an-card');
+    this.anKicker = q('#an-card .an-kicker');
+    this.anText = q('#an-card .an-text');
+    this.tapeEl = q('#hud-tape');
+    this.tapeNEl = q('#tape-n');
+    this.coachEl = q('#coach');
+    this.coachTextEl = q('#coach-text');
+    this.speedLinesEl = q('#speedlines');
+    this.pedalHotTextEl = q('#pedal-hot-text');
     this.pedalsEl = q('#pedals');
     this.pedalGasEl = q('#pedal-gas');
     this.pedalBrakeEl = q('#pedal-brake');
@@ -721,17 +819,12 @@ export class UI {
     this.mandaoChipEl = q('#mandao-chip');
     this.mandaoSheetEl = q('#mandao-sheet');
     this.pauseMandaosEl = q('#pause-mandaos');
-    this.toastEl = q('#mandao-toast');
-    this.toastKickerEl = q('#mandao-toast-kicker');
-    this.toastTextEl = q('#mandao-toast-text');
-
-    const layer = q('#popup-layer');
-    for (let i = 0; i < POPUP_POOL; i++) {
-      const el = document.createElement('div');
-      el.className = 'popup';
-      layer.appendChild(el);
-      this.popups.push(el);
-    }
+    this.popups = new Popups(q('#popup-layer'), () => this.popupBand());
+    // The band popups live in moves only on a resize (or rotation).
+    window.addEventListener('resize', () => {
+      this.bandDirty = true;
+      this.scoreLen = 0; // refit the score to the new width
+    });
 
     // Two listeners for the life of the page: keep the on-screen hints honest
     // on hybrid devices (iPad with a keyboard, touch laptops).
@@ -804,10 +897,6 @@ export class UI {
     });
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape') this.mandaoSheetEl.classList.add('hidden');
-    });
-    this.toastEl.addEventListener('animationend', () => {
-      this.toastBusy = false;
-      this.nextToast();
     });
     this.bindPedals();
 
@@ -945,8 +1034,22 @@ export class UI {
     if (hot === this.brakeHotShown) return;
     this.brakeHotShown = hot;
     this.pedalBrakeEl.classList.toggle('hot', hot);
-    const t = this.t();
-    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = hot ? t.pedalBrakeHot : t.pedalBrake;
+    this.pedalsEl.classList.toggle('brake-hot', hot);
+  }
+
+  // El cafecito on the pedals: frac is the time left (1..0, 0 = none). The
+  // gas wears a gold ring that drains, reads CAFECITO (the power-up keeps
+  // its name in EN), and FRENO dims: the cafecito pays neither.
+  setCafecito(frac: number): void {
+    const q = frac > 0 ? Math.ceil(frac * 40) : -1;
+    if (q === this.cafeShown) return;
+    const was = this.cafeShown;
+    this.cafeShown = q;
+    if (q >= 0 !== was >= 0) {
+      this.pedalsEl.classList.toggle('cafe', q >= 0);
+      this.pedalGasEl.querySelector('.pedal-label')!.textContent = q >= 0 ? 'CAFECITO' : this.t().pedalGas;
+    }
+    if (q >= 0) this.pedalsEl.style.setProperty('--cafe', String(q / 40));
   }
 
   // The speedometer above the pedals, in km/h. Written only when the
@@ -990,13 +1093,15 @@ export class UI {
       this.selectedVehicle === 'civic' ? t.trickPillCar : t.trickPillBike;
     this.pedalGasEl.setAttribute('aria-label', t.ariaGas);
     this.pedalBrakeEl.setAttribute('aria-label', t.ariaBrake);
-    this.pedalGasEl.querySelector('.pedal-label')!.textContent = t.pedalGas;
-    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = this.brakeHotShown ? t.pedalBrakeHot : t.pedalBrake;
+    this.pedalGasEl.querySelector('.pedal-label')!.textContent = this.cafeShown >= 0 ? 'CAFECITO' : t.pedalGas;
+    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = t.pedalBrake;
+    this.pedalHotTextEl.textContent = t.pedalBrakeHot;
     this.subtitleEl.textContent = t.subtitle;
     this.promptEl.textContent = this.inputMode === 'touch' ? t.startTouch : t.startKey;
     this.hudRecordEl.textContent =
-      this.lastRecord > 0 ? `${t.record.toUpperCase()} ${this.lastRecord}` : '';
+      this.lastRecord > 0 ? `${t.record.toUpperCase()} ${fmtN(this.lastRecord)}` : '';
     this.recordKey = Number.NaN; // the run's countdown rewrites it on its next tick
+    if (this.coachShown) this.coachTextEl.textContent = this.coachText(this.coachShown);
     if (this.mandaoView) this.setMandaos(this.mandaoView);
     for (const el of this.title.querySelectorAll<HTMLElement>('.vd-label')) {
       const k = el.dataset.stat;
@@ -1141,6 +1246,7 @@ export class UI {
     this.hud.classList.add('hidden');
     this.gameover.classList.add('hidden');
     this.pause.classList.add('hidden');
+    this.bandDirty = true;
     this.setContraVia(false);
     this.setCaballito(false);
     this.setGas(false);
@@ -1152,32 +1258,47 @@ export class UI {
     this.lastRecord = record;
     this.stopCountUp();
     this.snapReady = false; // the share photo belongs to the run that just ended
-    this.setBrakeHeat(0, false);
     this.hideCountdown();
     this.applyLang();
-    this.lastScore = -1;
-    this.setScore(0);
-    this.comboShown = 0;
-    this.comboEl.classList.add('hidden');
+    this.resetRunHud();
+    this.showPedal(0);
+    this.setPedalLive(true);
+    this.hud.classList.remove('hidden');
+    this.title.classList.add('hidden');
+    this.gameover.classList.add('hidden');
+    this.pause.classList.add('hidden');
+  }
+
+  // A clean HUD for a new run.
+  private resetRunHud(): void {
+    this.scoreTarget = 0;
+    this.scoreShown = -1;
+    this.scoreRollT = -1;
+    this.scoreLen = 0;
+    this.writeScore(0);
+    this.setCombo(0, null);
+    this.comboBarShown = -1;
     this.platShown = -1;
     this.setPlatanos(0);
     this.setContraVia(false);
     this.setCaballito(false);
     this.setGas(false);
     this.setBrake(false);
-    this.showPedal(0);
-    this.setPedalLive(true);
+    this.setBrakeHeat(0, false);
+    this.setCafecito(0);
     this.multQ = 10;
-    this.multEl.classList.add('hidden');
+    this.multEl.classList.add('off');
     this.recordKey = Number.NaN;
-    this.toastQueue.length = 0;
-    this.toastBusy = false;
-    this.toastEl.classList.remove('show');
-    for (const p of this.popups) p.classList.remove('go');
-    this.hud.classList.remove('hidden');
-    this.title.classList.add('hidden');
-    this.gameover.classList.add('hidden');
-    this.pause.classList.add('hidden');
+    this.lane.clear();
+    this.laneShown = null;
+    this.anCard.className = 'an-card';
+    this.streetWildAt = -1;
+    this.setTapeApproach(-1);
+    this.coach.startRun();
+    this.showCoach(null);
+    this.popups.clear();
+    this.setFrozen(false);
+    this.bandDirty = true;
   }
 
   // The game-over card, top of the screen so the tumble below it stays in
@@ -1272,7 +1393,7 @@ export class UI {
 
   private countUp(to: number): void {
     const el = this.goPoints;
-    if (reducedMotion.matches || to <= 0) {
+    if (reducedMotion() || to <= 0) {
       el.textContent = fmtN(to);
       return;
     }
@@ -1322,57 +1443,176 @@ export class UI {
     this.pause.classList.add('hidden');
   }
 
-  setScore(n: number): void {
-    if (n === this.lastScore) return;
-    this.lastScore = n;
-    this.scoreEl.textContent = String(n);
+  // ---------------- the HUD ----------------
+
+  // One HUD tick, every rendered frame (and every __ecc.tick step): the score
+  // roll, the popups' clock, the announcement lane and the freeze. running:
+  // a run is on screen (playing or crashing). frozen: paused or counting
+  // down, so the HUD holds still with the world.
+  update(dt: number, running: boolean, frozen: boolean): void {
+    this.clock += dt;
+    if (frozen !== this.frozen) this.setFrozen(frozen);
+    if (!running || frozen) return;
+    this.popups.update(dt);
+    this.stepScore();
+    // An escalation no multiplier came to claim this step speaks alone.
+    if (this.streetWildAt >= 0) {
+      this.streetWildAt = -1;
+      this.announce('streetWild', this.t().streetWild);
+    }
+    if (this.lane.step(dt)) this.renderLane();
+    else if (!this.laneShown && this.lane.now >= this.lane.freeAt && this.anCard.classList.contains('out')) {
+      this.anCard.className = 'an-card'; // a cut card's exit is over and nothing followed
+    }
   }
 
-  setCombo(n: number, tier: string | null): void {
-    if (n === this.comboShown) return;
-    this.comboShown = n;
-    if (n < 2) {
-      this.comboEl.classList.add('hidden');
+  // For probes (__ecc.hud): what the lane, the coach and the score show.
+  hudState(): { lane: string | null; kicker: string | null; kind: string | null; queued: number; coach: CoachId | null; learned: number; tape: number; score: number; frozen: boolean } {
+    const a = this.lane.current;
+    return {
+      lane: a ? a.text : null,
+      kicker: a ? a.kicker : null,
+      kind: a ? a.kind : null,
+      queued: this.lane.queued,
+      coach: this.coachShown,
+      learned: this.coach.learned,
+      tape: this.tapeStep < 0 ? -1 : this.tapeStep * CONFIG.tapeApproachStepM,
+      score: this.scoreShown,
+      frozen: this.frozen,
+    };
+  }
+
+  private setFrozen(on: boolean): void {
+    this.frozen = on;
+    this.hud.classList.toggle('frozen', on);
+    this.popups.freeze(on);
+  }
+
+  // The score rolls up to a gain (easeOutQuad over scoreRollSec) and a big
+  // one punches it; the meters just tick.
+  setScore(n: number): void {
+    if (n === this.scoreTarget) return;
+    const gain = n - this.scoreTarget;
+    this.scoreTarget = n;
+    if (gain >= CONFIG.scorePunchAt && this.scoreShown >= 0) {
+      this.scoreFrom = this.scoreShown;
+      this.scoreRollT = this.clock;
+      if (this.clock - this.lastPunchAt > 0.15) {
+        this.lastPunchAt = this.clock;
+        restart(this.scoreEl, 'punch');
+      }
+    } else if (this.scoreRollT < 0) {
+      this.writeScore(n);
+    }
+  }
+
+  private stepScore(): void {
+    if (this.scoreRollT < 0) return;
+    const u = (this.clock - this.scoreRollT) / CONFIG.scoreRollSec;
+    if (u >= 1) {
+      this.scoreRollT = -1;
+      this.writeScore(this.scoreTarget);
       return;
     }
-    const txt = this.comboEl.querySelector<HTMLElement>('#combo-text');
-    if (txt) txt.textContent = tier ? `×${n} ${tier}` : `×${n}`;
-    this.comboEl.classList.remove('hidden', 'bump');
-    void this.comboEl.offsetWidth;
-    this.comboEl.classList.add('bump');
+    const e = 1 - (1 - u) * (1 - u);
+    this.writeScore(Math.round(this.scoreFrom + (this.scoreTarget - this.scoreFrom) * e));
   }
 
-  // The combo's remaining life as a shrinking bar under the pill. Written
-  // only when it moves a visible amount, so it costs nothing at 60 fps.
+  private writeScore(n: number): void {
+    if (n === this.scoreShown) return;
+    this.scoreShown = n;
+    const s = SCORE_FMT.format(n);
+    this.scoreEl.textContent = s;
+    if (s.length !== this.scoreLen) {
+      this.scoreLen = s.length;
+      this.fitScore(s);
+    }
+  }
+
+  // A long score shrinks to fit between the side columns (pause on the left,
+  // plátanos and the multiplier on the right). Widest digits assumed.
+  private fitScore(s: string): void {
+    const base = this.scoreBox.offsetHeight || 46;
+    let em = 0.12; // the stroke
+    for (const ch of s) em += ch === ',' ? 0.3 : 0.6;
+    const room = window.innerWidth - 2 * (12 + HUD_SIDE_PX + 8);
+    const fit = Math.min(1, room / (em * base));
+    this.scoreBox.style.setProperty('--score-fit', fit.toFixed(3));
+  }
+
+  // The combo: ×n over the slang tier. A new tier slams in; any other step
+  // up bumps the count (never both at once: the slam is the celebration).
+  setCombo(n: number, tier: string | null): void {
+    if (n === this.comboShown) return;
+    const up = n > this.comboShown;
+    this.comboShown = n;
+    if (n < 2) {
+      this.comboEl.classList.add('off');
+      this.comboTierShown = 0;
+      this.setComboLow(false);
+      return;
+    }
+    this.comboNEl.textContent = `×${n}`;
+    let ti = 0;
+    for (const step of LADDER_STEPS) if (n >= step) ti++;
+    let slam = false;
+    if (ti !== this.comboTierShown) {
+      this.comboTierShown = ti;
+      this.comboTierEl.textContent = tier ?? '';
+      this.comboTierEl.dataset.tier = String(ti);
+      this.fitTier();
+      slam = up;
+      if (slam) restart(this.comboTierEl, 'slam');
+    }
+    this.comboEl.classList.remove('off');
+    if (up && !slam) restart(this.comboNEl, 'bump');
+  }
+
+  // The tier shrinks only if its slam (1.16x at the peak) would leave the
+  // centre column: "LEGEND OF THE MALECÓN!" on a narrow phone.
+  private fitTier(): void {
+    const el = this.comboTierEl;
+    el.style.setProperty('--tier-fit', '1');
+    const room = this.comboEl.parentElement!.clientWidth - 8;
+    const w = el.scrollWidth * 1.16;
+    el.style.setProperty('--tier-fit', w > room ? (room / w).toFixed(3) : '1');
+  }
+
+  // The combo's remaining life as a shrinking fuse under it. Written only
+  // when it moves a visible amount; its last second burns red and ticks.
   setComboFraction(f: number): void {
     const q = Math.round(f * 40); // 2.5% steps
-    if (q === this.comboBarShown) return;
-    this.comboBarShown = q;
-    const bar = this.comboEl.querySelector<HTMLElement>('#combo-bar');
-    if (bar) bar.style.transform = `scaleX(${q / 40})`;
+    if (q !== this.comboBarShown) {
+      this.comboBarShown = q;
+      this.comboBarEl.style.transform = `scaleX(${q / 40})`;
+    }
+    this.setComboLow(this.comboShown >= 2 && f > 0 && f * CONFIG.comboDecaySec <= 1);
+  }
+
+  private setComboLow(on: boolean): void {
+    if (on === this.comboLow) return;
+    this.comboLow = on;
+    this.comboEl.classList.toggle('low', on);
   }
 
   setPlatanos(n: number): void {
     if (n === this.platShown) return;
     this.platShown = n;
-    this.platEl.textContent = String(n);
-    const wrap = this.platEl.parentElement!;
-    wrap.classList.remove('bump');
-    void wrap.offsetWidth;
-    wrap.classList.add('bump');
+    this.platEl.textContent = fmtN(n);
+    if (n > 0) restart(this.platEl.parentElement!, 'bump');
   }
 
   setContraVia(on: boolean): void {
     if (on === this.cvShown) return;
     this.cvShown = on;
-    this.cvEl.classList.toggle('hidden', !on);
-    this.vignette.classList.toggle('on', on);
+    this.cvEl.classList.toggle('on', on);
+    this.cvVignette.classList.toggle('on', on);
   }
 
   setCaballito(on: boolean): void {
     if (on === this.cabShown) return;
     this.cabShown = on;
-    this.cabEl.classList.toggle('hidden', !on);
+    this.cabEl.classList.toggle('on', on);
   }
 
   // Wind streaks at the edges of the frame, fading in past ~60% of top
@@ -1382,8 +1622,7 @@ export class UI {
     const q = Math.round(Math.max(0, Math.min(1, (norm - 0.6) / 0.6)) * 20);
     if (q === this.speedLinesShown) return;
     this.speedLinesShown = q;
-    const el = document.getElementById('speedlines');
-    if (el) el.style.opacity = String(q / 20);
+    this.speedLinesEl.style.opacity = String(q / 20);
   }
 
   // A fondo pays ×1.5: the GAS pedal glows, its tag shows, and the
@@ -1402,21 +1641,23 @@ export class UI {
   }
 
   // Every multiplier stacked into one number (Score.liveMult): ×2, ×3.8,
-  // ×15. Hidden at ×1. Called every frame; it writes only when the shown
-  // value changes, and bumps when it climbs.
+  // ×15. Hidden at ×1; gold from ×3, on fire from ×6. Called every frame;
+  // it writes only when the shown value changes, and bumps when it climbs.
   setLiveMult(m: number): void {
     const q = m >= 10 ? Math.round(m) * 10 : Math.round(m * 10);
     if (q === this.multQ) return;
     const up = q > this.multQ;
     this.multQ = q;
-    this.multEl.classList.toggle('hidden', q === 10);
+    this.multEl.classList.toggle('off', q === 10);
+    const heat = q >= 60 ? 2 : q >= 30 ? 1 : 0;
+    if (heat !== this.multHeat) {
+      this.multHeat = heat;
+      this.multEl.classList.toggle('hot', heat === 1);
+      this.multEl.classList.toggle('fire', heat === 2);
+    }
     if (q === 10) return;
     this.multEl.textContent = fmtMult(q / 10);
-    if (up) {
-      this.multEl.classList.remove('bump');
-      void this.multEl.offsetWidth;
-      this.multEl.classList.add('bump');
-    }
+    if (up) restart(this.multEl, 'bump');
   }
 
   // The HUD record label against the record the run started with: RÉCORD n,
@@ -1429,8 +1670,23 @@ export class UI {
     this.recordKey = key;
     const t = this.t();
     this.hudRecordEl.textContent =
-      key === -1 ? '' : key === -2 ? t.newRecord : key === -3 ? `${t.record.toUpperCase()} ${record}` : t.toGo(key);
+      key === -1 ? '' : key === -2 ? t.newRecord : key === -3 ? `${t.record.toUpperCase()} ${fmtN(record)}` : t.toGo(key);
     this.hudRecordEl.classList.toggle('near', key >= 0);
+  }
+
+  // La Cinta ahead (m to the tape, <= 0 for none): inside tapeApproachM a
+  // chip in the lane counts down "Faltan 180 m" in tapeApproachStepM steps,
+  // punching on each. It steps aside while an announcement is up.
+  setTapeApproach(toTape: number): void {
+    const on = toTape > 0 && toTape <= CONFIG.tapeApproachM;
+    const step = on ? Math.ceil(toTape / CONFIG.tapeApproachStepM) : -1;
+    if (step === this.tapeStep) return;
+    const was = this.tapeStep;
+    this.tapeStep = step;
+    this.tapeEl.classList.toggle('off', step < 0);
+    if (step < 0) return;
+    this.tapeNEl.textContent = this.t().tapeToGo(step * CONFIG.tapeApproachStepM);
+    if (was >= 0) restart(this.tapeEl, 'punch');
   }
 
   // La Cinta's banner text for a record distance: TU RÉCORD · 1,234 m.
@@ -1447,19 +1703,180 @@ export class UI {
   popupNearMiss(razor: boolean, pts: number, x: number, y: number, combo: number): void {
     const t = this.t();
     const cls = razor ? 'pop-md pop-gold' : combo >= 5 ? 'pop-md' : 'pop-sm';
-    this.popup(`${razor ? t.razorMiss : t.nearMiss} +${pts}`, x, y, cls);
+    this.popups.show(`${razor ? t.razorMiss : t.nearMiss} +${fmtN(pts)}`, x, y, cls);
+  }
+
+  // A plátano: pickups close together read as one growing "+N".
+  popupPlatano(pts: number, x: number, y: number): void {
+    this.popups.platano(pts, x, y, plusLabel);
   }
 
   popupRecordNear(): void {
-    this.popup(this.t().recordNear, 50, 30, 'pop-lg pop-gold');
+    this.announce('nudge', this.t().recordNear);
   }
 
   bannerFarthest(): void {
-    this.banner(this.t().farRecord);
+    this.announce('record', this.t().farRecord);
   }
 
   bannerGoal(): void {
-    this.banner(this.t().goalReached);
+    this.announce('record', this.t().goalReached);
+  }
+
+  // ---------------- coach chips ----------------
+
+  // One live sim step: what the player did, t seconds into the run.
+  coachStep(t: number, x: number, cv: boolean, trick: boolean, gas: boolean): void {
+    const id = this.coach.step(t, x, cv, trick, gas);
+    if (id !== this.coachShown) this.showCoach(id);
+  }
+
+  private showCoach(id: CoachId | null): void {
+    this.coachShown = id;
+    this.bandDirty = true; // popups keep clear of the chip
+    if (!id) {
+      this.coachEl.classList.add('off');
+      this.coachEl.classList.remove('show');
+      return;
+    }
+    this.coachEl.dataset.cue = id;
+    this.coachTextEl.textContent = this.coachText(id);
+    this.coachEl.classList.remove('off');
+    restart(this.coachEl, 'show');
+  }
+
+  private coachText(id: CoachId): string {
+    const t = this.t();
+    const key = this.inputMode === 'key';
+    const trick = this.selectedVehicle === 'civic' ? t.trickCar : t.trickBike;
+    const gas = multTag(CONFIG.gasScoreMult);
+    switch (id) {
+      case 'steer':
+        return key ? t.coachSteerKey : t.coachSteer;
+      case 'cv':
+        return t.coachCv(multTag(CONFIG.contraViaMultiplier));
+      case 'trick':
+        return key ? t.coachTrickKey(trick) : t.coachTrick(trick);
+      case 'gas':
+        return key ? t.coachGasKey(gas) : t.coachGas(gas);
+    }
+  }
+
+  // ---------------- the announcement lane ----------------
+
+  // Public for probes (__ecc.announce); the game calls the named methods.
+  announce(kind: AnnounceKind, text: string, kicker = ''): void {
+    this.lane.push(announcement(kind, text, kicker));
+    if (this.lane.step(0)) this.renderLane(); // a free lane shows it this frame
+  }
+
+  private renderLane(): void {
+    const a = this.lane.current;
+    const c = this.anCard;
+    if (!a) {
+      // Cut short by a bigger one: fade out now. Run out on its own: its
+      // exit already played (an-out at --an-out-at), so just clear it.
+      if (this.laneShown && this.lane.lastCut) {
+        c.classList.remove('show');
+        c.classList.add('out');
+      } else {
+        c.className = 'an-card';
+      }
+      this.laneShown = null;
+      return;
+    }
+    this.laneShown = a;
+    // Laid out (shown) before it is measured; restart() then replays the entry.
+    c.className = `an-card an-${a.style}${a.kind === 'mandao' || a.kind === 'levelUp' ? ' sentence' : ''} show`;
+    c.style.removeProperty('--an-max');
+    c.style.setProperty('--an-out-at', `${Math.max(0, a.showSec - CONFIG.announceOutSec)}s`);
+    this.anKicker.textContent = a.kicker;
+    this.anText.textContent = a.text;
+    this.fitLane();
+    restart(c, 'show');
+  }
+
+  // Auto-fit: the big line shrinks to fit one line, down to 72% (86% for a
+  // sentence); past that it wraps, balanced, onto two lines at most
+  // (shrinking more if it must, never under LANE_MIN_PX).
+  // Sized so the card still fits at the peak of its pop-in (1.08x), and so
+  // it ends above the horizon, where traffic first shows (laneHorizonShare).
+  private fitLane(): void {
+    const c = this.anCard;
+    const text = this.anText;
+    c.style.setProperty('--an-fit', '1');
+    const cs = getComputedStyle(c);
+    const chrome =
+      parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+    const avail = c.parentElement!.clientWidth / 1.12 - chrome - 6;
+    const natural = text.scrollWidth;
+    const oneLine = text.offsetHeight;
+    const minFit = LANE_MIN_PX / parseFloat(getComputedStyle(text).fontSize);
+    let fit = 1;
+    // A shout shrinks to stay on one line; a sentence would rather wrap.
+    const oneLineFloor = c.classList.contains('sentence') ? 0.86 : 0.72;
+    if (natural > avail && natural * oneLineFloor <= avail) {
+      fit = avail / natural;
+    } else if (natural > avail) {
+      c.classList.add('wrap');
+      c.style.setProperty('--an-max', `${Math.floor(avail)}px`);
+      fit = Math.min(1, Math.max(minFit, (2 * avail * 0.9) / natural));
+      for (let i = 0; i < 5 && fit > minFit; i++) {
+        c.style.setProperty('--an-fit', fit.toFixed(3));
+        if (text.offsetHeight <= oneLine * fit * 2.3) break;
+        fit = Math.max(minFit, fit * 0.9);
+      }
+    }
+    c.style.setProperty('--an-fit', fit.toFixed(3));
+    // (the lane's own top: the card itself is mid-transform at this point)
+    const maxBottom = window.innerHeight * CONFIG.laneHorizonShare - c.parentElement!.getBoundingClientRect().top;
+    for (let i = 0; i < 6 && fit > minFit && c.offsetHeight > maxBottom; i++) {
+      fit = Math.max(minFit, fit * 0.94);
+      c.style.setProperty('--an-fit', fit.toFixed(3));
+    }
+  }
+
+  // The band popups live in: under the top band's pills, above the pedals
+  // (and the coach chip), inside the safe area. Measured only when the
+  // layout may have moved; on the title (no HUD) it is most of the screen.
+  private popupBand(): Band {
+    const b = this.layoutBand();
+    // Clear of whatever the lane is showing right now (read per popup).
+    const now = this.bandNow;
+    now.left = b.left;
+    now.right = b.right;
+    now.bottom = b.bottom;
+    now.top = b.top;
+    const lane = this.laneShown ? this.anCard : this.tapeStep >= 0 ? this.tapeEl : null;
+    if (lane && !this.hud.classList.contains('hidden')) now.top = Math.max(b.top, lane.getBoundingClientRect().bottom + 4);
+    return now;
+  }
+
+  // The part of popupBand that only moves with the layout.
+  private layoutBand(): Band {
+    const b = this.bandBox;
+    if (!this.bandDirty) return b;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const pills = this.pillsEl.getBoundingClientRect();
+    if (pills.height === 0) {
+      b.left = 0;
+      b.right = W;
+      b.top = H * 0.12;
+      b.bottom = H * 0.88;
+      return b; // not cached: the HUD is hidden
+    }
+    const top = document.getElementById('hud-top')!.getBoundingClientRect();
+    b.left = top.left - 16;
+    b.right = top.right + 16;
+    b.top = pills.bottom + 4;
+    let bottom = this.pedalsEl.getBoundingClientRect().top;
+    if (bottom <= 0) bottom = H - 16;
+    if (this.coachShown) bottom = Math.min(bottom, this.coachEl.getBoundingClientRect().top);
+    // and out from under the steering thumb, which rests low on the screen
+    b.bottom = Math.min(bottom - 6, H * CONFIG.popupFloorShare);
+    this.bandDirty = false;
+    return b;
   }
 
   // ---------------- Los Mandaos ----------------
@@ -1547,28 +1964,18 @@ export class UI {
     this.mandaoSheetEl.classList.remove('hidden');
   }
 
-  // Mid-run: a mandao got done. Toasts queue, so a set finished on one
-  // plátano still reads one line at a time, then the level up.
+  // Mid-run: a mandao got done. It goes through the announcement lane, so a
+  // set finished on one plátano still reads one line at a time, then the
+  // level up, and never on top of a tramo sign or a record.
   toastMandao(c: Completion): void {
     const t = this.t();
-    this.toastQueue.push([c.daily ? t.dailyDone : t.mandaoDone, `${this.mandaoText(c.mandao)} · ${t.reward(c.reward)}`]);
+    // (no "en una corrida" tail here: the run it happened in is this one)
+    const what = t.mandao[c.mandao.kind](c.mandao.target, this.trickNoun());
+    this.announce('mandao', `${what} · ${t.reward(c.reward)}`, c.daily ? t.dailyDone : t.mandaoDone);
     if (c.levelUp) {
       const name = t.levelNames[Math.min(c.level, t.levelNames.length - 1)];
-      this.toastQueue.push([t.levelUpKicker, `${name} ${fmtBarrio(barrioMultFor(c.level))} · ${t.reward(c.setBonus)}`]);
+      this.announce('levelUp', `${name} ${fmtBarrio(barrioMultFor(c.level))} · ${t.reward(c.setBonus)}`, t.levelUpKicker);
     }
-    this.nextToast();
-  }
-
-  private nextToast(): void {
-    if (this.toastBusy) return;
-    const next = this.toastQueue.shift();
-    if (!next) return;
-    this.toastBusy = true;
-    this.toastKickerEl.textContent = next[0];
-    this.toastTextEl.textContent = next[1];
-    this.toastEl.classList.remove('show');
-    void this.toastEl.offsetWidth;
-    this.toastEl.classList.add('show');
   }
 
   ladderHitText(combo: number): string | null {
@@ -1587,57 +1994,52 @@ export class UI {
   popupTrick(pts: number, x: number, y: number): void {
     const t = this.t();
     const name = this.selectedVehicle === 'civic' ? t.trickCar : t.trickBike;
-    this.popup(`${name} +${pts}`, x, y, 'pop-md pop-gold');
+    this.popups.show(`${name} +${fmtN(pts)}`, x, y, 'pop-md pop-gold', true);
   }
 
   popupAir(pts: number, x: number, y: number): void {
-    this.popup(`${this.t().air} +${pts}`, x, y, 'pop-md pop-gold');
+    this.popups.show(`${this.t().air} +${fmtN(pts)}`, x, y, 'pop-md pop-gold', true);
   }
 
   popupObelisco(): void {
-    this.popup(this.t().obelisco, 50, 28, 'pop-lg pop-gold');
+    this.announce('landmark', this.t().obelisco);
   }
 
-  // A set piece announces itself where the combo ladder lands.
+  // A set piece calls its name, on a red street-warning plate.
   popupSetPiece(kind: SetPieceKind): void {
-    this.popup(this.t().setPieces[kind], 50, 34, 'pop-lg');
+    this.announce('setPiece', this.t().setPieces[kind]);
   }
 
-  // Escalation fires on the same tick as the multiplier popup, just before
-  // it, so it sits below it instead of stacking on top.
+  // Escalation fires on the same step as the multiplier tier, just before
+  // it: it waits for it and rides on the multiplier's card as the kicker.
   popupEscalation(): void {
-    this.popup(this.t().streetWild, 50, 48, 'pop-md');
+    this.streetWildAt = this.clock;
   }
 
   popupMultUp(n: number): void {
-    this.popup(this.t().multUp(n), 50, 40, 'pop-lg pop-gold');
+    const t = this.t();
+    const kicker = this.streetWildAt >= 0 ? t.streetWild : '';
+    this.streetWildAt = -1;
+    this.announce('mult', t.multUp(n), kicker);
   }
 
-  // Arriving somewhere new is the payoff for a long run, so it gets its own
-  // announcement rather than sharing the near-miss popup pool.
-  popupTramo(t: 'malecon' | 'zona' | 'campo'): void {
-    const card = document.getElementById('tramo-card');
-    const kicker = document.getElementById('tramo-kicker');
-    const name = document.getElementById('tramo-name');
-    if (!card || !kicker || !name) return;
-    kicker.textContent = this.t().tramoKicker;
-    name.textContent = this.t().tramoNames[t];
-    card.classList.remove('show');
-    void card.offsetWidth; // restart the animation on back-to-back crossings
-    card.classList.add('show');
+  // Arriving somewhere new is the payoff for a long run: a green road sign,
+  // DE VUELTA EN EL MALECÓN / LLEGASTE A LA ZONA COLONIAL / YA ESTÁS EN EL CAMPO.
+  popupTramo(tr: Tramo): void {
+    const t = this.t();
+    this.announce('tramo', t.tramoNames[tr], t.tramoKicker[tr]);
   }
 
   bannerNewRecord(): void {
-    this.banner(this.t().newRecord);
+    this.announce('record', this.t().newRecord);
   }
 
   // The Bendición took the hit for you.
   popupShieldSaved(): void {
-    this.popup(this.t().shieldSaved, 50, 40, 'pop-lg pop-gold');
+    this.announce('shield', this.t().shieldSaved);
   }
 
   // The resume countdown: 3, 2, 1, then ¡DALE! as the world moves again.
-  // Minimal markup; the look is WP-E's.
   showCountdown(n: number): void {
     this.countdownEl.textContent = String(n);
     this.countdownEl.classList.remove('hidden', 'go', 'beat');
@@ -1669,34 +2071,10 @@ export class UI {
     el.classList.add('go');
   }
 
+  // A popup at a screen point in percent (power-up names come through
+  // here). pop-lg ones live a little longer.
   popup(text: string, xPct: number, yPct: number, cls: string): void {
-    const now = performance.now();
-    if (now - this.lastPopupAt < 220) this.popupBurst += 1;
-    else this.popupBurst = 0;
-    this.lastPopupAt = now;
-    const el = this.popups[this.popupIdx];
-    this.popupIdx = (this.popupIdx + 1) % POPUP_POOL;
-    el.className = `popup ${cls}`;
-    el.textContent = text;
-    el.style.left = '50%';
-    el.style.top = `${clampPct(yPct - this.popupBurst * 6, 10, 80)}%`;
-    // This reflow already had to happen to restart the animation, so reading
-    // the width here is free. A popup is centred on its x, so a wide one
-    // fired near the kerb used to hang off the screen: pull it in by its own
-    // half width instead of a fixed 8% guess, and leave narrow ones where the
-    // event actually happened.
-    void el.offsetWidth;
-    const halfPct = ((el.offsetWidth / 2 + 8) / window.innerWidth) * 100;
-    el.style.left = `${clampPct(xPct, Math.min(halfPct, 50), Math.max(100 - halfPct, 50))}%`;
-    el.classList.add('go');
-  }
-
-  banner(text: string): void {
-    this.bannerEl.textContent = text;
-    this.bannerEl.classList.toggle('long', text.length > 15);
-    this.bannerEl.classList.remove('show');
-    void this.bannerEl.offsetWidth;
-    this.bannerEl.classList.add('show');
+    this.popups.show(text, xPct, yPct, cls, cls.includes('pop-lg'));
   }
 
   // ---------------- share card ----------------

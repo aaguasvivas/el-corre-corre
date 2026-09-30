@@ -1,0 +1,1184 @@
+/* hud.css: the in-run HUD and its overlays. The screens (title, pause,
+   game over) live in style.css.
+
+   Layout, top down (portrait): a soft scrim behind the top band; the score
+   top center; the pause button top left; plátanos and the live multiplier
+   top right; the combo (×n over its slang tier, then the fuse) under the
+   score; the contra vía and caballito pills in one row under that; then the
+   announcement lane, the one slot for the big words, which ends above the
+   horizon where traffic first shows. Popups live in the free band between
+   the pills and the pedals. Everything moves on transform and opacity only,
+   and every loop and big move has a reduced-motion fallback at the bottom. */
+
+#hud,
+#popup-layer,
+#countdown,
+#flash,
+#cv-vignette {
+  --hud-top: env(safe-area-inset-top, 0px);
+  --hud-bottom: env(safe-area-inset-bottom, 0px);
+  --hud-left: env(safe-area-inset-left, 0px);
+  --hud-right: env(safe-area-inset-right, 0px);
+  /* the locked palette, scoped so the HUD never depends on screen tokens */
+  --hud-blue: #002d62;
+  --hud-red: #ce1126;
+  --hud-white: #ffffff;
+  --hud-gold: #f4c430;
+  --hud-sun: #fff3c4;
+  --hud-cream: #f2e9dc;
+  --hud-sign: #0f7a3d; /* DR highway-sign green (the atlas presidente-green) */
+  --hud-plate: rgba(0, 45, 98, 0.8);
+  --hud-drop: 0 3px 0 rgba(0, 24, 52, 0.45);
+  /* motion tokens */
+  --hud-back: cubic-bezier(0.34, 1.56, 0.64, 1); /* easeOutBack */
+  --hud-quad: cubic-bezier(0.5, 1, 0.89, 1); /* easeOutQuad */
+  /* type scale */
+  --score-size: clamp(36px, 7vh, 56px);
+  --combo-size: clamp(22px, 3.8vh, 30px);
+  --tier-size: clamp(15px, 2.5vh, 19px);
+  --pill-size: clamp(13px, 2.1vh, 16px);
+}
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Paused, or counting back in: the HUD holds still with the world, and no
+   hint talks over the countdown. */
+#hud.frozen,
+#hud.frozen * {
+  animation-play-state: paused !important;
+}
+
+#hud.frozen #coach {
+  display: none;
+}
+
+/* Under PAUSA the top-right corner belongs to the pause screen's sound
+   button. */
+#ui:has(#pause:not(.hidden)) #hud-right {
+  visibility: hidden;
+}
+
+/* ---------- the contra vía glow ---------- */
+
+#cv-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  background: radial-gradient(ellipse at center, rgba(206, 17, 38, 0) 52%, rgba(206, 17, 38, 0.4) 100%);
+}
+
+#cv-vignette.on {
+  animation: cv-breathe 1.15s ease-in-out infinite alternate;
+}
+
+@keyframes cv-breathe {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+/* ---------- speed streaks ---------- */
+
+/* Eight thin lights racing past the edges of the frame. The container's
+   opacity follows felt speed; everything else is CSS. */
+#speedlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  overflow: hidden;
+}
+
+#speedlines i {
+  position: absolute;
+  top: 18%;
+  width: 3px;
+  height: 22vh;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0));
+  transform-origin: 50% 0;
+  animation: streak 0.34s linear infinite;
+}
+
+#speedlines i:nth-child(1) { left: 5%; transform: rotate(16deg); animation-delay: 0s; }
+#speedlines i:nth-child(2) { left: 11%; top: 30%; transform: rotate(11deg); animation-delay: -0.12s; }
+#speedlines i:nth-child(3) { left: 17%; top: 42%; transform: rotate(6deg); animation-delay: -0.22s; }
+#speedlines i:nth-child(4) { left: 3%; top: 52%; height: 16vh; transform: rotate(20deg); animation-delay: -0.3s; }
+#speedlines i:nth-child(5) { right: 5%; transform: rotate(-16deg); animation-delay: -0.06s; }
+#speedlines i:nth-child(6) { right: 11%; top: 30%; transform: rotate(-11deg); animation-delay: -0.18s; }
+#speedlines i:nth-child(7) { right: 17%; top: 42%; transform: rotate(-6deg); animation-delay: -0.26s; }
+#speedlines i:nth-child(8) { right: 3%; top: 52%; height: 16vh; transform: rotate(-20deg); animation-delay: -0.02s; }
+
+@keyframes streak {
+  0% { opacity: 0; translate: 0 -10vh; scale: 1 0.5; }
+  35% { opacity: 1; }
+  100% { opacity: 0; translate: 0 34vh; scale: 1 1.5; }
+}
+
+/* ---------- the top band ---------- */
+
+/* A soft shade behind the band so white type holds over the bright sky,
+   the clouds and the overhead banners. */
+#hud-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--hud-top) + var(--score-size) + var(--combo-size) + 96px);
+  background: linear-gradient(to bottom, rgba(0, 32, 72, 0.4) 0%, rgba(0, 32, 72, 0.2) 55%, rgba(0, 32, 72, 0) 100%);
+}
+
+/* The centre column. Every row keeps its height when empty (visibility,
+   not display), so nothing below it ever jumps. */
+#hud-top {
+  position: absolute;
+  top: calc(var(--hud-top) + 8px);
+  left: calc(var(--hud-left) + 16px);
+  right: calc(var(--hud-right) + 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#hud-score {
+  height: var(--score-size);
+  line-height: var(--score-size);
+  /* --score-fit shrinks a long score to fit between the side columns */
+  font-size: calc(var(--score-size) * var(--score-fit, 1));
+  color: var(--hud-white);
+  -webkit-text-stroke: 5px var(--hud-blue);
+  paint-order: stroke fill;
+  text-shadow: 0 4px 0 rgba(0, 45, 98, 0.35);
+  white-space: nowrap;
+}
+
+#score-n {
+  display: inline-block;
+}
+
+#score-n.punch {
+  animation: score-punch 220ms linear;
+}
+
+@keyframes score-punch {
+  0% { transform: scale(1); animation-timing-function: var(--hud-quad); }
+  36% { transform: scale(1.12); animation-timing-function: ease-in; }
+  100% { transform: scale(1); }
+}
+
+/* the combo: ×n over the slang tier, and the fuse that burns under it */
+#hud-combo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: calc(var(--combo-size) + var(--tier-size) * 1.7 + 17px);
+  margin-top: 5px;
+  transform-origin: 50% 0;
+}
+
+#hud-combo.off {
+  visibility: hidden;
+}
+
+#combo-n {
+  font-size: var(--combo-size);
+  font-weight: normal; /* a <b>; Lilita One has one weight, never fake a bold */
+  line-height: 1;
+  color: var(--hud-sun);
+  -webkit-text-stroke: 4px var(--hud-blue);
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 rgba(0, 45, 98, 0.35);
+  white-space: nowrap;
+}
+
+/* it punches downward, away from the score */
+#combo-n.bump {
+  transform-origin: 50% 0;
+  animation: combo-bump 240ms linear;
+}
+
+@keyframes combo-bump {
+  0% { transform: scale(1); animation-timing-function: var(--hud-quad); }
+  40% { transform: scale(1.14); animation-timing-function: ease-in; }
+  100% { transform: scale(1); }
+}
+
+#combo-tier {
+  display: flex;
+  align-items: center;
+  height: calc(var(--tier-size) * 1.7);
+  margin-top: 7px;
+  font-size: calc(var(--tier-size) * var(--tier-scale, 1) * var(--tier-fit, 1));
+  color: var(--hud-white);
+  -webkit-text-stroke: 3.5px var(--hud-blue);
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 rgba(0, 45, 98, 0.35);
+  white-space: nowrap;
+}
+
+/* the ladder climbs: each tier a little bigger, the top three in the
+   flag's red and gold */
+#combo-tier[data-tier='2'] { --tier-scale: 1.03; }
+#combo-tier[data-tier='3'] { --tier-scale: 1.06; }
+#combo-tier[data-tier='4'] { --tier-scale: 1.09; color: var(--hud-sun); -webkit-text-stroke-color: var(--hud-red); }
+#combo-tier[data-tier='5'] { --tier-scale: 1.12; color: var(--hud-sun); -webkit-text-stroke-color: var(--hud-red); }
+#combo-tier[data-tier='6'] { --tier-scale: 1.15; color: var(--hud-gold); -webkit-text-stroke-color: var(--hud-red); }
+
+/* a ladder hit: the tier slams in, tilted, and lands square
+   (0.4 -> 1.16 -> 1) */
+#combo-tier.slam {
+  animation: tier-slam 300ms linear;
+}
+
+@keyframes tier-slam {
+  0% { transform: scale(0.4) rotate(-8deg); opacity: 0; animation-timing-function: ease-out; }
+  45% { transform: scale(1.16) rotate(0deg); opacity: 1; animation-timing-function: ease-in-out; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+#combo-bar {
+  display: block;
+  width: calc(var(--combo-size) * 3.2);
+  height: 5px;
+  margin-top: 3px;
+  border-radius: 3px;
+  background: var(--hud-gold);
+  box-shadow: 0 0 0 1.5px var(--hud-blue);
+  transform-origin: 50% 50%;
+  transform: scaleX(1);
+}
+
+/* the last second of the fuse: red, and the block ticks at 5 Hz */
+#hud-combo.low #combo-bar {
+  background: var(--hud-red);
+}
+
+#hud-combo.low {
+  animation: fuse-tick 0.2s ease-in-out infinite alternate;
+}
+
+@keyframes fuse-tick {
+  from { transform: scale(1); }
+  to { transform: scale(1.06); }
+}
+
+/* contra vía and the caballito: one centred row.
+   DECISION: side by side, not stacked. A second row would push the
+   announcement lane down onto the horizon, where traffic first shows and
+   the 1.5 s telegraph lives. Both pills fit one row on a 375 pt phone in
+   Spanish and English. */
+#hud-pills {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  height: calc(var(--pill-size) + 14px);
+  margin-top: 6px;
+}
+
+.hud-pill {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: var(--pill-size);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  box-shadow: var(--hud-drop);
+}
+
+.hud-pill.on {
+  animation: pill-in 220ms var(--hud-back) both, pill-pulse 0.75s ease-in-out 220ms infinite alternate;
+}
+
+.hud-pill:not(.on) {
+  display: none;
+}
+
+#hud-cv {
+  background: var(--hud-red);
+  color: var(--hud-white);
+  border: 2px solid var(--hud-white);
+}
+
+#hud-cab {
+  background: var(--hud-sun);
+  color: var(--hud-blue);
+  border: 2px solid var(--hud-blue);
+}
+
+#hud-cab.on {
+  animation-duration: 220ms, 0.6s;
+}
+
+@keyframes pill-in {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pill-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.05); }
+}
+
+/* ---------- the side columns ---------- */
+
+#hud-left {
+  position: absolute;
+  top: calc(var(--hud-top) + 12px);
+  left: calc(var(--hud-left) + 12px);
+}
+
+#hud-pause {
+  pointer-events: auto;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(0, 45, 98, 0.62);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  box-shadow: var(--hud-drop);
+}
+
+#hud-pause:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 24, 52, 0.45);
+}
+
+#hud-pause:focus-visible {
+  outline: 3px solid var(--hud-gold);
+  outline-offset: 2px;
+}
+
+#hud-pause i {
+  display: block;
+  width: 5px;
+  height: 16px;
+  background: var(--hud-white);
+  border-radius: 2px;
+}
+
+#hud-right {
+  position: absolute;
+  top: calc(var(--hud-top) + 12px);
+  right: calc(var(--hud-right) + 12px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+#hud-platanos {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px 0 8px;
+  border-radius: 999px;
+  background: var(--hud-plate);
+  color: var(--hud-sun);
+  font-size: 16px;
+  box-shadow: var(--hud-drop);
+}
+
+/* the side chips punch toward the centre, never past the screen edge */
+#hud-platanos.bump,
+#hud-mult.bump {
+  transform-origin: 100% 50%;
+  animation: chip-bump 0.26s ease;
+}
+
+@keyframes chip-bump {
+  40% { transform: scale(1.12); }
+}
+
+/* the live multiplier: cream, gold from ×3, on fire from ×6 */
+#hud-mult {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 2px solid var(--hud-blue);
+  background: var(--hud-sun);
+  color: var(--hud-blue);
+  font-size: 17px;
+  letter-spacing: 0.5px;
+  box-shadow: var(--hud-drop);
+}
+
+#hud-mult.off {
+  visibility: hidden;
+}
+
+#hud-mult.hot {
+  background: var(--hud-gold);
+}
+
+#hud-mult.fire {
+  background: var(--hud-red);
+  border-color: var(--hud-gold);
+  color: var(--hud-white);
+}
+
+#hud-mult.fire::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 999px;
+  box-shadow: 0 0 12px 3px rgba(244, 150, 48, 0.9);
+  opacity: 0.35;
+  animation: mult-fire 0.32s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes mult-fire {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+/* ---------- the announcement lane ---------- */
+
+#announce {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.an-card {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+  text-align: center;
+  --an-rot: 0deg;
+  --an-fit: 1;
+}
+
+.an-card.show {
+  display: flex;
+  animation: an-in 320ms linear both, an-out 180ms ease-in var(--an-out-at, 1.8s) forwards;
+}
+
+.an-card.out {
+  display: flex;
+  animation: an-out 180ms ease-in forwards;
+}
+
+@keyframes an-in {
+  0% { opacity: 0; transform: rotate(var(--an-rot)) scale(0.5); animation-timing-function: ease-out; }
+  55% { opacity: 1; transform: rotate(var(--an-rot)) scale(1.08); animation-timing-function: ease-in-out; }
+  100% { opacity: 1; transform: rotate(var(--an-rot)) scale(1); }
+}
+
+@keyframes an-out {
+  from { opacity: 1; transform: rotate(var(--an-rot)) scale(1); }
+  to { opacity: 0; transform: rotate(var(--an-rot)) translateY(-10px) scale(0.96); }
+}
+
+.an-kicker {
+  font-size: clamp(11px, 3.2vw, 13px);
+  letter-spacing: 2px;
+  line-height: 1.15;
+}
+
+.an-kicker:empty {
+  display: none;
+}
+
+.an-text {
+  font-size: calc(clamp(20px, 6.2vw, 28px) * var(--an-fit));
+  line-height: 1.08;
+  white-space: nowrap;
+}
+
+/* two lines at most, balanced, in a tighter plate so the card still ends
+   above the horizon (text-wrap is a shorthand that would reset nowrap, so
+   it lives here) */
+.an-card.wrap {
+  padding-top: 3px;
+  padding-bottom: 4px;
+}
+
+.an-card.wrap .an-text {
+  max-width: var(--an-max, 100%);
+  white-space: normal;
+  text-wrap: balance;
+  line-height: 1.05;
+}
+
+/* plates: solid, bordered, a hard drop shadow; the card identity */
+.an-sign,
+.an-gold,
+.an-red,
+.an-blue,
+.an-cream {
+  padding: 5px 16px 6px;
+  border-radius: 14px;
+  border: 3px solid var(--hud-blue);
+  box-shadow: 0 5px 0 rgba(0, 24, 52, 0.45);
+}
+
+/* the tramo: a Dominican road sign */
+.an-sign {
+  --an-rot: -1.5deg;
+  padding: 6px 20px 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--hud-sign);
+  color: var(--hud-white);
+  box-shadow: inset 0 0 0 3px var(--hud-sign), inset 0 0 0 6px var(--hud-white), 0 6px 0 rgba(0, 45, 98, 0.35);
+}
+
+.an-sign .an-kicker {
+  margin-top: 2px;
+}
+
+.an-gold {
+  background: var(--hud-gold);
+  color: var(--hud-blue);
+}
+
+.an-red {
+  background: var(--hud-red);
+  color: var(--hud-white);
+}
+
+.an-blue {
+  background: var(--hud-blue);
+  color: var(--hud-sun);
+  border-color: var(--hud-gold);
+}
+
+.an-blue .an-kicker {
+  color: var(--hud-white);
+  letter-spacing: 0.5px;
+}
+
+.an-cream {
+  background: var(--hud-sun);
+  color: var(--hud-blue);
+}
+
+/* a sentence (a mandao) reads smaller than a shout */
+.an-card.sentence .an-text {
+  font-size: calc(clamp(14px, 4.2vw, 18px) * var(--an-fit));
+  line-height: 1.12;
+}
+
+/* the records: no plate, the heaviest stroke in the game */
+.an-record {
+  --an-rot: -2deg;
+}
+
+.an-record .an-text {
+  font-size: calc(clamp(30px, min(7vh, 10vw), 48px) * var(--an-fit));
+  color: var(--hud-white);
+  -webkit-text-stroke: 8px var(--hud-red);
+  paint-order: stroke fill;
+  text-shadow: 0 6px 0 rgba(0, 45, 98, 0.5);
+}
+
+/* La Cinta ahead: "Faltan 180 m", in the lane while it is free */
+#hud-tape {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px 0 8px;
+  border-radius: 999px;
+  border: 2px solid var(--hud-blue);
+  background: var(--hud-sun);
+  color: var(--hud-blue);
+  font-size: 16px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  box-shadow: var(--hud-drop);
+}
+
+#hud-tape.off,
+.an-card.show ~ #hud-tape,
+.an-card.out ~ #hud-tape {
+  display: none;
+}
+
+#hud-tape.punch {
+  animation: tape-punch 200ms linear;
+}
+
+@keyframes tape-punch {
+  0% { transform: scale(1); animation-timing-function: var(--hud-quad); }
+  40% { transform: scale(1.12); animation-timing-function: ease-in; }
+  100% { transform: scale(1); }
+}
+
+/* ---------- the record label ---------- */
+
+/* Bottom right, clear of the pedals: RÉCORD n, then FALTAN n, then
+   ¡NUEVO RÉCORD! once passed. */
+#hud-record {
+  position: absolute;
+  bottom: calc(var(--hud-bottom) + 12px);
+  right: calc(var(--hud-right) + 12px);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 45, 98, 0.72);
+  font-size: 14px;
+  letter-spacing: 0.8px;
+  color: var(--hud-cream);
+}
+
+#hud-record:empty {
+  display: none;
+}
+
+#hud-record.near {
+  color: var(--hud-gold);
+}
+
+/* ---------- coach chips ---------- */
+
+/* A first-time hint, one at a time, above the pedals. */
+#coach {
+  position: absolute;
+  left: calc(var(--hud-left) + 14px);
+  bottom: calc(var(--hud-bottom) + 162px);
+  max-width: min(320px, calc(100vw - 28px - var(--hud-left) - var(--hud-right)));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 16px;
+  border: 2px solid var(--hud-white);
+  background: rgba(0, 45, 98, 0.9);
+  color: var(--hud-white);
+  font-size: 15px;
+  line-height: 1.2;
+  box-shadow: var(--hud-drop);
+  transform-origin: 30px 100%;
+}
+
+#coach.off {
+  display: none;
+}
+
+#coach.show {
+  animation: coach-in 280ms var(--hud-back) both;
+}
+
+@keyframes coach-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.85); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+#coach svg {
+  flex: none;
+  display: none;
+}
+
+#coach[data-cue='cv'] svg {
+  display: block;
+}
+
+/* the gas hint points down at the pedal */
+#coach[data-cue='gas']::after {
+  content: '';
+  position: absolute;
+  left: 104px;
+  bottom: -9px;
+  border: 8px solid transparent;
+  border-bottom: none;
+  border-top-color: var(--hud-white);
+}
+
+/* ---------- el pedal ----------
+   Bottom left, laid out like a car: FRENO (small) on the left, ¡DALE! (big)
+   on the right, for the thumb that is not steering. The cluster box is the
+   hit zone: 12 px of slack around the art on three sides, plus the tag and
+   speedometer rows on top. The pedal art itself takes no pointer events. */
+#pedals {
+  position: absolute;
+  left: calc(var(--hud-left) + 2px);
+  bottom: calc(var(--hud-bottom) + 6px);
+  width: 176px;
+  height: 150px;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.pedal {
+  position: absolute;
+  bottom: 12px;
+  padding: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  border: 3px solid var(--hud-blue);
+  border-radius: 16px 16px 12px 12px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85);
+  opacity: 0.92;
+  pointer-events: none;
+  transition: transform 60ms ease-out, box-shadow 60ms ease-out, background-color 80ms ease-out, opacity 120ms ease-out;
+}
+
+.pedal-label {
+  position: relative;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* the rubber: horizontal ridges, like a real pedal pad */
+.pedal-tread {
+  position: absolute;
+  inset: 9px 9px 30px;
+  border-radius: 7px;
+  background: repeating-linear-gradient(to bottom, rgba(0, 45, 98, 0.3) 0 5px, transparent 5px 11px);
+}
+
+.pedal-brake {
+  left: 12px;
+  width: 64px;
+  height: 84px;
+  background: var(--hud-blue);
+  border-color: var(--hud-white);
+  color: var(--hud-white);
+  font-size: 14px;
+}
+
+.pedal-brake .pedal-tread {
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 0 5px, transparent 5px 11px);
+}
+
+.pedal-gas {
+  left: 86px;
+  width: 78px;
+  height: 110px;
+  background: var(--hud-gold);
+  color: var(--hud-blue);
+  font-size: 17px;
+}
+
+/* pressed: the pedal goes down onto its base and lights up */
+.pedal.down {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 rgba(0, 24, 52, 0.85);
+  opacity: 1;
+}
+
+.pedal-brake.down {
+  background: var(--hud-red);
+}
+
+/* a fondo and paying: the gas glows gold */
+.pedal-gas.on {
+  box-shadow: 0 1px 0 rgba(0, 24, 52, 0.85), 0 0 0 3px var(--hud-sun), 0 0 20px 4px rgba(244, 196, 48, 0.9);
+}
+
+/* first launch: the gas breathes until it is pressed once, ever */
+.pedal-gas.hint {
+  animation: pedal-breathe 1.2s ease-in-out infinite;
+}
+
+@keyframes pedal-breathe {
+  0%,
+  100% { scale: 1; box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 0 0 rgba(255, 243, 196, 0); }
+  50% { scale: 1.07; box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 0 5px rgba(255, 243, 196, 0.85); }
+}
+
+/* el freno caliente: heat fills FRENO from the bottom while it bites
+   (--heat, 0..1, written by ui.setBrakeHeat) */
+.pedal-heat {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px 12px 9px 9px;
+  background: linear-gradient(to top, var(--hud-red), #ff8c42);
+  transform-origin: bottom;
+  transform: scaleY(var(--heat, 0));
+  opacity: 0.85;
+  transition: transform 80ms linear;
+}
+
+/* overheated: orange-hot, a flame for a label, a glow that throbs, a
+   shiver, and ¡CALIENTE! on a red tag above it. It reads at a glance. */
+.pedal-brake.hot {
+  border-color: #ffd23f;
+  background: #ff6a2b;
+  animation: pedal-hot 0.36s ease-in-out infinite alternate;
+}
+
+.pedal-brake.hot .pedal-heat {
+  opacity: 1;
+}
+
+.pedal-flame {
+  position: relative;
+  display: none;
+  width: 26px;
+  height: 30px;
+  margin-bottom: -4px;
+}
+
+.pedal-brake.hot .pedal-flame {
+  display: block;
+}
+
+.pedal-brake.hot .pedal-label {
+  display: none;
+}
+
+@keyframes pedal-hot {
+  from {
+    translate: -1px 0;
+    box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 4px 1px rgba(255, 140, 66, 0.6);
+  }
+  to {
+    translate: 1px 0;
+    box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 18px 5px rgba(255, 90, 40, 0.95);
+  }
+}
+
+/* el cafecito: the gas wears a gold ring that drains with the time left
+   (--cafe, 1..0), reads CAFECITO, and the brake sits dimmed out */
+.pedal-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 22px 22px 18px 18px;
+  padding: 4px;
+  background: conic-gradient(var(--hud-gold) calc(var(--cafe, 1) * 360deg), rgba(0, 45, 98, 0.45) 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  display: none;
+}
+
+#pedals.cafe .pedal-ring {
+  display: block;
+}
+
+#pedals.cafe .pedal-gas {
+  opacity: 1;
+  box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 16px 3px rgba(244, 196, 48, 0.7);
+}
+
+#pedals.cafe .pedal-gas .pedal-label {
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+#pedals.cafe .pedal-brake {
+  opacity: 0.35;
+}
+
+/* the multiplier each pedal is paying, on a tag above it while it applies */
+.pedal-mult {
+  position: absolute;
+  bottom: 128px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity 0.12s ease-out, transform 0.16s var(--hud-back);
+}
+
+.pedal-mult span {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: normal;
+  line-height: 1.15;
+  white-space: nowrap;
+  box-shadow: var(--hud-drop);
+}
+
+.pedal-mult-brake {
+  left: 12px;
+  width: 64px;
+}
+
+/* wider than FRENO, so it hangs from FRENO's left edge, not past the screen's */
+.pedal-hot-tag {
+  left: 12px;
+  justify-content: flex-start;
+  transform-origin: 30px 50%;
+}
+
+.pedal-mult-brake span {
+  background: var(--hud-red);
+  color: var(--hud-white);
+  border: 2px solid var(--hud-white);
+}
+
+.pedal-hot-tag span {
+  background: var(--hud-red);
+  color: var(--hud-white);
+  border: 2px solid #ffd23f;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+.pedal-mult-gas {
+  left: 86px;
+  width: 78px;
+}
+
+.pedal-mult-gas span {
+  background: var(--hud-gold);
+  color: var(--hud-blue);
+  border: 2px solid var(--hud-blue);
+}
+
+#pedals.gas-on .pedal-mult-gas,
+#pedals.brake-on:not(.brake-hot) .pedal-mult-brake,
+#pedals.brake-hot .pedal-hot-tag {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* the speedometer, on its own plate above FRENO so it reads over anything */
+.pedal-speed {
+  position: absolute;
+  left: 44px;
+  bottom: 102px;
+  transform: translateX(-50%);
+  padding: 1px 8px 2px;
+  border-radius: 999px;
+  background: var(--hud-plate);
+  color: var(--hud-white);
+  white-space: nowrap;
+  pointer-events: none;
+  transition: color 0.12s ease-out;
+}
+
+.pedal-speed b {
+  font-size: 17px;
+  font-weight: normal;
+}
+
+.pedal-speed span {
+  margin-left: 2px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.pedal-speed.fast {
+  color: var(--hud-gold);
+}
+
+/* ---------- popups ---------- */
+
+/* Placed and animated by popups.ts (Web Animations): centred on their x and
+   y, clamped inside the free band, never past the screen's edges. */
+#popup-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.popup {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-size: 20px;
+  color: var(--hud-white);
+  -webkit-text-stroke: 4px var(--hud-blue);
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 rgba(0, 45, 98, 0.35);
+  will-change: transform, opacity;
+}
+
+.pop-sm {
+  font-size: clamp(16px, 2.7vh, 21px);
+}
+
+.pop-md {
+  font-size: clamp(20px, 3.4vh, 27px);
+}
+
+.pop-lg {
+  font-size: clamp(24px, 4.2vh, 34px);
+  color: var(--hud-sun);
+}
+
+.pop-gold {
+  color: var(--hud-sun);
+}
+
+/* ---------- the resume countdown ---------- */
+
+/* 3, 2, 1, ¡DALE!: centred in the free band between the top band and the
+   pedals, white on the heaviest blue stroke, one pop per beat. */
+#countdown {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--hud-top) + (100% - var(--hud-top) - var(--hud-bottom)) * 0.43);
+  transform: translate(-50%, -50%);
+  font-size: clamp(76px, 15vh, 128px);
+  line-height: 1;
+  color: var(--hud-white);
+  -webkit-text-stroke: 10px var(--hud-blue);
+  paint-order: stroke fill;
+  text-shadow: 0 8px 0 rgba(0, 45, 98, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#countdown.beat {
+  animation: countdown-beat 0.5s linear forwards;
+}
+
+#countdown.go {
+  animation: countdown-go 0.5s linear forwards;
+}
+
+@keyframes countdown-beat {
+  0% { transform: translate(-50%, -50%) scale(1.7); opacity: 0; animation-timing-function: var(--hud-quad); }
+  30% { transform: translate(-50%, -50%) scale(0.94); opacity: 1; animation-timing-function: ease-in-out; }
+  48% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0.85; }
+}
+
+@keyframes countdown-go {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; animation-timing-function: ease-out; }
+  30% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; animation-timing-function: ease-in-out; }
+  55% { transform: translate(-50%, -50%) scale(1); opacity: 1; animation-timing-function: ease-in; }
+  100% { transform: translate(-50%, -60%) scale(1.08); opacity: 0; }
+}
+
+/* ---------- the flash ---------- */
+
+/* White on the crash's impact frame, gold on a Bendición save. ui.flash
+   sets the color, the peak and the fade. */
+#flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#flash.go {
+  animation: flash-fade 150ms ease-out forwards;
+}
+
+@keyframes flash-fade {
+  from { opacity: var(--flash-a, 0.35); }
+  to { opacity: 0; }
+}
+
+/* ---------- short screens (landscape phones, small windows) ---------- */
+
+@media (max-height: 560px) {
+  #hud,
+  #popup-layer,
+  #countdown {
+    --score-size: 34px;
+    --combo-size: 20px;
+    --tier-size: 13px;
+    --pill-size: 12px;
+  }
+
+  #hud-scrim {
+    height: calc(var(--hud-top) + 120px);
+  }
+}
+
+/* ---------- reduced motion ---------- */
+
+/* Everything still shows and still changes state; nothing loops, flies or
+   scales. Popups get the same treatment in popups.ts. */
+@media (prefers-reduced-motion: reduce) {
+  #speedlines {
+    display: none;
+  }
+
+  #cv-vignette.on {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  #score-n.punch,
+  #combo-n.bump,
+  #combo-tier.slam,
+  #hud-combo.low,
+  #hud-platanos.bump,
+  #hud-mult.bump,
+  #hud-mult.fire::after,
+  #hud-tape.punch,
+  .hud-pill.on,
+  .pedal-gas.hint,
+  .pedal-brake.hot {
+    animation: none;
+  }
+
+  #hud-mult.fire::after {
+    opacity: 0.8;
+  }
+
+  .pedal-gas.hint {
+    box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 0 4px rgba(255, 243, 196, 0.85);
+  }
+
+  .pedal-brake.hot {
+    box-shadow: 0 6px 0 rgba(0, 24, 52, 0.85), 0 0 14px 4px rgba(255, 90, 40, 0.9);
+  }
+
+  .an-card.show {
+    animation: an-fade-in 200ms linear both, an-fade-out 180ms linear var(--an-out-at, 1.8s) forwards;
+  }
+
+  .an-card.out {
+    animation: an-fade-out 180ms linear forwards;
+  }
+
+  @keyframes an-fade-in {
+    from { opacity: 0; transform: rotate(var(--an-rot)); }
+    to { opacity: 1; transform: rotate(var(--an-rot)); }
+  }
+
+  @keyframes an-fade-out {
+    from { opacity: 1; transform: rotate(var(--an-rot)); }
+    to { opacity: 0; transform: rotate(var(--an-rot)); }
+  }
+
+  #coach.show {
+    animation: fade-in 200ms linear both;
+  }
+
+  #countdown.beat,
+  #countdown.go {
+    animation: fade-in 150ms linear both;
+  }
+
+  #flash.go {
+    animation-name: flash-fade-soft;
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes flash-fade-soft {
+    from { opacity: calc(var(--flash-a, 0.35) * 0.5); }
+    to { opacity: 0; }
+  }
+}

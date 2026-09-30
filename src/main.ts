@@ -5,6 +5,7 @@
 // time-dips only scale how much sim time a frame feeds in.
 
 import './style.css';
+import './hud.css';
 import '@fontsource/lilita-one';
 import * as THREE from 'three';
 import { CONFIG, PINTURAS, ROAD, VEHICLES, type VehicleId } from './config';
@@ -367,7 +368,7 @@ const traffic = new Traffic(scene, {
     ui.setPlatanos(score.platanos);
     player.setRackCount(score.platanos);
     const s = w2s(x, y + 0.5, Math.max(z, 1));
-    ui.popup(`+${pts}`, s.x, s.y, 'pop-sm pop-gold');
+    ui.popupPlatano(pts, s.x, s.y); // a string reads as one growing "+N"
     audio.platano();
     haptics.platano(score.platanos);
     missions.sample(score);
@@ -786,6 +787,8 @@ function stepSim(h: number): void {
   }
   gasInPrev = gasIn;
   brakeInPrev = brakeIn;
+  // First-time hints: each shows until its move has been done once, ever.
+  if (live) ui.coachStep(elapsed, player.x, cv, player.isWheelie, gasIn);
   // The pads cook: ¡CALIENTE! on FRENO, smoke off the rear wheel, a sizzle.
   if (brakeHeat.hot !== brakeHotPrev) {
     brakeHotPrev = brakeHeat.hot;
@@ -874,6 +877,7 @@ function runMoments(h: number): void {
   // Its last meters get a snare roll.
   const toTape = tapeAt - score.distance;
   audio.tapeRiser(!tapeBurst && tapeAt > 0 && toTape > 0 && toTape <= CONFIG.tapeRiserM);
+  ui.setTapeApproach(!tapeBurst && tapeAt > 0 ? toTape : -1);
   if (!tapeBurst && tapeAt > 0 && score.distance >= tapeAt) {
     tapeBurst = true;
     world.burstTape();
@@ -911,10 +915,7 @@ function onNearMiss(x: number, z: number, clearance: number): void {
   const s = w2s(x, 1.3, Math.max(z, 1.5));
   ui.popupNearMiss(r.razor, r.pts, s.x, s.y, r.combo);
   const hit = ui.ladderHitText(r.combo);
-  if (hit) {
-    ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
-    audio.ladder(r.combo);
-  }
+  if (hit) audio.ladder(r.combo); // the HUD's combo slams the new tier in (setCombo)
   ui.setCombo(r.combo, ui.ladderTierText(r.combo));
   audio.nearMiss(panOf(x), r.combo, r.razor);
   if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
@@ -1026,6 +1027,7 @@ function syncHud(): void {
   ui.showPedal(player.throttle > 0 ? 1 : player.throttle < 0 ? -1 : 0);
   ui.setSpeedKmh(Math.round(currentEff * 3.6));
   ui.setLiveMult(score.liveMult);
+  ui.setCafecito(state === 'playing' ? cafecitoT / CONFIG.cafecitoSec : 0);
 }
 
 let last = performance.now();
@@ -1100,7 +1102,14 @@ function frame(now: number): void {
   updateCamera(dt);
   audio.update(dt, audioCtxNow());
   if (state === 'playing' || state === 'crashing') syncHud();
+  hudUpdate(dt);
   renderer.render(scene, camera);
+}
+
+// The HUD's own clock (score roll, popups, the announcement lane), frozen
+// with the world while paused or counting back in.
+function hudUpdate(dt: number): void {
+  ui.update(dt, state === 'playing' || state === 'crashing', state === 'paused' || state === 'countdown');
 }
 
 ui.showTitle(score.record);
@@ -1264,7 +1273,9 @@ let testGod = false;
   // Advances the sim deterministically (used by automated checks when the
   // pane is hidden and requestAnimationFrame is frozen). The camera chases
   // every 1/60 s step like frame() does, so a long tick frames the rider the
-  // way a real run would instead of leaving the chase camera behind.
+  // way a real run would instead of leaving the chase camera behind. The HUD
+  // runs every step too, so its clock (the score roll, the announcement
+  // lane, the plátano "+N") follows the sim, not the wall clock.
   tick: (sec: number) => {
     let remaining = sec;
     while (remaining > 0) {
@@ -1272,9 +1283,14 @@ let testGod = false;
       remaining -= step;
       advance(step, performance.now());
       updateCamera(step);
+      if (state === 'playing' || state === 'crashing') syncHud();
+      hudUpdate(step);
     }
     audio.update(1 / 60, audioCtxNow());
-    if (state === 'playing' || state === 'crashing') syncHud();
     renderer.render(scene, camera);
   },
+  // HUD probes: the announcement lane, the coach chip and what is learned;
+  // and any announcement, to measure the lane with the longest copy.
+  hud: () => ui.hudState(),
+  announce: (kind: Parameters<UI['announce']>[0], text: string, kicker?: string) => ui.announce(kind, text, kicker),
 };

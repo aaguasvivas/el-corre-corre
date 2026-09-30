@@ -679,6 +679,46 @@ export const CONFIG = {
   hapticPlatanoMediumEvery: 10, // ...and every Nth plátano of the run lands medium
   dustMinVelX: 4.2, // FEEL: how hard you must carve before tire dust kicks up
 
+  // The in-run HUD. Popups are the constant small rewards; the announcement
+  // lane is the one slot for the big words (records, places, mandaos, set
+  // pieces), so two of them never overlap.
+  popupMax: 4, // FEEL: popups on screen at once; a fifth retires the oldest
+  popupSec: 1.0, // FEEL: a popup's life: pop in, hold, rise and fade
+  popupBigSec: 1.25, // FEEL: the same for the big ones (power-ups, the trick, airtime)
+  popupRisePx: 36, // FEEL: how far a popup drifts up as it fades
+  popupFloorShare: 0.7, // FEEL: popups end above this share of the screen height; lower, the steering thumb covers them
+  platanoAggSec: 0.35, // FEEL: plátanos closer than this in time add up into one "+N"
+  scoreRollSec: 0.18, // FEEL: the score rolls up to a gain over this long instead of jumping
+  scorePunchAt: 25, // FEEL: a gain this big at once also punches the score
+  // Each announcement: [priority, minSec, showSec, ttlSec]. A higher
+  // priority cuts the one on screen short once it has had minSec; a queued
+  // one that waited ttlSec is dropped (a set piece's name is stale by then).
+  // FEEL: showSec is how long each big word stays up.
+  announce: {
+    record: [5, 1.2, 2.0, 6],
+    shield: [4, 0.8, 1.5, 1.5],
+    tramo: [3, 1.6, 2.6, 8],
+    mult: [3, 1.0, 1.9, 4],
+    levelUp: [3, 1.4, 2.4, 20],
+    mandao: [2, 1.3, 2.2, 20],
+    setPiece: [2, 0.9, 1.6, 2.5],
+    streetWild: [2, 0.9, 1.6, 3],
+    nudge: [2, 0.9, 1.8, 4],
+    landmark: [1, 0.9, 1.6, 3],
+  } satisfies Record<string, readonly [number, number, number, number]>,
+  announceOutSec: 0.18, // FEEL: the gap between two announcements, for the exit
+  // The horizon: the lane's cards end above this share of the screen height
+  // (a long one shrinks to), so a card never hides traffic as it first shows.
+  laneHorizonShare: 0.335,
+  tapeApproachM: 200, // FEEL: La Cinta's "Faltan n m" chip shows this close to the tape...
+  tapeApproachStepM: 10, // ...counting down in steps this big, with a punch on each
+  // Coach chips: one contextual hint at a time, only until the move has been
+  // done once, ever (ecc.v1.learned). Steer, contra vía, the trick, the gas.
+  coachStartSec: 1.5, // FEEL: the first hint of a run, never sooner
+  coachGapSec: 4.5, // FEEL: from one hint appearing to the next
+  coachShowSec: 4, // FEEL: a hint leaves after this long even if unanswered
+  coachSteerM: 1, // how far the rider must steer (m) to count as steering
+
   // Phase 3: el Malecon
   // DECISION: the S-curve is a visual bend field applied in the vertex shader.
   // Gameplay space stays straight (lateral x relative to the road), so spawn
