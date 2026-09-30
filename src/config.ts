@@ -120,7 +120,13 @@ export const VEHICLES: Record<VehicleId, VehicleDef> = {
 // Las Pinturas: the platano wallet spends. Index 0 is the factory paint,
 // always owned. Names stay Spanish in both languages, like the power-ups.
 // Ownership is stored by index, so prices can move without touching saves.
-// PROVISIONAL prices, re-derived below from the economy lab.
+// FEEL: prices from tools/economy-lab.ts (-- career: fresh saves, a mix of
+// riding styles, Los Mandaos on). A median player earns about 55 plátanos a
+// run from the road plus the mandao rewards, which front-load (both tutorial
+// sets land in the first three runs): the first paint comes in run 3, the
+// next two about 5 and 7 runs apart, and Oro Fino some 30 runs after that,
+// a real flex. Re-run the lab after touching plátano placement, survival or
+// any mandao reward.
 export interface Pintura {
   name: string;
   hex: number;
@@ -130,24 +136,24 @@ export interface Pintura {
 export const PINTURAS: Record<VehicleId, ReadonlyArray<Pintura>> = {
   motor: [
     { name: 'Rojo del Barrio', hex: 0xce1126, price: 0 },
-    { name: 'Negro Tinto', hex: 0x2b2f36, price: 250 },
-    { name: 'Verde Colmado', hex: 0x27b598, price: 600 }, // shifted off the rider's shirt teal
-    { name: 'Azul Marino', hex: 0x002d62, price: 1200 },
-    { name: 'Oro Fino', hex: 0xf4c430, price: 2500 },
+    { name: 'Negro Tinto', hex: 0x2b2f36, price: 500 },
+    { name: 'Verde Colmado', hex: 0x27b598, price: 800 }, // shifted off the rider's shirt teal
+    { name: 'Azul Marino', hex: 0x002d62, price: 1100 },
+    { name: 'Oro Fino', hex: 0xf4c430, price: 3000 },
   ],
   pasola: [
     { name: 'Menta de Fábrica', hex: 0x7fd8c9, price: 0 },
-    { name: 'Rosa Chicle', hex: 0xff8b94, price: 250 },
-    { name: 'Cielo', hex: 0xb3d9ff, price: 600 },
-    { name: 'Lila', hex: 0xcdb4db, price: 1200 },
-    { name: 'Oro Fino', hex: 0xf4c430, price: 2500 },
+    { name: 'Rosa Chicle', hex: 0xff8b94, price: 500 },
+    { name: 'Cielo', hex: 0xb3d9ff, price: 800 },
+    { name: 'Lila', hex: 0xcdb4db, price: 1100 },
+    { name: 'Oro Fino', hex: 0xf4c430, price: 3000 },
   ],
   civic: [
     { name: 'Rojo Que Se Oiga', hex: 0xce1126, price: 0 },
-    { name: 'Morado Neón', hex: 0x9d4edd, price: 250 },
-    { name: 'Turquesa', hex: 0x17a2b8, price: 600 },
-    { name: 'Negro Mate', hex: 0x24242a, price: 1200 },
-    { name: 'Oro Fino', hex: 0xf4c430, price: 2500 },
+    { name: 'Morado Neón', hex: 0x9d4edd, price: 500 },
+    { name: 'Turquesa', hex: 0x17a2b8, price: 800 },
+    { name: 'Negro Mate', hex: 0x24242a, price: 1100 },
+    { name: 'Oro Fino', hex: 0xf4c430, price: 3000 },
   ],
 } as const;
 
@@ -372,8 +378,8 @@ export const CONFIG = {
   // El pelito: a pass this tight (m between the rider's circle and the
   // vehicle's hitbox) reads ¡Por un pelito! and pays razorMissMult on top of
   // everything else. The rest of the near-miss band reads ¡Cerquita!.
-  razorMissM: 0.45, // FEEL: lower = rarer and prouder; the lab bot that dodges without aiming lands ~1 in 4 of its near-misses here
-  razorMissMult: 2, // FEEL: what daring the extra half metre is worth
+  razorMissM: 0.35, // FEEL: lower = rarer and prouder. tools/economy-lab.ts: a dodge that does not aim for it lands here about 1 in 6 (0.45 m would be 1 in 4)
+  razorMissMult: 2, // FEEL: what daring that close is worth
 
   // Contra via. The signature: riding the oncoming lanes doubles everything.
   contraViaMultiplier: 2,
@@ -525,18 +531,23 @@ export const CONFIG = {
   ],
   // After the tutorials, three distinct kinds are drawn per set. Targets by
   // tier [0, 1, 2]. FEEL: raise a target and that goal takes more runs.
+  // Tuned with tools/economy-lab.ts (-- kinds): for the riding style that
+  // chases it, the lab's human-ish bot meets a tier-0 target in roughly a
+  // third or more of its runs, tier 1 in one run of five or better, tier 2
+  // in a few percent up to a third. The bot near-misses far less than a
+  // player who aims, so the near-miss family sits lower than it feels.
   mandaoPool: {
     platanosRun: [40, 70, 110],
-    nearMissRun: [6, 12, 20],
-    razorRun: [2, 4, 7],
-    comboReach: [5, 7, 10],
+    nearMissRun: [5, 9, 15],
+    razorRun: [1, 2, 4],
+    comboReach: [3, 5, 7], // ¡Duro!, ¡Diache!, ¡Tú ta' loco!
     cvMetersRun: [300, 700, 1400],
-    cvNearMissRun: [3, 6, 12],
-    trickSecRun: [5, 10, 18],
-    gasSecRun: [15, 35, 70],
+    cvNearMissRun: [2, 4, 8],
+    trickSecRun: [8, 16, 28],
+    gasSecRun: [20, 40, 70],
     airRun: [2, 3, 5],
     reachTramo: [1000, 2000, 3000], // La Zona, El Campo, the whole lap
-    pointsRun: [4000, 12000, 30000],
+    pointsRun: [5000, 15000, 40000], // the barrio multiplier has grown by each tier
     cleanMeters: [600, 1200, 2000],
     pasolaMeters: [800, 1500, 2500],
     civicMeters: [800, 1500, 2500],

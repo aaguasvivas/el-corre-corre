@@ -159,6 +159,24 @@ describe('Los Mandaos: sets, levels and the barrio multiplier', () => {
     expect(got.map((c) => c.mandao.kind)).toEqual(['platanosTotal']);
   });
 
+  it('a pause saves lifetime progress; the run ending later does not count it twice', () => {
+    const store = installStorage();
+    const set = [
+      { k: 'platanosTotal', t: 150, r: 60, d: 0, p: 40 },
+      { k: 'airRun', t: 2, r: 60, d: 0 },
+      { k: 'comboReach', t: 5, r: 60, d: 0 },
+    ];
+    store.set('ecc.v1.mandaos', JSON.stringify({ v: 1, level: 3, set }));
+    const m = new Missions({ now: clock(2026, 9, 29).now });
+    m.startRun('motor');
+    m.persist(stats({ platanos: 25 }));
+    // the app dies while paused: a fresh boot sees the paused progress
+    expect(new Missions({ now: clock(2026, 9, 29).now }).view().set[0].progress).toBe(65);
+    // or the run goes on and ends normally: 40 + 30, not 40 + 25 + 30
+    m.finishRun(stats({ platanos: 30 }));
+    expect(new Missions({ now: clock(2026, 9, 29).now }).view().set[0].progress).toBe(70);
+  });
+
   it('ride goals count only on that ride', () => {
     installStorage().set(
       'ecc.v1.mandaos',
@@ -338,21 +356,27 @@ describe('El Mandao del Día: date math and the streak', () => {
 });
 
 describe('Economy: Las Pinturas against real income', () => {
-  // Measured with tools/economy-lab.ts (human-ish bot mix, motor, seeded):
-  // the median run picks up this many plátanos. Re-measure after touching
-  // plátano placement or survival, and keep this test honest.
-  const MEDIAN_RUN_PLATANOS = 55;
+  // Measured with tools/economy-lab.ts (-- career: 24 fresh saves, a mix of
+  // riding styles, the human-ish bot): the median run picks up 53 plátanos
+  // from the road, tutorial set 1 is done in run 1 and set 2 by run 3.
+  // Re-measure after touching plátano placement, survival or the tutorials.
+  const MEDIAN_RUN_PLATANOS = 53;
+  const TUTORIAL_DONE_BY_RUN = [1, 3];
 
-  it('the first pintura is affordable within 4 median runs, counting the first tutorial set', () => {
-    const tutorial = CONFIG.mandaoTutorial[0].length * CONFIG.mandaoTutorialReward + CONFIG.mandaoSetBonus;
+  it('the first pintura is affordable within 4 median runs (road plátanos plus the tutorial sets, no daily)', () => {
     const cheapest = Math.min(...Object.values(PINTURAS).map((list) => list[1].price));
     let bank = 0;
     let runs = 0;
     while (bank < cheapest && runs < 10) {
       runs++;
-      bank += MEDIAN_RUN_PLATANOS + (runs === 1 ? tutorial : 0);
+      bank += MEDIAN_RUN_PLATANOS;
+      CONFIG.mandaoTutorial.forEach((set, i) => {
+        if (TUTORIAL_DONE_BY_RUN[i] === runs) bank += set.length * CONFIG.mandaoTutorialReward + CONFIG.mandaoSetBonus;
+      });
     }
     expect(runs).toBeLessThanOrEqual(4);
+    // and not in the very first run: the first paint is a goal, not a gift
+    expect(runs).toBeGreaterThan(1);
   });
 
   it('every pintura has a Spanish name, and Oro Fino is the top of every row', () => {

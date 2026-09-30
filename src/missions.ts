@@ -188,10 +188,13 @@ function parseMandao(o: unknown): Mandao | null {
   return m;
 }
 
+// A lifetime kind stores its live progress (never below base), so a save
+// taken mid-run (a pause, a completion) keeps what this run added even if
+// the app is killed before the run finishes.
 function storeMandao(m: Mandao): Record<string, number | string> {
   const o: Record<string, number | string> = { k: m.kind, t: m.target, r: m.reward, d: m.done ? 1 : 0 };
   if (m.tutorial) o.tut = 1;
-  if (KINDS[m.kind].lifetime) o.p = m.base;
+  if (KINDS[m.kind].lifetime) o.p = m.progress;
   return o;
 }
 
@@ -268,6 +271,13 @@ export class Missions {
       const m = this.set[i];
       if (KINDS[m.kind].lifetime && !m.done) m.base = m.progress;
     }
+    this.save();
+  }
+
+  // Defensive save (pause, backgrounding): per-run progress restarts with
+  // the next run anyway, lifetime progress so far is kept.
+  persist(s: RunStats): void {
+    this.sample(s);
     this.save();
   }
 

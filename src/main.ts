@@ -472,6 +472,7 @@ function pauseGame(): void {
   if (state !== 'playing') return;
   state = 'paused';
   score.persist();
+  missions.persist(score); // a pause may be the last thing a killed app does
   ui.showPause(missions.view());
   audio.stopRun(false);
   audio.click();
