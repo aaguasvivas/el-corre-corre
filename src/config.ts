@@ -117,35 +117,37 @@ export const VEHICLES: Record<VehicleId, VehicleDef> = {
   },
 } as const;
 
-// Las Pinturas: the platano wallet finally spends. Index 0 is the factory
-// paint, always owned. Prices tuned to the earn rate (a decent run banks
-// 20-60 platanos): first unlock inside a session or two, the gold one a flex.
+// Las Pinturas: the platano wallet spends. Index 0 is the factory paint,
+// always owned. Names stay Spanish in both languages, like the power-ups.
+// Ownership is stored by index, so prices can move without touching saves.
+// PROVISIONAL prices, re-derived below from the economy lab.
 export interface Pintura {
+  name: string;
   hex: number;
   price: number;
 }
 
 export const PINTURAS: Record<VehicleId, ReadonlyArray<Pintura>> = {
   motor: [
-    { hex: 0xce1126, price: 0 }, // rojo del barrio
-    { hex: 0x2b2f36, price: 400 }, // negro tinto
-    { hex: 0x27b598, price: 900 }, // verde colmado (shifted off the rider's shirt teal)
-    { hex: 0x002d62, price: 1600 }, // azul marino
-    { hex: 0xf4c430, price: 3000 }, // oro fino
+    { name: 'Rojo del Barrio', hex: 0xce1126, price: 0 },
+    { name: 'Negro Tinto', hex: 0x2b2f36, price: 250 },
+    { name: 'Verde Colmado', hex: 0x27b598, price: 600 }, // shifted off the rider's shirt teal
+    { name: 'Azul Marino', hex: 0x002d62, price: 1200 },
+    { name: 'Oro Fino', hex: 0xf4c430, price: 2500 },
   ],
   pasola: [
-    { hex: 0x7fd8c9, price: 0 }, // menta de fabrica
-    { hex: 0xff8b94, price: 400 }, // rosa chicle
-    { hex: 0xb3d9ff, price: 900 }, // cielo
-    { hex: 0xcdb4db, price: 1600 }, // lila
-    { hex: 0xf4c430, price: 3000 }, // oro fino
+    { name: 'Menta de Fábrica', hex: 0x7fd8c9, price: 0 },
+    { name: 'Rosa Chicle', hex: 0xff8b94, price: 250 },
+    { name: 'Cielo', hex: 0xb3d9ff, price: 600 },
+    { name: 'Lila', hex: 0xcdb4db, price: 1200 },
+    { name: 'Oro Fino', hex: 0xf4c430, price: 2500 },
   ],
   civic: [
-    { hex: 0xce1126, price: 0 }, // rojo que se oiga
-    { hex: 0x9d4edd, price: 400 }, // morado neon
-    { hex: 0x17a2b8, price: 900 }, // turquesa
-    { hex: 0x24242a, price: 1600 }, // negro mate
-    { hex: 0xf4c430, price: 3000 }, // oro fino
+    { name: 'Rojo Que Se Oiga', hex: 0xce1126, price: 0 },
+    { name: 'Morado Neón', hex: 0x9d4edd, price: 250 },
+    { name: 'Turquesa', hex: 0x17a2b8, price: 600 },
+    { name: 'Negro Mate', hex: 0x24242a, price: 1200 },
+    { name: 'Oro Fino', hex: 0xf4c430, price: 2500 },
   ],
 } as const;
 
@@ -367,6 +369,11 @@ export const CONFIG = {
   nearMissDodgeM: 0.2, // min lateral move (m) between the collision course and the pass
   nearMissPoints: 25,
   comboDecaySec: 4,
+  // El pelito: a pass this tight (m between the rider's circle and the
+  // vehicle's hitbox) reads ¡Por un pelito! and pays razorMissMult on top of
+  // everything else. The rest of the near-miss band reads ¡Cerquita!.
+  razorMissM: 0.45, // FEEL: lower = rarer and prouder; the lab bot that dodges without aiming lands ~1 in 4 of its near-misses here
+  razorMissMult: 2, // FEEL: what daring the extra half metre is worth
 
   // Contra via. The signature: riding the oncoming lanes doubles everything.
   contraViaMultiplier: 2,
@@ -403,6 +410,8 @@ export const CONFIG = {
 
   // Airtime
   airtimePointsPerSec: 15,
+  airLandBonus: 40, // FEEL: flat points (x the live multiplier) for landing a real jump off a policía
+  airLandMinSec: 0.25, // a hop shorter than this is a bump, not a jump: no landing bonus
   policiaLaunchVy: 0.16, // FEEL: launch vy = forward speed * this
   jumpGravity: 20, // FEEL: heavier = snappier hops
 
@@ -493,6 +502,61 @@ export const CONFIG = {
   // pointerup from the finger that was still steering.
   restartDebounceSec: 0.15, // ignore taps this long after the card shows
   closeCallShare: 0.15, // FEEL: "te quedaste a N" shows when within this fraction of the record
+
+  // Records. Each means one thing: ¡NUEVO RÉCORD! is always the points
+  // record, La Cinta is always the distance record, and both are the values
+  // the run STARTED with, so a mid-run save can never fake one.
+  recordNudgeAt: 0.9, // FEEL: once per run, "¡Ya casi el récord!" at this share of the points record
+  recordNudgeFrom: 0.75, // FEEL: from this share on, the HUD record label counts down "FALTAN n"
+  // DECISION: a ride with no distance record yet still gets a finish line,
+  // LA META, so the very first run has a target to burst through.
+  goalTapeM: 400, // FEEL: where LA META stands on a ride's first runs
+
+  // Los Mandaos: three small goals at a time; finish all three and you level
+  // up. Positive goals only. Every "Run" kind must happen inside one run;
+  // platanosTotal is the one that keeps counting across runs.
+  // DECISION: the owner lifted the brief's "no meta in v1" rule for this pass
+  // (docs/audit/PLAN.md decision 3). Mandaos never touch distance, La Cinta
+  // or the distance records; the barrio multiplier pays points only.
+  // The two tutorial sets come first, in order, and teach the verbs.
+  mandaoTutorial: [
+    [['platanosRun', 10], ['nearMissRun', 2], ['distRun', 300]], // doable in run one
+    [['cvMetersRun', 100], ['trickHold', 2], ['gasSecRun', 5]], // contra vía, the caballito, el pedal
+  ],
+  // After the tutorials, three distinct kinds are drawn per set. Targets by
+  // tier [0, 1, 2]. FEEL: raise a target and that goal takes more runs.
+  mandaoPool: {
+    platanosRun: [40, 70, 110],
+    nearMissRun: [6, 12, 20],
+    razorRun: [2, 4, 7],
+    comboReach: [5, 7, 10],
+    cvMetersRun: [300, 700, 1400],
+    cvNearMissRun: [3, 6, 12],
+    trickSecRun: [5, 10, 18],
+    gasSecRun: [15, 35, 70],
+    airRun: [2, 3, 5],
+    reachTramo: [1000, 2000, 3000], // La Zona, El Campo, the whole lap
+    pointsRun: [4000, 12000, 30000],
+    cleanMeters: [600, 1200, 2000],
+    pasolaMeters: [800, 1500, 2500],
+    civicMeters: [800, 1500, 2500],
+    platanosTotal: [150, 400, 800],
+  },
+  mandaoTierEvery: 2, // FEEL: levels spent on each tier before the targets step up
+  mandaoTutorialReward: 40, // plátanos per tutorial mandao
+  mandaoReward: [60, 100, 150], // FEEL: plátanos per mandao by tier
+  mandaoSetBonus: 100, // FEEL: plátanos on top for finishing a whole set (a level up)
+  // El multiplicador del barrio: +barrioMultStep on ALL points per level,
+  // capped. Earned only, never bought.
+  barrioMultStep: 0.25,
+  barrioMultMax: 3,
+  // El Mandao del Día: one date-seeded goal at the tier-1 target. The reward
+  // grows with the streak of days in a row, capped. A missed day quietly
+  // restarts the streak; the game never says it was lost.
+  dailyReward: 120, // FEEL: plátanos for the daily at a 1-day streak
+  streakStep: 0.25,
+  streakMax: 2.5,
+  mandaoSampleSec: 0.25, // how often (sim seconds) mandao progress is re-read mid-run
 
   // Juice
   shakeHoyo: 0.22, // FEEL: camera jolt when you eat a pothole
