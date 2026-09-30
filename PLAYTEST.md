@@ -1,11 +1,67 @@
 # PLAYTEST NOW
 
 Living log of what the human should feel-test at the end of each phase.
-Run it with `npm run dev`. Desktop: A/D or arrows to steer, HOLD W or Space
-for the trick (caballito on bikes, derrape in the Civic), M for mute. Touch:
-drag to steer, swipe up and hold, swipe down to drop.
+Run it with `npm run dev`, or install the TestFlight build. Phone: drag
+anywhere with one thumb to steer, hold ¡DALE! (gas) or FRENO (brake) at the
+bottom left with the other thumb, swipe up and hold for the trick (caballito
+on the bikes, derrape in the Civic). Desktop: A/D or left/right to steer,
+up/down for gas and brake, hold W or Space for the trick, P or Escape to
+pause, M to mute.
 
-## El acelerador + art round 3 (current)
+## Next-level pass (build 10)
+
+New since build 9: two pedals with el freno caliente, near-misses that need
+a real dodge, Los Mandaos, records that each mean one thing, new screens and
+HUD, new music and sounds, a new crash, the iPhone share sheet, and a backup
+of your saves. The decisions are in `docs/audit/PLAN.md`.
+
+**PLAYTEST NOW** (on the phone, build 10):
+
+1. **Pedals.** Hold ¡DALE! with the left thumb and steer with the right.
+   Within a moment the km/h turns gold and x1.5 shows. Slide the same thumb
+   onto FRENO without lifting: it brakes at once, shows x0.5 and lights the
+   tail light.
+2. **Freno caliente.** Hold FRENO for more than 2 s. The pedal fills, turns
+   orange with a flame and ¡CALIENTE!, and the brake lets go. Short taps and
+   1 s holds brake fully every time. Does the fade feel fair?
+3. **Near-miss needs a dodge.** Ride on the dashed line without dodging: no
+   ¡Cerquita!. Sit in a car's line and swerve out late: ¡Cerquita! and the
+   combo climbs. Do near-misses feel earned or too rare?
+4. **Por un pelito.** Squeeze past a car on purpose. The gold ¡Por un
+   pelito! (x2) should come only when you really went close, about 1 in 6
+   casual dodges.
+5. **Opening.** Start 5 runs. Plátanos come in the first 2 s, you pass slow
+   cars at about 5, 9 and 14 s, and a Bendición around 14 s saves your first
+   hit.
+6. **Set pieces.** Past 500 m and 1200 m, "¡La calle se puso brava!" shows.
+   ¡TAPÓN!, ¡CARAVANA! and the other named moments always leave a way
+   through.
+7. **Records and the tape.** Chase your Motor record: gold FALTAN from 75%,
+   ¡Ya casi el récord! near 90%, and ¡NUEVO RÉCORD! with confetti when your
+   points pass it. Bursting La Cinta says ¡MÁS LEJOS QUE NUNCA!, never NUEVO
+   RÉCORD. A ride with no record gets LA META at 400 m.
+8. **Mandaos.** On a fresh install the first set (10 plátanos, 2 cerquitas,
+   300 m) gets done in the first run or two. ¡MANDAO HECHO! is readable
+   mid-ride without hiding traffic, and the card stamps ¡HECHO!. Is the
+   first paint (500 plátanos) in reach around run 3?
+9. **Crash and OTRA VEZ.** Crash a few times. The white flash, the rider
+   flying off under the stars and the bike sliding away should be funny. The
+   tumble stays visible between the card and OTRA VEZ, and a tap on OTRA VEZ
+   half a second after the hit starts a new run.
+10. **Audio by ear.** Near-miss whooshes rise with the combo, plátano
+    strings climb in pitch, a crash slows the band down, the title and card
+    play a muffled radio, and La Zona and El Campo change the music. Nothing
+    is harsh on the phone speaker.
+11. **Art on the phone.** Sun over a turquoise sea, veleros, cars in their
+    real colors, white head lamps on oncoming cars and red tail lamps ahead.
+    Pasacalles and laundry fade out before they cross the score.
+12. **Share and saves.** COMPARTIR opens the iPhone share sheet with a photo
+    of your crash. Send it to WhatsApp and Messages. Guardar imagen asks for
+    permission in Spanish and the card lands in Fotos. Close the sheet
+    without choosing: nothing breaks. Force-quit and reopen: plátanos, paints
+    and records are still there.
+
+## El acelerador + art round 3 (build 9; the finger-height throttle is gone since build 10)
 
 1. **Gas and brake.** Phone: hold your thumb above where it landed for gas,
    below it for brake; the dead zone is 30 px so a dodge is still a dodge.
@@ -192,7 +248,7 @@ with a bell. Feel for:
 5. **El Obelisco** only appears on Malecon stretches now. Does its return
    still land as a milestone?
 
-## Phase 6 (current): ship prep
+## Phase 6: ship prep
 
 Most of this phase is invisible if it worked. Four things you CAN feel:
 
