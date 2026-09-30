@@ -87,8 +87,10 @@ export class Sim {
     runDist: 0, shielded: false, cafecito: false,
   };
 
-  // buildSeed: the pools draw each vehicle's drift phase at construction, so
-  // it is seeded too; otherwise a test would depend on the process.
+  // buildSeed: construction still draws randoms (art variety, geometry
+  // uuids), so it is seeded too; otherwise a test would depend on the
+  // process. The drift phases no longer come from it (traffic.ts takes them
+  // from the pool slot), so art edits cannot reshuffle seeded traffic.
   constructor(buildSeed = 1) {
     installCanvasStub();
     seedRandom(buildSeed);

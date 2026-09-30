@@ -455,8 +455,9 @@ function guaguaAssets(banner: THREE.Texture, parked: boolean): TypeAssets {
     addExtras: (group) => {
       group.add(new THREE.Mesh(bannerGeo, bannerMat));
       if (!parked) return [];
-      // el cobrador hangs off the back step on the sidewalk side (world.ts)
-      addCobrador(group);
+      // el cobrador hangs off the back step on the sidewalk side (world.ts),
+      // on the same fog curve as the guagua
+      addCobrador(group, hazardMaterial);
       // hazard blinkers over the tail lamps, both in one mesh
       const blink = new THREE.Mesh(blinkGeo, blinkMat);
       group.add(blink);
@@ -531,12 +532,38 @@ function camionAssets(): TypeAssets {
   };
 }
 
+// The underglow's light pool: an ellipse that is brightest under the car
+// and fades to nothing before the plane's edge, so the glow reads as light
+// spilling onto the road instead of a flat teal mat with hard corners.
+// Shared by the traffic Civics and the player's (player.ts).
+let _underglowMap: THREE.CanvasTexture | null = null;
+export function underglowMap(): THREE.CanvasTexture {
+  if (!_underglowMap) {
+    _underglowMap = canvasTex(64, (g) => {
+      g.translate(32, 32);
+      const grad = g.createRadialGradient(0, 0, 0, 0, 0, 32);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(0.55, 'rgba(255,255,255,0.8)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad;
+      g.fillRect(-32, -32, 64, 64);
+    });
+  }
+  return _underglowMap;
+}
+
 function civicAssets(): TypeAssets {
-  const glowGeo = new THREE.PlaneGeometry(2.3, 4.7);
+  const glowGeo = new THREE.PlaneGeometry(2.5, 5.0);
   glowGeo.rotateX(-Math.PI / 2);
   glowGeo.translate(0, 0.04, 0);
   const glowMat = hazardMaterial(
-    new THREE.MeshBasicMaterial({ color: PALETTE.underglow, transparent: true, opacity: 0.5 }),
+    new THREE.MeshBasicMaterial({
+      color: PALETTE.underglow,
+      map: underglowMap(),
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+    }),
   );
   return {
     halfW: 0.93, halfL: 2.1, pool: 5,
@@ -759,6 +786,38 @@ function powerupIcon(kind: PowerupKind): THREE.BufferGeometry {
   return g;
 }
 
+// The power-up beam's shader (see buildPickups). Additive, so it only ever
+// adds light.
+const BEAM_VS = `
+varying vec3 vEccN;
+varying vec3 vEccV;
+varying float vEccH;
+#include <common>
+void main() {
+  vEccH = uv.y;
+  #include <beginnormal_vertex>
+  #include <defaultnormal_vertex>
+  #include <begin_vertex>
+  #include <project_vertex>
+  vEccN = normalize( transformedNormal );
+  vEccV = normalize( -mvPosition.xyz );
+}
+`;
+
+const BEAM_FS = `
+uniform vec3 uColor;
+varying vec3 vEccN;
+varying vec3 vEccV;
+varying float vEccH;
+void main() {
+  float facing = abs( dot( normalize( vEccN ), normalize( vEccV ) ) );
+  float core = facing * facing;
+  float rise = smoothstep( 0.0, 0.2, vEccH ) * pow( 1.0 - vEccH, 1.4 );
+  gl_FragColor = vec4( uColor * ( core * rise * 0.6 ), 1.0 );
+  #include <colorspace_fragment>
+}
+`;
+
 function canvasTex(size: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -784,27 +843,44 @@ function blob(g: CanvasRenderingContext2D, cx: number, cy: number, r: number, ji
 }
 
 // La rama: the branch every Dominican driver sticks in a pothole so the
-// next one sees it. A stick with a twig and a few leaf clusters.
+// next one sees it. A thin, tall stick driven in at a lean, a small tuft of
+// leaves left at the tip, and a red trapo knotted under the tuft. Up close
+// it reads as a stick, never a little tree; far off the rag is the dot of
+// color that says "hoyo aquí". The rag's two tails cross, so one of them
+// faces the camera whatever way the instance is turned.
 function ramaGeometry(): THREE.BufferGeometry {
-  const k = new Kit();
-  k.add(cyl(0.028, 0.045, 1.35, 0, 0.62, 0, 5), PALETTE.palmTrunk);
-  const twig = new THREE.CylinderGeometry(0.016, 0.024, 0.42, 4);
-  twig.rotateZ(-0.9);
-  twig.translate(0.14, 0.98, 0);
-  k.add(twig, PALETTE.palmTrunk);
-  const leaf = (x: number, y: number, z: number, s: number, color: number): void => {
-    const g = new THREE.OctahedronGeometry(0.2 * s, 0);
-    g.scale(1, 0.6, 1.3);
+  const LEAN = 0.2;
+  const stick = new Kit();
+  stick.add(cyl(0.014, 0.03, 1.95, 0, 0.82, 0, 5), PALETTE.palmTrunk); // from inside the hole to 1.8 m
+  const twig = new THREE.CylinderGeometry(0.008, 0.013, 0.24, 4);
+  twig.rotateZ(-0.85);
+  twig.translate(0.07, 1.32, 0);
+  stick.add(twig, PALETTE.palmTrunk);
+  const leaf = (x: number, y: number, z: number, s: number, color: number, yaw: number): void => {
+    const g = new THREE.OctahedronGeometry(0.1 * s, 0);
+    g.scale(0.7, 0.5, 1.6);
+    g.rotateY(yaw);
     g.translate(x, y, z);
-    k.add(g, color);
+    stick.add(g, color);
   };
-  leaf(0, 1.34, 0, 1, PALETTE.palmFronds);
-  leaf(0.17, 1.2, 0.08, 0.85, PALETTE.platano);
-  leaf(-0.13, 1.22, -0.07, 0.8, PALETTE.platano);
-  leaf(0.3, 1.1, -0.02, 0.75, PALETTE.palmFronds);
-  const g = k.build();
-  g.rotateZ(0.26); // stuck in at an angle, never straight
-  return g;
+  leaf(0, 1.82, 0, 1, PALETTE.palmFronds, 0.3);
+  leaf(0.05, 1.76, 0.03, 0.8, PALETTE.platano, 1.9);
+  leaf(-0.04, 1.77, -0.03, 0.75, PALETTE.palmFronds, -1.2);
+  const g = stick.build();
+  g.rotateZ(LEAN); // stuck in at an angle, never straight
+  // el trapo, tied where the stick is at 1.5 m, hanging plumb
+  const kx = -Math.sin(LEAN) * 1.5;
+  const ky = Math.cos(LEAN) * 1.5;
+  const rag = new Kit().addColored(g).add(box(0.085, 0.07, 0.085, kx, ky, 0), PALETTE.flagRed);
+  for (const yaw of [0.7, -0.85]) {
+    const tail = new THREE.BoxGeometry(0.17, 0.3, 0.02);
+    tail.rotateZ(0.12);
+    tail.translate(0.05, -0.17, 0);
+    tail.rotateY(yaw);
+    tail.translate(kx, ky, 0);
+    rag.add(tail, PALETTE.flagRed);
+  }
+  return rag.build();
 }
 
 // Scratch buffer for the corridor sweep: flat [start, end, start, end, ...] so
@@ -974,7 +1050,12 @@ export class Traffic {
         this.vehicles.push({
           type, group, active: false, lane: 0, baseX: 0, x: 0, z: 0, dir: 1,
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
-          driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
+          // DECISION: the phase comes from the slot, spread by the golden
+          // angle, not from Math.random. Building the art draws randoms too
+          // (every geometry and material takes some for its uuid), so a
+          // random phase here changed with every art edit and reshuffled the
+          // traffic that the seeded tests replay.
+          driftPhase: (this.vehicles.length * 2.39996) % (Math.PI * 2), driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
           threat: false, threatX: 0, honked: false, lineN: 0, lineSide: 1,
           dropT: -1, noRebase: false,
         });
@@ -1148,32 +1229,24 @@ export class Traffic {
     }
 
     // Power-ups: one merged icon each, plus a light beam that marks it from
-    // 80 m out. The names stay Spanish in EN (HANDOFF section 8).
-    const beamTex = (() => {
-      const c = document.createElement('canvas');
-      c.width = 2;
-      c.height = 64;
-      const g = c.getContext('2d')!;
-      const grad = g.createLinearGradient(0, 64, 0, 0);
-      grad.addColorStop(0, 'rgb(96,96,96)');
-      grad.addColorStop(1, 'rgb(0,0,0)');
-      g.fillStyle = grad;
-      g.fillRect(0, 0, 2, 64);
-      return new THREE.CanvasTexture(c);
-    })();
-    const beamGeo = new THREE.CylinderGeometry(0.62, 0.62, 3.6, 16, 1, true);
+    // 80 m out. The names stay Spanish in EN (HANDOFF section 8). The beam is
+    // light, not a tube: brightest where it faces the camera, fading to
+    // nothing at its silhouette, rising out of the road with no hard foot
+    // and thinning toward the sky. The old flat-alpha cylinder read as a
+    // colored pillar standing on the asphalt.
+    const beamGeo = new THREE.CylinderGeometry(0.5, 0.62, 3.6, 16, 1, true);
     beamGeo.translate(0, 0.95, 0);
     const beams: Record<PowerupKind, number> = { cafecito: 0xff9f43, bendicion: PALETTE.gold, iman: 0xff3b3b };
     for (const kind of ['cafecito', 'bendicion', 'iman'] as const) {
       const icon = powerupIcon(kind);
       const beamMat = worldMaterial(
-        new THREE.MeshBasicMaterial({
-          color: beams[kind],
-          alphaMap: beamTex,
+        new THREE.ShaderMaterial({
+          uniforms: { uColor: { value: new THREE.Color(beams[kind]) } },
+          vertexShader: BEAM_VS,
+          fragmentShader: BEAM_FS,
           transparent: true,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
-          fog: false,
         }),
       );
       for (let i = 0; i < 2; i++) {

@@ -18,7 +18,7 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG, PALETTE, ROAD, VEHICLES, type VehicleId } from './config';
 import { toonMaterial, worldMaterial, paint, vcToonMaterial } from './world';
-import { platanoFruit } from './traffic';
+import { platanoFruit, underglowMap } from './traffic';
 
 const DEG = Math.PI / 180;
 
@@ -136,6 +136,60 @@ void main() {
 }
 `;
 
+// La Bendicion's bubble: a pearl-gold fresnel rim, clear in the middle so
+// the rider stays readable, with soft bands of light drifting up its skin.
+// Paler and slower than the cafecito's pulsing gold, so the two never read
+// as the same power when both are on.
+const AURA_VS = `
+varying vec3 vEccN;
+varying vec3 vEccV;
+varying float vEccY;
+#include <common>
+void main() {
+  vEccY = position.y;
+  #include <beginnormal_vertex>
+  #include <defaultnormal_vertex>
+  #include <begin_vertex>
+  #include <project_vertex>
+  vEccN = normalize( transformedNormal );
+  vEccV = normalize( -mvPosition.xyz );
+}
+`;
+
+const AURA_FS = `
+uniform vec3 uColor;
+uniform float uTime;
+varying vec3 vEccN;
+varying vec3 vEccV;
+varying float vEccY;
+void main() {
+  float facing = abs( dot( normalize( vEccN ), normalize( vEccV ) ) );
+  float rim = pow( 1.0 - facing, 2.0 );
+  float band = pow( 0.5 + 0.5 * sin( vEccY * 6.5 - uTime * 2.6 ), 10.0 );
+  float glow = rim * 0.95 + band * ( 0.1 + 0.5 * rim );
+  gl_FragColor = vec4( uColor * glow, 1.0 );
+  #include <colorspace_fragment>
+}
+`;
+
+// La Bendicion's halo and glints per ride: halo radius, height and z (over
+// the rider's head; the Civic's tiguere stands lower, out of the sunroof, a
+// little behind the middle), and the glints' orbit radius and heights
+// around the ride.
+interface CrownSpec {
+  haloR: number;
+  haloY: number;
+  haloZ: number;
+  orbitR: number;
+  glintYs: number[];
+}
+const AURA_CROWN: Record<'bike' | 'civic', CrownSpec> = {
+  bike: { haloR: 0.22, haloY: 1.98, haloZ: 0, orbitR: 0.9, glintYs: [0.55, 1.05, 1.5] },
+  civic: { haloR: 0.2, haloY: 1.72, haloZ: -0.15, orbitR: 1.35, glintYs: [1.15, 1.45, 1.75] },
+};
+const HALO_TILT = 0.3; // radians the halo tips back, so the chase camera sees it open
+const HALO_LIFT = 0.36; // metres from the middle of the head up to the halo
+
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -189,7 +243,16 @@ export class Player {
   private paintHex: number = DEFAULT_PAINT.motor;
   private buildTarget!: THREE.Group;
   private staticParts: THREE.BufferGeometry[] = [];
-  private aura!: THREE.Mesh;
+  private aura!: THREE.Group; // la Bendicion: bubble + halo, on the lean group
+  private auraBubble!: THREE.Mesh;
+  private auraCrown!: THREE.Mesh;
+  private auraCrownGeo!: Record<'bike' | 'civic', THREE.BufferGeometry>;
+  private auraHaloY = AURA_CROWN.bike.haloY;
+  private auraHaloZ = AURA_CROWN.bike.haloZ;
+  private auraSize = new THREE.Vector3(1, 1, 1);
+  private auraU = { value: 0 };
+  private auraIn = 0; // 0..1, the pop when it is earned
+  private underglowMat: THREE.MeshBasicMaterial | null = null;
   private glowShell!: THREE.Mesh;
   private glowU = { value: 1 };
   private stars!: THREE.Group;
@@ -197,8 +260,9 @@ export class Player {
   private wheelieVis = 0;
   private time = 0;
   private edgeMax = ROAD.edgeX - CONFIG.playerHalfWidth;
-  private wheelieAngleMax = 0.5;
-  private wheelieLift = 0.62;
+  // the rear axle (height = wheel radius, z) the caballito pivots on
+  private rearAxleZ = -0.62;
+  private wheelieDustAcc = 0;
 
   private keys = new Set<string>();
   private wheelieKeys = new Set<string>();
@@ -303,16 +367,40 @@ export class Player {
   // ---------------- visuals ----------------
 
   private buildShared(): void {
-    // Bendicion aura, hidden until earned
-    const auraGeo = new THREE.TorusGeometry(0.8, 0.05, 8, 24);
-    auraGeo.rotateX(Math.PI / 2);
-    this.aura = new THREE.Mesh(
-      auraGeo,
-      worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.9 })),
+    // La Bendicion, hidden until earned: a soft bubble of light around the
+    // ride and a gold halo over the rider's head with glints orbiting the
+    // ride. Two draws. It lives on the lean group, so the halo stays on the
+    // head through the lean and the caballito. The chase camera always looks
+    // down on the halo, so it never goes edge-on the way the old waist ring
+    // did (that one read as a flat yellow lasso).
+    this.aura = new THREE.Group();
+    this.auraBubble = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 24, 16),
+      worldMaterial(
+        new THREE.ShaderMaterial({
+          uniforms: { uColor: { value: new THREE.Color(PALETTE.sunGlow) }, uTime: this.auraU },
+          vertexShader: AURA_VS,
+          fragmentShader: AURA_FS,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      ),
     );
-    this.aura.position.y = 0.5;
+    this.auraCrownGeo = {
+      bike: this.crownGeometry(AURA_CROWN.bike),
+      civic: this.crownGeometry(AURA_CROWN.civic),
+    };
+    this.auraCrown = new THREE.Mesh(
+      this.auraCrownGeo.bike,
+      worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold })),
+    );
+    // tipped back toward the camera; step() spins it about its own tipped
+    // axis, which leaves the halo exactly where it is
+    this.auraCrown.rotation.x = -HALO_TILT;
+    this.aura.add(this.auraBubble, this.auraCrown);
     this.aura.visible = false;
-    this.root.add(this.aura);
+    this.leanGroup.add(this.aura);
 
     // Cafecito invincibility glow
     const glowMat = worldMaterial(
@@ -348,14 +436,36 @@ export class Player {
     this.root.add(this.stars);
   }
 
+  // The halo, flat around the local y axis at the origin (the mesh sits at
+  // the halo's height), and three diamond glints on a ring of radius orbitR
+  // at the given ride heights. One merged geometry: spinning the mesh about
+  // its y axis orbits the glints and leaves the round halo where it is. (A
+  // halo tipped in the geometry would precess with that spin and go edge-on
+  // to the camera once a turn: the flat lasso again.)
+  private crownGeometry(c: CrownSpec): THREE.BufferGeometry {
+    const halo = new THREE.TorusGeometry(c.haloR, 0.035, 6, 28);
+    halo.rotateX(Math.PI / 2);
+    // the octahedra come non-indexed, so the halo joins them that way
+    const parts: THREE.BufferGeometry[] = [halo.toNonIndexed()];
+    halo.dispose();
+    c.glintYs.forEach((y, i) => {
+      const a = (i / c.glintYs.length) * Math.PI * 2;
+      const g = new THREE.OctahedronGeometry(0.075, 0);
+      g.scale(0.8, 1.9, 0.8);
+      g.translate(Math.cos(a) * c.orbitR, y - c.haloY, Math.sin(a) * c.orbitR);
+      parts.push(g);
+    });
+    const geo = mergeGeometries(parts)!;
+    for (const p of parts) p.dispose();
+    return geo;
+  }
+
   // Rigs are cached per vehicle: swapping rides on the title screen is a
   // visibility flip. A rig only rebuilds when its pintura changes.
   setVehicle(id: VehicleId, paintHex?: number): void {
     this.vehicle = id;
     const v = VEHICLES[id];
     this.edgeMax = ROAD.edgeX - CONFIG.playerHalfWidth * v.hitbox;
-    this.wheelieAngleMax = id === 'civic' ? 0.3 : 0.5;
-    this.wheelieLift = id === 'civic' ? 0.42 : 0.62;
 
     if (paintHex !== undefined) this.paintFor[id] = paintHex;
     const want = this.paintFor[id] ?? DEFAULT_PAINT[id];
@@ -391,12 +501,29 @@ export class Player {
     // the glow hugs the ride: a round bubble for the bikes, a long one for the car
     if (id === 'civic') this.glowShell.scale.set(1.25, 0.8, 2.2);
     else this.glowShell.scale.set(1, 0.9, 1);
+    // la Bendicion sizes itself the same way, a hair wider than the glow,
+    // and its halo sits over this ride's head (the Civic's tiguere stands
+    // a little behind the middle)
+    const crown = id === 'civic' ? 'civic' : 'bike';
+    if (id === 'civic') {
+      this.auraSize.set(1.45, 0.95, 2.35);
+      this.auraBubble.position.set(0, 0.72, -0.1);
+    } else {
+      this.auraSize.set(1.05, 1.08, 1.2);
+      this.auraBubble.position.set(0, 0.95, 0.05);
+    }
+    this.auraBubble.scale.copy(this.auraSize);
+    this.auraCrown.geometry = this.auraCrownGeo[crown];
+    this.auraHaloY = AURA_CROWN[crown].haloY;
+    this.auraHaloZ = AURA_CROWN[crown].haloZ;
+    this.auraCrown.position.set(0, this.auraHaloY, this.auraHaloZ);
     for (const key of Object.keys(this.rigs) as VehicleId[]) {
       const r = this.rigs[key];
       if (r) r.group.visible = key === id;
     }
     this.wheels = rig.wheels;
     this.wheelRadius = rig.wheelRadius;
+    this.rearAxleZ = rig.wheels[0].position.z; // the builders push the rear wheel first
     this.attachBrakeLight(id);
   }
 
@@ -635,34 +762,49 @@ export class Player {
     this.addStatic(new THREE.BoxGeometry(0.4, 0.13, 0.02), PALETTE.flagWhite, 0, 0.42, -1.96);
     this.addStatic(new THREE.BoxGeometry(0.4, 0.035, 0.024), PALETTE.flagBlue, 0, 0.47, -1.96);
     this.finishRig();
-    // underglow, que se vea
-    const glowPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.1, 4.3),
-      worldMaterial(
-        new THREE.MeshBasicMaterial({ color: PALETTE.underglow, transparent: true, opacity: 0.5 }),
-      ),
-    );
+    // underglow, que se vea: light added onto the road under the car, soft at
+    // the edges (traffic.ts underglowMap), never a teal mat
+    if (!this.underglowMat) {
+      this.underglowMat = worldMaterial(
+        new THREE.MeshBasicMaterial({
+          color: PALETTE.underglow,
+          map: underglowMap(),
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+        }),
+      );
+    }
+    const glowPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 5.0), this.underglowMat);
     glowPlane.rotation.x = -Math.PI / 2;
     glowPlane.position.y = 0.05;
     this.buildTarget.add(glowPlane);
   }
 
   // The platano rack: every bunch the ride can carry, merged in tier order,
-  // so revealing a tier is a draw range, never a new mesh.
+  // so revealing a tier is a draw range, never a new mesh. The fruit lie
+  // across the ride with the curve toward the camera (the smile is what
+  // reads as a platano from behind), nested like a mano on the stalk, and
+  // the pile stays low: even the third tier tops out under the chaleco, and
+  // it stops above the tail lamp, so the 27 and the rear wheel both read.
   private buildRack(id: VehicleId): { rack: THREE.Mesh; counts: number[] } {
     const fruit = platanoFruit();
-    fruit.scale(0.55, 0.55, 0.55);
-    const tiers: Array<Array<[number, number, number, number]>> = [
-      [[-0.02, 0, -0.1, 0.1], [0.02, 0, 0, -0.08], [0, 0, 0.1, 0.05]],
-      [[0.03, 0.09, -0.05, -0.25], [-0.03, 0.09, 0.05, 0.3], [0, 0.1, 0.12, 1.4]],
-      [[0.04, 0.18, 0, 0.5], [-0.04, 0.18, -0.08, -0.45], [0, 0.26, 0.02, 0.1], [0.05, 0.2, 0.12, 1.2]],
+    fruit.scale(0.46, 0.46, 0.46);
+    // [x, y, z, yaw, roll] per fruit, one row per tier
+    const tiers: Array<Array<[number, number, number, number, number]>> = [
+      [[0, 0, -0.07, 0.05, 0], [0.01, 0.012, 0, -0.04, 0.03], [-0.01, 0.024, 0.07, 0.06, -0.03]],
+      [[0.02, 0.06, -0.04, -0.07, 0.06], [-0.02, 0.07, 0.03, 0.05, -0.05], [0, 0.08, 0.1, -0.03, 0.02]],
+      [[0.03, 0.115, 0, 0.09, -0.08], [-0.03, 0.125, 0.07, -0.08, 0.07]],
     ];
     const parts: THREE.BufferGeometry[] = [];
     const counts: number[] = [];
     let n = 0;
     for (const tier of tiers) {
-      for (const [x, y, z, yaw] of tier) {
+      for (const [x, y, z, yaw, roll] of tier) {
         const g = fruit.clone();
+        g.rotateZ(roll);
         g.rotateY(yaw);
         g.translate(x, y, z);
         parts.push(g);
@@ -674,9 +816,9 @@ export class Player {
     fruit.dispose();
     for (const g of parts) g.dispose();
     rack.castShadow = true;
-    if (id === 'civic') rack.position.set(0, 0.7, -1.45); // on the trunk, below the aleron
-    else if (id === 'pasola') rack.position.set(0, 0.95, -0.8);
-    else rack.position.set(0, 0.91, -0.78);
+    if (id === 'civic') rack.position.set(0, 0.7, -1.5); // on the trunk, below the aleron
+    else if (id === 'pasola') rack.position.set(0, 0.945, -0.76);
+    else rack.position.set(0, 0.905, -0.74);
     return { rack, counts };
   }
 
@@ -891,6 +1033,7 @@ export class Player {
   }
 
   setShield(on: boolean): void {
+    if (on && !this.shielded) this.auraIn = 0; // pops in when earned
     this.shielded = on;
     this.aura.visible = on;
   }
@@ -950,6 +1093,9 @@ export class Player {
       this.wheelieActive = true;
       this.wheelieLatch = true;
       this.wheelieT = 0;
+      // the rear tire bites: a puff of dust as the front comes up
+      if (this.vehicle !== 'civic') this.emit('dust', 6, this.x, 0.08, this.rearAxleZ - 0.2, 2.6);
+      this.wheelieDustAcc = 0;
     }
     let wheelieDecay = 0;
     if (this.wheelieActive) {
@@ -1019,6 +1165,14 @@ export class Player {
         this.emit('dust', 1, this.x - Math.sign(this.velX || 1) * 0.3, 0.12, drifting ? -1.4 : -0.6, 1.2);
       }
     }
+    // and keeps kicking it up behind the rear tire while the front is up
+    if (this.wheelieActive && this.vehicle !== 'civic' && !this.airborne) {
+      this.wheelieDustAcc += dt;
+      while (this.wheelieDustAcc > CONFIG.wheelieDustEverySec) {
+        this.wheelieDustAcc -= CONFIG.wheelieDustEverySec;
+        this.emit('dust', 1, this.x, 0.06, this.rearAxleZ - 0.25, 1.8);
+      }
+    }
 
     // Cafecito trail
     if (this.glowOn) {
@@ -1033,8 +1187,24 @@ export class Player {
       this.glowShell.visible = Math.floor(this.time * CONFIG.cafecitoBlinkHz * 2) % 2 === 0;
     }
     if (this.aura.visible) {
-      this.aura.rotation.z += dt * 1.5;
-      this.aura.position.y = 0.5 + Math.sin(this.time * 4) * 0.08;
+      // pop in with a little overshoot, then breathe; the glints orbit and
+      // the halo bobs over the head
+      this.auraIn = Math.min(1, this.auraIn + dt * 4);
+      const k = this.auraIn;
+      const pop = 1 + 2.2 * (k - 1) * (k - 1) * (k - 1) + 1.2 * (k - 1) * (k - 1);
+      const breathe = pop * (1 + Math.sin(this.time * 2.4) * 0.025);
+      this.auraBubble.scale.copy(this.auraSize).multiplyScalar(breathe);
+      this.auraCrown.scale.setScalar(pop);
+      this.auraCrown.rotation.y = (this.auraCrown.rotation.y + dt * 1.9) % (Math.PI * 2);
+      // The halo floats level over the head through the caballito: its lift
+      // off the head and its tilt cancel the ride's pitch. Pitched with the
+      // rider, it stood up behind the gorra and read as a ring around it.
+      const pitch = this.wheelieVis - this.pedalPitchVis; // the lean group's nose-up pitch
+      const lift = HALO_LIFT + Math.sin(this.time * 3.2) * 0.035;
+      this.auraCrown.position.y = this.auraHaloY - HALO_LIFT + lift * Math.cos(pitch);
+      this.auraCrown.position.z = this.auraHaloZ + lift * Math.sin(pitch);
+      this.auraCrown.rotation.x = pitch - HALO_TILT;
+      this.auraU.value = this.time;
     }
 
     // Visuals: lean, wheelie pitch (bikes) or drift yaw (civic), wobble deep in a hold
@@ -1045,7 +1215,7 @@ export class Player {
     const leanTarget = -this.velXNorm * CONFIG.steerLeanMaxDeg * DEG * veh.leanMult;
     this.leanVis += (leanTarget - this.leanVis) * Math.min(1, CONFIG.leanResponse * dt);
     this.leanGroup.rotation.z = this.leanVis + wobble;
-    const wheelieTarget = this.wheelieActive && this.vehicle !== 'civic' ? this.wheelieAngleMax : 0;
+    const wheelieTarget = this.wheelieActive && this.vehicle !== 'civic' ? CONFIG.wheeliePitchRad : 0;
     this.wheelieVis += (wheelieTarget - this.wheelieVis) * Math.min(1, 11 * dt);
     // El pedal on the model, ahead of the eased speed: the rider tucks
     // forward on gas and sits back on the brake. The rider is part of the
@@ -1060,9 +1230,21 @@ export class Player {
     this.brakeGlow += ((th <= -CONFIG.gasEngageAt ? 1 : 0) - this.brakeGlow) * Math.min(1, 2 * kp);
     this.brakeLightMat.color.lerpColors(TAIL_DARK, TAIL_LIT, this.brakeGlow);
     this.brakeLight.visible = this.brakeGlow > 0.02;
-    this.leanGroup.position.y = Math.sin(this.wheelieVis) * this.wheelieLift;
+    // El caballito pivots on the rear axle, so the back tire stays planted
+    // on the road while the front climbs (the lean group's origin is on the
+    // ground under the middle of the ride).
+    const ws = Math.sin(this.wheelieVis);
+    const wc = 1 - Math.cos(this.wheelieVis);
+    this.leanGroup.position.y = this.wheelRadius * wc - this.rearAxleZ * ws;
+    this.leanGroup.position.z = this.wheelRadius * ws + this.rearAxleZ * wc;
     if (Math.abs(this.velX) > 0.6) this.driftSign = this.velX > 0 ? 1 : -1;
-    const driftTarget = drifting ? this.driftSign * CONFIG.driftYaw : 0;
+    // the derrape swings the car's tail out; the caballito angles the bike a
+    // little so its raised front shows past the rider's back
+    const driftTarget = drifting
+      ? this.driftSign * CONFIG.driftYaw
+      : this.wheelieActive
+        ? this.driftSign * CONFIG.wheelieYawRad
+        : 0;
     this.driftYawVis += (driftTarget - this.driftYawVis) * Math.min(1, 9 * dt);
     this.root.rotation.y = this.velXNorm * 0.16 + this.driftYawVis; // nose into the carve, tail out in the derrape
     this.root.position.x = this.x;
@@ -1221,6 +1403,7 @@ export class Player {
     this.airVy = 0;
     this.charcoT = 0;
     this.dustAcc = 0;
+    this.wheelieDustAcc = 0;
     this.setShield(false);
     this.setGraceBlink(false);
     this.setGlow(false);
@@ -1229,6 +1412,6 @@ export class Player {
     this.root.position.set(START_X, 0, 0);
     this.root.rotation.set(0, 0, 0);
     this.leanGroup.rotation.set(0, 0, 0);
-    this.leanGroup.position.y = 0;
+    this.leanGroup.position.set(0, 0, 0);
   }
 }
