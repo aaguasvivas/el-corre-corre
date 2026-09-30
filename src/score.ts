@@ -35,7 +35,6 @@ export interface RunResult {
   isNewDistRecord: boolean; // distance beat a previous distance record (not a first run)
   prevRecord: number; // the points record the run started with
   prevRecordDist: number; // the distance record the run started with
-  closeCall: number | null; // points short of the record, when tantalizingly close
   tramo: Tramo; // how far into the country the run got
   bestCombo: number;
   nearMisses: number;
@@ -353,11 +352,6 @@ export class Score {
     // DECISION: a first run on a ride rode to LA META, not to a record, so
     // only beating an earlier distance counts as "farther than ever".
     const isNewDistRecord = prevRecordDist > 0 && distanceM > prevRecordDist;
-    let closeCall: number | null = null;
-    if (!isNewRecord && prevRecord > 0) {
-      const short = prevRecord - points;
-      if (short > 0 && short <= Math.max(50, prevRecord * CONFIG.closeCallShare)) closeCall = short;
-    }
     this.bankRecords();
     return {
       points,
@@ -369,7 +363,6 @@ export class Score {
       isNewDistRecord,
       prevRecord,
       prevRecordDist,
-      closeCall,
       tramo,
       bestCombo: this.bestCombo,
       nearMisses: this.nearMisses,

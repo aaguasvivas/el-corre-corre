@@ -33,6 +33,7 @@ export const STRINGS = {
     again: 'OTRA VEZ',
     menu: 'MENÚ',
     share: 'COMPARTIR',
+    shareFailed: '¡NO SE PUDO!', // the share sheet could not take the card
     resumeBtn: 'SEGUIR',
     newRecord: '¡NUEVO RÉCORD!',
     tapeRecord: 'TU RÉCORD',
@@ -174,6 +175,7 @@ export const STRINGS = {
     again: 'AGAIN',
     menu: 'MENU',
     share: 'SHARE',
+    shareFailed: 'SHARE FAILED',
     resumeBtn: 'RESUME',
     newRecord: 'NEW RECORD!',
     tapeRecord: 'YOUR RECORD',
@@ -406,7 +408,9 @@ const SCORE_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
 // 12,000: grouped in the language's own locale. es-DO groups every number
 // from 1,000 up (plain 'es' leaves 4567 bare), and both read 12,000.
-let numLocale = readLang() === 'en' ? 'en-US' : 'es-DO';
+// applyLang sets it from the UI's language, which is read after main has
+// restored the saves (a module-level read would run before the restore).
+let numLocale = 'es-DO';
 function fmtN(n: number): string {
   return Math.floor(n).toLocaleString(numLocale);
 }
@@ -602,6 +606,7 @@ export class UI {
   private btnAgain: HTMLElement;
   private btnMenu: HTMLElement;
   private btnShare: HTMLElement;
+  private shareLabelTimer = 0;
   private pauseTitle: HTMLElement;
   private pauseLevelEl: HTMLElement;
   private btnResume: HTMLElement;
@@ -1072,7 +1077,6 @@ export class UI {
 
   private toggleLang(): void {
     this.lang = this.lang === 'es' ? 'en' : 'es';
-    numLocale = this.lang === 'en' ? 'en-US' : 'es-DO';
     try {
       localStorage.setItem(LANG_KEY, this.lang);
     } catch {
@@ -1083,6 +1087,7 @@ export class UI {
 
   private applyLang(): void {
     const t = this.t();
+    numLocale = this.lang === 'en' ? 'en-US' : 'es-DO';
     document.documentElement.lang = this.lang;
     this.langBtn.textContent = this.lang === 'es' ? 'EN' : 'ES';
     this.muteBtn.setAttribute('aria-label', t.ariaSound);
@@ -1188,6 +1193,20 @@ export class UI {
     if (el) el.textContent = fmtN(n);
   }
 
+  // Nothing could take the card: COMPARTIR says so for a moment and shakes,
+  // so the button never looks dead. A dismissed sheet is not a failure.
+  shareFailed(): void {
+    const el = this.btnShare;
+    el.textContent = this.t().shareFailed;
+    el.classList.remove('deny');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('deny');
+    window.clearTimeout(this.shareLabelTimer);
+    this.shareLabelTimer = window.setTimeout(() => {
+      el.textContent = this.t().share;
+    }, CONFIG.shareFailedMs);
+  }
+
   // A buy the bank cannot cover: the reason is already on the line under the
   // swatches, so that line and the wallet shake together.
   flashBank(): void {
@@ -1199,8 +1218,10 @@ export class UI {
     }
   }
 
+  // On the title, in the open band over the ride (the ride picker ends near
+  // half the height, and the popup layer sits under the screens).
   popupPintura(): void {
-    this.popup(this.t().pinturaNew, 50, 40, 'pop-lg pop-gold');
+    this.popup(this.t().pinturaNew, 50, 56, 'pop-lg pop-gold');
   }
 
   updateVehicles(selected: VehicleId, records: Record<VehicleId, number>): void {
@@ -1309,6 +1330,9 @@ export class UI {
   showGameOver(r: RunResult, mandaos: MandaosView, pintura: PinturaGoal | null): void {
     const t = this.t();
     this.stopCountUp();
+    // The run's popups end with it: the HUD clock stops at the card, so one
+    // still up would hang over the crash under the card.
+    this.popups.clear();
     this.lastResult = r;
     this.lastRecord = r.record;
     this.goTitleIdx = Math.floor(Math.random() * t.gameOverTitles.length);

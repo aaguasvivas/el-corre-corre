@@ -441,7 +441,8 @@ body {
 }
 
 .paint-state.deny,
-.title-bank.deny {
+.title-bank.deny,
+#btn-share.deny {
   animation: deny 0.4s ease;
 }
 
@@ -676,7 +677,7 @@ body {
 /* the record seal: a rubber stamp on the card's corner */
 .go-stamp {
   position: absolute;
-  top: -14px;
+  top: -8px; /* the seal's ring clears the top of the screen on the SE */
   right: -2px;
   display: flex;
   align-items: center;

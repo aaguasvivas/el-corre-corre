@@ -519,12 +519,12 @@ const SCENES = [
   },
   {
     id: 'overhead-fade',
-    what: 'A pasacalle 18 m ahead, halfway through its fade as it climbs toward the HUD',
+    what: 'A pasacalle 34 m ahead, partway through its fade as it climbs toward the HUD',
     settle: 'finish',
     run: async (s) => {
       await s.start();
       await s.tick(3);
-      await s.ecc('overhead', 18, 'pasacalle');
+      await s.ecc('overhead', 34, 'pasacalle');
       await s.tick(1 / 60);
     },
   },

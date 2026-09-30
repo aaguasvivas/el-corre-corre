@@ -338,13 +338,25 @@ function goToMenu(): void {
   audio.click();
 }
 
+// One share at a time: a second tap while the native sheet is still up
+// fails in the plugin, and that must not read as a failure to the player.
+let sharing = false;
+
 function doShare(): void {
   audio.click();
-  if (!lastRun) return;
+  if (!lastRun || sharing) return;
+  sharing = true;
   // The card's photo: a fresh frame of the crash, read back in this task.
   renderer.render(scene, camera);
   ui.captureScene(canvas);
-  void ui.shareCard(lastRun);
+  ui.shareCard(lastRun)
+    .then((r) => {
+      if (r === 'failed') ui.shareFailed();
+    })
+    .catch(() => ui.shareFailed())
+    .finally(() => {
+      sharing = false;
+    });
 }
 
 const ui = new UI(document.getElementById('ui')!, {

@@ -103,21 +103,6 @@ describe('Score: the multiplier stack', () => {
     expect(again.recordDist).toBe(250);
   });
 
-  it('reports a close call only when within closeCallShare of the record', () => {
-    const s = new Score();
-    s.setVehicle('motor');
-    s.step(1000, 10, { airborne: false, wheelie: false });
-    const best = s.finishRun('zona'); // distance tiers apply, so read the model's number
-    s.reset();
-    s.step(950, 10, { airborne: false, wheelie: false });
-    const near = s.finishRun('malecon');
-    expect(near.closeCall).toBe(best.points - near.points);
-    expect(near.closeCall!).toBeLessThanOrEqual(Math.max(50, best.points * CONFIG.closeCallShare));
-    s.reset();
-    s.step(300, 10, { airborne: false, wheelie: false });
-    expect(s.finishRun('malecon').closeCall).toBeNull();
-  });
-
   it('the platano wallet banks every pickup across runs and refuses overdrafts', () => {
     const s = new Score();
     s.setVehicle('motor');
@@ -168,11 +153,10 @@ describe('Score: records are the ones the run started with', () => {
     expect(r.isNewRecord).toBe(true);
     expect(r.prevRecord).toBe(200);
     expect(r.record).toBe(r.points);
-    expect(r.closeCall).toBeNull();
     expect(new Score().recordFor('motor')).toBe(r.points);
   });
 
-  it('a persist mid-run never shrinks the close call either', () => {
+  it('a persist mid-run keeps the record the run started with, short of it', () => {
     const s = new Score();
     s.setVehicle('motor');
     s.reset();
@@ -183,7 +167,8 @@ describe('Score: records are the ones the run started with', () => {
     s.persist();
     const r = s.finishRun('malecon');
     expect(r.isNewRecord).toBe(false);
-    expect(r.closeCall).toBe(r.prevRecord - r.points);
+    expect(r.prevRecord).toBeGreaterThan(r.points);
+    expect(r.record).toBe(r.prevRecord);
   });
 
   it('isNewDistRecord only when an earlier distance record falls', () => {

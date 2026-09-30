@@ -572,7 +572,6 @@ export const CONFIG = {
   // only swallows a tap in the same frame as the card. Card plus guard is
   // the brief's 0.5 s from crash to a tappable OTRA VEZ.
   restartDebounceSec: 0.08,
-  closeCallShare: 0.15, // FEEL: "te quedaste a N" shows when within this fraction of the record
   // FEEL: after SEGUIR (and the pause a phone call or an app switch forces)
   // the world stays frozen for a 3, 2, 1 before ¡DALE!, so the thumbs can
   // find the glass again. The steering finger may pre-aim meanwhile.
@@ -592,6 +591,7 @@ export const CONFIG = {
   soCloseShare: 0.3, // FEEL: higher = the "so close" line shows on more runs
   soCloseMinM: 50, // FEEL: a short record still gets the line this near
   countUpMs: 600, // FEEL: how long the card's points take to count up (OTRA VEZ is live throughout)
+  shareFailedMs: 2200, // FEEL: how long COMPARTIR reads ¡NO SE PUDO! after a share nothing could take
 
   // Los Mandaos: three small goals at a time; finish all three and you level
   // up. Positive goals only. Every "Run" kind must happen inside one run;
@@ -731,11 +731,15 @@ export const CONFIG = {
   worldDrop: 0.00013, // FEEL: how much the distant road curls below the horizon
   beltLen: 120, // scenery recycles in two alternating belts of this length
   // Overhead spans (pasacalles, banderitas, laundry) fade out as they climb
-  // toward the HUD, so none sweeps over the score or the pause button.
+  // toward the HUD, so none sweeps behind the score, the combo or its tier.
   // Measured where the span's top edge lands on screen, as a fraction of
   // the frame from the top, so it holds at any camera height, fov or aspect.
-  overheadFadeFrom: 0.2, // FEEL: a span starts to fade here; higher = it fades farther away
-  overheadFadeGone: 0.09, // FEEL: and is gone here; keep it below the score and the pause button
+  // DECISION: the full top band (score, ×n, the tier text and its fuse) has
+  // no plate and ends at 0.19 of the height on the SE (0.15 on the 6.9-inch
+  // phone), so a span is gone by the time its top edge reaches it. The pills
+  // below have solid plates.
+  overheadFadeFrom: 0.27, // FEEL: a span starts to fade here; higher = it fades farther away
+  overheadFadeGone: 0.17, // FEEL: and is gone here; keep it below the combo tier's fuse
   // The Obelisco stands once per national lap, this far into each Malecon
   // stretch. It is one monument, so it must not appear twice in a lap, and
   // being reachable early is what makes it a landmark instead of a rumor.
