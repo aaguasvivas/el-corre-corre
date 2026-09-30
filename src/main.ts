@@ -724,7 +724,10 @@ function stepSim(h: number): void {
   const gasIn = live && th >= CONFIG.gasEngageAt;
   const brakeIn = live && th <= -CONFIG.gasEngageAt;
   gasOn = gasIn && !cafe && throttleMult >= 1 + 0.5 * (gasRatio - 1) - 1e-4;
-  brakeOn = brakeIn && !cafe && throttleMult < 1;
+  // DECISION: the x0.5 needs a brake you can feel (1% under cruise). Once
+  // cooked pads let the ride run back up to cruise, FRENO says ¡CALIENTE!
+  // and stops charging, instead of lighting x0.5 on a pedal that does nothing.
+  brakeOn = brakeIn && !cafe && throttleMult < 0.99;
   score.setGas(gasOn);
   score.setBrake(brakeOn);
   ui.setGas(gasOn);
@@ -1054,6 +1057,10 @@ let testGod = false;
   trauma: () => +trauma.toFixed(3),
   countdown: () => (state === 'countdown' ? +countdownT.toFixed(3) : -1),
   crashT: () => +crashRealT.toFixed(3),
+  // Sim seconds into the run (unrounded): a frame's share of it shows the
+  // impact frame, the slow-mo, a dip, and that no frame judders.
+  simT: () => elapsed,
+  motion: () => motionScale,
   killer: () => (killer ? { x: +killer.x.toFixed(2), z: +killer.z.toFixed(2), speed: killer.speed } : null),
   // The resume path without tapping SEGUIR (P and Escape do the same).
   pause: () => pauseGame(),

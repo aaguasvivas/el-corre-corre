@@ -19,6 +19,9 @@ const H = CONFIG.fixedDt;
 // turns it off, to measure the brake as it was before.
 const HEAT = process.env.HEAT !== '0';
 const START_X = -3.4;
+// The pools draw build-time randoms (drift phases, paint): seed them too, so
+// two invocations of the same section print the same numbers.
+seed(1);
 const T = makeTraffic();
 const A = T as any;
 const ctx = blankCtx() as any;
@@ -127,9 +130,12 @@ if (want('parked')) {
 // Bot: a planning rider (sim.ts decision model) against the real traffic
 // ---------------------------------------------------------------------------
 interface Policy { name: string; decideEvery: number; horizon: number; noise: number }
-// tactical: brakes only while the line it chose still has a car arriving
-// within about a second, the way a player uses the brake to buy a gap.
-type Throttle = 'cruise' | 'gas' | 'brake' | 'tactical';
+// brake: holds FRENO all run, cooked pads or not. smart: holds it too, but
+// lets go the moment the pads cook and presses again once they bite (the
+// best a player can squeeze out of the heat meter). tactical: brakes only
+// while the line it chose still has a car arriving within about a second,
+// the way a player uses the brake to buy a gap.
+type Throttle = 'cruise' | 'gas' | 'brake' | 'smart' | 'tactical';
 const TACTICAL_DANGER = 80; // danger() on the chosen line: one car about 1.2 s out
 
 interface BotResult {
@@ -142,6 +148,7 @@ interface BotResult {
   brakeSec: number; // seconds the pedal was down
   bitingSec: number; // seconds the brake actually bit (authority over 0.5)
   hotCount: number; // times the pads overheated
+  killedBy: '' | 'behind' | 'ahead' | 'oncoming'; // what the crash was: a same-way car from behind or ahead, or oncoming
 }
 
 function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number): BotResult {
@@ -152,9 +159,10 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
   startRun(s);
   const res: BotResult = {
     t: 0, dist: 0, platanos: 0, nearMiss: 0, firstReward: -1, crashed: false, brakeSec: 0, bitingSec: 0, hotCount: 0,
+    killedBy: '',
   };
   const heat = new BrakeHeat();
-  let braking = th === 'brake';
+  let braking = th === 'brake' || th === 'smart';
   let el = 0;
   let x = START_X;
   let velX = 0;
@@ -249,6 +257,7 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
     // brake bites faster than the gas rises
     const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
     // the cafecito overrides the brake: the pedal reads as released
+    if (th === 'smart') braking = !heat.hot;
     const press = braking && cafT <= 0 ? 1 : 0;
     const wasHot = heat.hot;
     const auth = HEAT ? heat.step(H, press) : 1;
@@ -316,14 +325,18 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
         airborne = false;
       }
     }
-    if (T.checkCollision(x, 0, r)) {
+    const hit = T.hitVehicle(x, 0, r);
+    if (hit) {
       if (cafT > 0 || graceT > 0 || invT > 0) {
         // plow
       } else if (shield) {
+        // mirrors main.ts: the save shoves the car and clears the line
         shield = false;
         invT = CONFIG.shieldGraceSec;
+        T.shove(hit, x, r);
       } else {
         res.crashed = true;
+        res.killedBy = hit.dir === -1 ? 'oncoming' : hit.z < 0 ? 'behind' : 'ahead';
         break;
       }
     }
@@ -344,7 +357,7 @@ if (want('bot')) {
   ];
   for (const p of policies) {
     const only = process.env.TH ? process.env.TH.split(',') : null;
-    for (const th of ['cruise', 'gas', 'brake', 'tactical'] as const) {
+    for (const th of ['cruise', 'gas', 'brake', 'smart', 'tactical'] as const) {
       if (only && !only.includes(th)) continue;
       const rs: BotResult[] = [];
       for (let i = 0; i < N; i++) rs.push(runBot(p, th, 'motor', 31 * i + 7, CAP));
@@ -357,7 +370,9 @@ if (want('bot')) {
           `dist median ${Math.round(med(rs.map((q) => q.dist)))} m mean ${Math.round(mean(rs.map((q) => q.dist)))} m  ` +
           `under20s ${ts.filter((t) => t < 20).length}/${N}  ` +
           `plátanos/run ${f1(mean(rs.map((q) => q.platanos)))}  near-miss/min ${f1(mean(rs.map((q) => (q.nearMiss / q.t) * 60)))}  ` +
-          `brake ${f1((100 * braked) / alive)}% of the run (bites ${f1((100 * bit) / alive)}%), overheats/run ${f1(mean(rs.map((q) => q.hotCount)))}`,
+          `first reward median ${f1(med(rs.map((q) => q.firstReward)))} s  ` +
+          `brake ${f1((100 * braked) / alive)}% of the run (bites ${f1((100 * bit) / alive)}%), overheats/run ${f1(mean(rs.map((q) => q.hotCount)))}  ` +
+          `killed by ${(['ahead', 'behind', 'oncoming'] as const).map((k) => `${k} ${rs.filter((q) => q.killedBy === k).length}`).join(', ')}`,
       );
     }
   }
