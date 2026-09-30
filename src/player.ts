@@ -18,6 +18,7 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG, PALETTE, ROAD, VEHICLES, type VehicleId } from './config';
 import { toonMaterial, worldMaterial, paint, vcToonMaterial } from './world';
+import { platanoFruit } from './traffic';
 
 const DEG = Math.PI / 180;
 
@@ -49,6 +50,8 @@ interface Rig {
   wheels: THREE.Mesh[];
   wheelRadius: number;
   paint: number; // the pintura this rig was built with
+  rack: THREE.Mesh; // the platanos stacked on the ride, revealed by draw range
+  rackCounts: number[]; // index count that shows tiers 1..3
 }
 
 // Factory paints (pintura index 0 in config's PINTURAS).
@@ -59,13 +62,79 @@ const DEFAULT_PAINT: Record<VehicleId, number> = {
 };
 
 interface Particle {
-  mesh: THREE.Mesh;
+  kind: FxKind;
+  x: number;
+  y: number;
+  z: number;
   vx: number;
   vy: number;
   vz: number;
   life: number;
-  grow: boolean;
+  max: number;
+  size: number;
 }
+
+const FX_KINDS: readonly FxKind[] = ['spark', 'splash', 'trail', 'dust'];
+const FX_POOL = 30;
+const RACK_POP_SEC = 0.15;
+const _m4 = new THREE.Matrix4();
+
+// Soft round particles: one instanced billboard draw per kind. The quad is
+// built around the instance center in view space, after the bend, so it
+// always faces the camera and still rides the curve of the road.
+const FX_VS = `
+attribute float aFade;
+varying vec2 vUv;
+varying float vFade;
+#include <common>
+void main() {
+  vUv = uv;
+  vFade = aFade;
+  vec3 transformed = vec3( 0.0 );
+  #include <project_vertex>
+  mvPosition.xy += position.xy * length( instanceMatrix[ 0 ].xyz );
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+const FX_FS = `
+uniform sampler2D uMap;
+uniform vec3 uColor;
+varying vec2 vUv;
+varying float vFade;
+void main() {
+  gl_FragColor = vec4( uColor, texture2D( uMap, vUv ).a * vFade );
+  #include <colorspace_fragment>
+}
+`;
+
+// The cafecito glow: a gold fresnel rim, bright at the silhouette and clear
+// in the middle, added on top of whatever is behind it.
+const GLOW_VS = `
+varying vec3 vEccN;
+varying vec3 vEccV;
+#include <common>
+void main() {
+  #include <beginnormal_vertex>
+  #include <defaultnormal_vertex>
+  #include <begin_vertex>
+  #include <project_vertex>
+  vEccN = normalize( transformedNormal );
+  vEccV = normalize( -mvPosition.xyz );
+}
+`;
+
+const GLOW_FS = `
+uniform vec3 uColor;
+uniform float uGlow;
+varying vec3 vEccN;
+varying vec3 vEccV;
+void main() {
+  float rim = pow( 1.0 - abs( dot( normalize( vEccN ), normalize( vEccV ) ) ), 2.6 ) * 1.25;
+  gl_FragColor = vec4( uColor * rim * uGlow, 1.0 );
+  #include <colorspace_fragment>
+}
+`;
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -74,6 +143,34 @@ function clamp(v: number, lo: number, hi: number): number {
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
+
+// A white stripe arching front to back over a gorra dome of radius r.
+function capStripe(r: number): THREE.BufferGeometry {
+  const g = new THREE.TorusGeometry(r, 0.016, 4, 12, Math.PI);
+  g.rotateY(Math.PI / 2);
+  g.scale(1, 0.72, 1);
+  return g;
+}
+
+// The back number, 27, as seven-segment boxes in viewer space (x to the
+// right as the chase camera sees it): [x, y, width, height].
+const SEGMENTS_27: ReadonlyArray<readonly [number, number, number, number]> = (() => {
+  const w = 0.07;
+  const h = 0.12;
+  const t = 0.022;
+  const seg = (cx: number, name: string): [number, number, number, number] => {
+    switch (name) {
+      case 'a': return [cx, h / 2, w, t];
+      case 'g': return [cx, 0, w, t];
+      case 'd': return [cx, -h / 2, w, t];
+      case 'b': return [cx + w / 2, h / 4, t, h / 2 + t];
+      case 'c': return [cx + w / 2, -h / 4, t, h / 2 + t];
+      case 'e': return [cx - w / 2, -h / 4, t, h / 2 + t];
+      default: return [cx - w / 2, h / 4, t, h / 2 + t]; // f
+    }
+  };
+  return [...'abged'.split('').map((n) => seg(-0.048, n)), ...'abc'.split('').map((n) => seg(0.048, n))];
+})();
 
 export class Player {
   x = START_X;
@@ -94,7 +191,7 @@ export class Player {
   private staticParts: THREE.BufferGeometry[] = [];
   private aura!: THREE.Mesh;
   private glowShell!: THREE.Mesh;
-  private glowMat!: THREE.MeshBasicMaterial;
+  private glowU = { value: 1 };
   private stars!: THREE.Group;
   private leanVis = 0;
   private wheelieVis = 0;
@@ -154,7 +251,11 @@ export class Player {
   private spinZ = 0;
 
   private particles: Particle[] = [];
-  private fxMats!: Record<FxKind, THREE.MeshBasicMaterial>;
+  private fx!: Record<FxKind, THREE.InstancedMesh>;
+  private fxFade!: Record<FxKind, THREE.InstancedBufferAttribute>;
+  private fxCount: Record<FxKind, number> = { spark: 0, splash: 0, trail: 0, dust: 0 };
+  private rackTier = 0;
+  private rackPop = 0;
   private readonly cb: PlayerCallbacks;
 
   constructor(scene: THREE.Scene, cb: PlayerCallbacks) {
@@ -214,16 +315,17 @@ export class Player {
     this.root.add(this.aura);
 
     // Cafecito invincibility glow
-    this.glowMat = worldMaterial(
-      new THREE.MeshBasicMaterial({
-        color: PALETTE.gold,
+    const glowMat = worldMaterial(
+      new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color(PALETTE.gold) }, uGlow: this.glowU },
+        vertexShader: GLOW_VS,
+        fragmentShader: GLOW_FS,
         transparent: true,
-        opacity: 0.22,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
       }),
     );
-    this.glowShell = new THREE.Mesh(new THREE.SphereGeometry(1.05, 14, 10), this.glowMat);
-    this.glowShell.scale.y = 0.9;
+    this.glowShell = new THREE.Mesh(new THREE.SphereGeometry(1.05, 20, 14), glowMat);
     this.glowShell.position.y = 0.85;
     this.glowShell.visible = false;
     this.root.add(this.glowShell);
@@ -279,10 +381,16 @@ export class Player {
       if (id === 'pasola') this.buildPasola();
       else if (id === 'civic') this.buildCivic();
       else this.buildMoto();
-      rig = { group, wheels: this.wheels, wheelRadius: this.wheelRadius, paint: want };
+      const { rack, counts } = this.buildRack(id);
+      group.add(rack);
+      rig = { group, wheels: this.wheels, wheelRadius: this.wheelRadius, paint: want, rack, rackCounts: counts };
       this.rigs[id] = rig;
       this.leanGroup.add(group);
+      this.applyRack(rig);
     }
+    // the glow hugs the ride: a round bubble for the bikes, a long one for the car
+    if (id === 'civic') this.glowShell.scale.set(1.25, 0.8, 2.2);
+    else this.glowShell.scale.set(1, 0.9, 1);
     for (const key of Object.keys(this.rigs) as VehicleId[]) {
       const r = this.rigs[key];
       if (r) r.group.visible = key === id;
@@ -371,18 +479,53 @@ export class Player {
     const blue = PALETTE.flagBlue;
     const tilt = upright ? 0.08 : 0.3;
     this.addStatic(rgeo(0.36, 0.5, 0.26, 0.07), shirt, 0, 1.24, -0.14, tilt);
+    // El chaleco: an orange vest with reflective strips and a number on the
+    // back, the side of the rider the camera always sees. Orange is the
+    // player's color on every ride; traffic motoconchos wear lime.
+    const onTorso = (geo: THREE.BufferGeometry, color: number, dx: number, dy: number, dz: number): void => {
+      geo.translate(dx, dy, dz);
+      this.addStatic(geo, color, 0, 1.24, -0.14, tilt);
+    };
+    onTorso(rgeo(0.4, 0.44, 0.3, 0.07), PALETTE.hazardOrange, 0, -0.02, 0);
+    onTorso(new THREE.BoxGeometry(0.41, 0.035, 0.31), PALETTE.flagWhite, 0, -0.14, 0);
+    onTorso(new THREE.BoxGeometry(0.41, 0.035, 0.31), PALETTE.flagWhite, 0, 0.1, 0);
+    onTorso(new THREE.BoxGeometry(0.22, 0.17, 0.012), PALETTE.flagWhite, 0, -0.02, -0.156);
+    // el 27, in seven-segment boxes. Seen from behind, screen right is -x.
+    for (const [vx, vy, w, h] of SEGMENTS_27) {
+      onTorso(new THREE.BoxGeometry(w, h, 0.012), blue, -vx, vy - 0.02, -0.163);
+    }
     this.addStatic(new THREE.SphereGeometry(0.17, 12, 10), PALETTE.skin, 0, 1.62, 0);
     // la gorra: a squashed dome that actually covers the crown of the head
     // (the old thin cylinder let the scalp poke out above it, which read as
-    // a headband on a bald man), plus the brim out front
+    // a headband on a bald man), plus the brim out front and a white stripe
+    // over the top so it reads against the road
     const crown = new THREE.SphereGeometry(0.19, 12, 10);
     crown.scale(1, 0.72, 1);
     this.addStatic(crown, blue, 0, 1.665, 0);
+    this.addStatic(capStripe(0.192), PALETTE.flagWhite, 0, 1.665, 0);
     this.addStatic(new THREE.BoxGeometry(0.26, 0.035, 0.16), blue, 0, 1.7, 0.19);
     this.addStatic(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, 0.25, 1.28, 0.18, -0.7);
     this.addStatic(new THREE.BoxGeometry(0.09, 0.44, 0.09), shirt, -0.25, 1.28, 0.18, -0.7);
     this.addStatic(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, 0.17, 0.62, -0.2, 0.55);
     this.addStatic(new THREE.BoxGeometry(0.11, 0.42, 0.15), jeans, -0.17, 0.62, -0.2, 0.55);
+  }
+
+  // The parrilla behind the seat: two chrome rails and a cross bar, open
+  // enough that the tail lamp under it stays in view.
+  private addRackRails(y: number, z: number): void {
+    const chrome = 0xd9d9d9;
+    this.addStatic(new THREE.BoxGeometry(0.03, 0.03, 0.32), chrome, 0.12, y, z);
+    this.addStatic(new THREE.BoxGeometry(0.03, 0.03, 0.32), chrome, -0.12, y, z);
+    this.addStatic(new THREE.BoxGeometry(0.27, 0.03, 0.03), chrome, 0, y, z - 0.15);
+  }
+
+  // A tail lamp and a Dominican plate (white, blue band on top). WP-A's
+  // brake light sits on the lamp.
+  private addTail(lampW: number, lampY: number, plateW: number, plateY: number, z: number): void {
+    this.addStatic(new THREE.BoxGeometry(lampW + 0.05, 0.11, 0.03), PALETTE.darkParts, 0, lampY, z + 0.01); // housing: reads on any paint
+    this.addStatic(new THREE.BoxGeometry(lampW, 0.07, 0.04), PALETTE.flagRed, 0, lampY, z);
+    this.addStatic(new THREE.BoxGeometry(plateW, plateW * 0.5, 0.02), PALETTE.flagWhite, 0, plateY, z);
+    this.addStatic(new THREE.BoxGeometry(plateW, plateW * 0.13, 0.024), PALETTE.flagBlue, 0, plateY + plateW * 0.2, z);
   }
 
   private buildMoto(): void {
@@ -408,6 +551,8 @@ export class Player {
     const pipeGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.55, 8);
     pipeGeo.rotateX(Math.PI / 2);
     this.addStatic(pipeGeo, chrome, 0.16, 0.4, -0.45);
+    this.addTail(0.14, 0.74, 0.2, 0.6, -0.65);
+    this.addRackRails(0.86, -0.78);
     this.buildRider(false);
     this.finishRig();
     this.addMesh(new THREE.SphereGeometry(0.07, 10, 8), glow, 0, 0.9, 0.8);
@@ -435,6 +580,8 @@ export class Player {
     const barGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.52, 8);
     barGeo.rotateZ(Math.PI / 2);
     this.addStatic(barGeo, chrome, 0, 1.06, 0.5);
+    this.addTail(0.16, 0.66, 0.2, 0.5, -0.685);
+    this.addRackRails(0.9, -0.8);
     this.buildRider(true);
     this.finishRig();
     this.addMesh(new THREE.SphereGeometry(0.06, 10, 8), glow, 0, 0.92, 0.68);
@@ -469,12 +616,21 @@ export class Player {
     // it. Now a torso rises from the opening and the whole head floats
     // clear above the roofline: unmistakably a person, never a stuck ball.
     this.addStatic(new THREE.BoxGeometry(0.52, 0.05, 0.52), dark, 0, 1.01, -0.15); // the opening
-    this.addStatic(new THREE.BoxGeometry(0.3, 0.26, 0.2), PALETTE.colmadoTeal, 0, 1.12, -0.15); // shoulders
+    this.addStatic(new THREE.BoxGeometry(0.3, 0.26, 0.2), PALETTE.hazardOrange, 0, 1.12, -0.15); // shoulders, in the chaleco
+    this.addStatic(new THREE.BoxGeometry(0.31, 0.03, 0.21), PALETTE.flagWhite, 0, 1.08, -0.15);
     this.addStatic(new THREE.SphereGeometry(0.15, 12, 10), PALETTE.skin, 0, 1.36, -0.15);
     const crown = new THREE.SphereGeometry(0.17, 12, 10);
     crown.scale(1, 0.72, 1);
     this.addStatic(crown, blue, 0, 1.4, -0.15);
+    this.addStatic(capStripe(0.172), PALETTE.flagWhite, 0, 1.4, -0.15);
     this.addStatic(new THREE.BoxGeometry(0.24, 0.03, 0.14), blue, 0, 1.43, 0.02);
+    // the back: rear window, full-width tail bar, plate
+    this.addStatic(new THREE.BoxGeometry(1.2, 0.24, 0.04), dark, 0, 0.84, -1.06);
+    this.addStatic(new THREE.BoxGeometry(1.4, 0.12, 0.03), dark, 0, 0.58, -1.955); // smoked housing
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.07, 0.04), PALETTE.flagRed, 0.45, 0.58, -1.96);
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.07, 0.04), PALETTE.flagRed, -0.45, 0.58, -1.96);
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.13, 0.02), PALETTE.flagWhite, 0, 0.42, -1.96);
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.035, 0.024), PALETTE.flagBlue, 0, 0.47, -1.96);
     this.finishRig();
     // underglow, que se vea
     const glowPlane = new THREE.Mesh(
@@ -488,23 +644,103 @@ export class Player {
     this.buildTarget.add(glowPlane);
   }
 
+  // The platano rack: every bunch the ride can carry, merged in tier order,
+  // so revealing a tier is a draw range, never a new mesh.
+  private buildRack(id: VehicleId): { rack: THREE.Mesh; counts: number[] } {
+    const fruit = platanoFruit();
+    fruit.scale(0.55, 0.55, 0.55);
+    const tiers: Array<Array<[number, number, number, number]>> = [
+      [[-0.02, 0, -0.1, 0.1], [0.02, 0, 0, -0.08], [0, 0, 0.1, 0.05]],
+      [[0.03, 0.09, -0.05, -0.25], [-0.03, 0.09, 0.05, 0.3], [0, 0.1, 0.12, 1.4]],
+      [[0.04, 0.18, 0, 0.5], [-0.04, 0.18, -0.08, -0.45], [0, 0.26, 0.02, 0.1], [0.05, 0.2, 0.12, 1.2]],
+    ];
+    const parts: THREE.BufferGeometry[] = [];
+    const counts: number[] = [];
+    let n = 0;
+    for (const tier of tiers) {
+      for (const [x, y, z, yaw] of tier) {
+        const g = fruit.clone();
+        g.rotateY(yaw);
+        g.translate(x, y, z);
+        parts.push(g);
+        n += g.index!.count;
+      }
+      counts.push(n);
+    }
+    const rack = new THREE.Mesh(mergeGeometries(parts)!, vcToonMaterial());
+    fruit.dispose();
+    for (const g of parts) g.dispose();
+    rack.castShadow = true;
+    if (id === 'civic') rack.position.set(0, 0.7, -1.45); // on the trunk, below the aleron
+    else if (id === 'pasola') rack.position.set(0, 0.95, -0.8);
+    else rack.position.set(0, 0.91, -0.78);
+    return { rack, counts };
+  }
+
+  private applyRack(r: Rig): void {
+    r.rack.visible = this.rackTier > 0;
+    r.rack.geometry.setDrawRange(0, this.rackTier > 0 ? r.rackCounts[this.rackTier - 1] : 0);
+    r.rack.scale.setScalar(1);
+  }
+
+  // Platanos collected this run stack up on the ride, a tier at each of
+  // CONFIG.rackTiers, with a little pop. main calls this on every pickup.
+  setRackCount(n: number): void {
+    let tier = 0;
+    for (const at of CONFIG.rackTiers) if (n >= at) tier++;
+    if (tier === this.rackTier) return;
+    this.rackPop = tier > this.rackTier ? RACK_POP_SEC : 0;
+    this.rackTier = tier;
+    for (const key of Object.keys(this.rigs) as VehicleId[]) {
+      const r = this.rigs[key];
+      if (r) this.applyRack(r);
+    }
+  }
+
   private buildFx(scene: THREE.Scene): void {
-    this.fxMats = {
-      spark: worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.centerLine })),
-      splash: worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.charco })),
-      trail: worldMaterial(
-        new THREE.MeshBasicMaterial({ color: PALETTE.gold, transparent: true, opacity: 0.85 }),
-      ),
-      dust: worldMaterial(
-        new THREE.MeshBasicMaterial({ color: PALETTE.dust, transparent: true, opacity: 0.55 }),
-      ),
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    const g = c.getContext('2d')!;
+    const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.45, 'rgba(255,255,255,0.75)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 32, 32);
+    const map = new THREE.CanvasTexture(c);
+    const look: Record<FxKind, [number, THREE.Blending]> = {
+      spark: [0xffc93c, THREE.AdditiveBlending],
+      splash: [0xbfeaf2, THREE.NormalBlending],
+      trail: [PALETTE.gold, THREE.AdditiveBlending],
+      dust: [PALETTE.dust, THREE.NormalBlending],
     };
-    const geo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-    for (let i = 0; i < 30; i++) {
-      const mesh = new THREE.Mesh(geo, this.fxMats.spark);
+    this.fx = {} as Record<FxKind, THREE.InstancedMesh>;
+    this.fxFade = {} as Record<FxKind, THREE.InstancedBufferAttribute>;
+    for (const kind of FX_KINDS) {
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const fade = new THREE.InstancedBufferAttribute(new Float32Array(FX_POOL), 1);
+      fade.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('aFade', fade);
+      const mat = worldMaterial(
+        new THREE.ShaderMaterial({
+          uniforms: { uMap: { value: map }, uColor: { value: new THREE.Color(look[kind][0]) } },
+          vertexShader: FX_VS,
+          fragmentShader: FX_FS,
+          transparent: true,
+          depthWrite: false,
+          blending: look[kind][1],
+        }),
+      );
+      const mesh = new THREE.InstancedMesh(geo, mat, FX_POOL);
+      mesh.count = 0;
       mesh.visible = false;
+      mesh.frustumCulled = false;
       scene.add(mesh);
-      this.particles.push({ mesh, vx: 0, vy: 0, vz: 0, life: 0, grow: false });
+      this.fx[kind] = mesh;
+      this.fxFade[kind] = fade;
+    }
+    for (let i = 0; i < FX_POOL; i++) {
+      this.particles.push({ kind: 'spark', x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, size: 0.2 });
     }
   }
 
@@ -788,7 +1024,7 @@ export class Player {
         this.trailAcc -= 0.04;
         this.emit('trail', 1, this.x + (Math.random() - 0.5) * 0.3, 0.35 + Math.random() * 0.4, -0.7, 1.2);
       }
-      this.glowMat.opacity = 0.16 + 0.08 * (1 + Math.sin(this.time * 12)) * 0.5;
+      this.glowU.value = 0.8 + 0.25 * Math.sin(this.time * 12);
     }
     if (this.graceBlink) {
       this.glowShell.visible = Math.floor(this.time * CONFIG.cafecitoBlinkHz * 2) % 2 === 0;
@@ -847,12 +1083,12 @@ export class Player {
     let n = 0;
     for (const p of this.particles) {
       if (p.life > 0) continue;
-      p.life = 0.22 + Math.random() * 0.2;
-      p.grow = kind === 'dust';
-      p.mesh.material = this.fxMats[kind];
-      p.mesh.visible = true;
-      p.mesh.scale.setScalar(1);
-      p.mesh.position.set(x + (Math.random() - 0.5) * 0.4, y + Math.random() * 0.25, z + (Math.random() - 0.5) * 0.6);
+      p.kind = kind;
+      p.life = p.max = 0.22 + Math.random() * 0.2;
+      p.size = kind === 'dust' ? 0.3 : kind === 'trail' ? 0.26 : kind === 'splash' ? 0.2 : 0.16;
+      p.x = x + (Math.random() - 0.5) * 0.4;
+      p.y = y + Math.random() * 0.25;
+      p.z = z + (Math.random() - 0.5) * 0.6;
       const spread = kind === 'trail' ? 0.5 : 1;
       p.vx = (dirX !== 0 ? dirX * (1.5 + Math.random() * 2.5) : (Math.random() - 0.5) * 2 * spread) * (power / 3);
       p.vy = (kind === 'splash' ? 2.2 : kind === 'dust' ? 0.8 : 1.4) + Math.random() * (kind === 'dust' ? 0.6 : power);
@@ -862,22 +1098,47 @@ export class Player {
   }
 
   updateFx(dt: number): void {
+    const counts = this.fxCount;
+    counts.spark = counts.splash = counts.trail = counts.dust = 0;
     for (const p of this.particles) {
       if (p.life <= 0) continue;
       p.life -= dt;
-      if (p.grow) {
-        p.mesh.scale.multiplyScalar(1 + 2.6 * dt);
+      if (p.kind === 'dust') {
+        p.size *= 1 + 2.6 * dt;
         p.vy -= 2 * dt;
       } else {
         p.vy -= 18 * dt;
       }
-      p.mesh.position.x += p.vx * dt;
-      p.mesh.position.y += p.vy * dt;
-      p.mesh.position.z += p.vz * dt;
-      if (p.life <= 0 || p.mesh.position.y < 0) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      if (p.life <= 0 || p.y < 0) {
         p.life = 0;
-        p.mesh.visible = false;
+        continue;
       }
+      const i = counts[p.kind]++;
+      _m4.makeScale(p.size, p.size, p.size);
+      _m4.setPosition(p.x, p.y, p.z);
+      this.fx[p.kind].setMatrixAt(i, _m4);
+      // glows hold their light and snap out at the end; dust thins as it spreads
+      const t = p.life / p.max;
+      this.fxFade[p.kind].setX(i, p.kind === 'dust' || p.kind === 'splash' ? t * 0.8 : Math.min(1, t * 2.5));
+    }
+    for (const kind of FX_KINDS) {
+      const mesh = this.fx[kind];
+      mesh.count = counts[kind];
+      mesh.visible = counts[kind] > 0;
+      if (mesh.visible) {
+        mesh.instanceMatrix.needsUpdate = true;
+        this.fxFade[kind].needsUpdate = true;
+      }
+    }
+
+    // the rack's pop when a new tier lands
+    if (this.rackPop > 0) {
+      this.rackPop = Math.max(0, this.rackPop - dt);
+      const r = this.rigs[this.vehicle];
+      if (r) r.rack.scale.setScalar(1 + 0.3 * (this.rackPop / RACK_POP_SEC));
     }
   }
 
@@ -958,6 +1219,7 @@ export class Player {
     this.setShield(false);
     this.setGraceBlink(false);
     this.setGlow(false);
+    this.setRackCount(0);
     this.stars.visible = false;
     this.root.position.set(START_X, 0, 0);
     this.root.rotation.set(0, 0, 0);

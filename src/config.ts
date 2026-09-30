@@ -23,7 +23,21 @@ export const PALETTE = {
   flagBlue: 0x002d62,
   flagRed: 0xce1126,
   flagWhite: 0xffffff,
-  carPaints: [0xd6ccc2, 0xb3d9ff, 0xf2e9dc, 0xa8e6cf, 0xff8b94, 0xffeaa7, 0xcdb4db],
+  // Traffic paint. DECISION: hazards get their own saturated, mid-value set,
+  // kept out of the pale band the building pastels live in, so a car pops off
+  // a facade and off the dark asphalt in one glance. The one pale body is the
+  // brief's beige carro publico, which carries a roof sign, a primer door and
+  // lit lamps to read. Sky blue stays reserved for charcos and yellow-black
+  // stripes for policias acostados: no vehicle wears them.
+  publicoBeige: 0xd6ccc2,
+  publicoDoors: [0xb5651d, 0x7a8c5b, 0x9aa0a6], // the mismatched door, in primer
+  sedanPaints: [0xe63946, 0x2a9d8f, 0xff8c42, 0x3a6ea5, 0x9aa3ad],
+  jeepetaPaints: [0x9aa3ad, 0xc1121f, 0x2a9d8f, 0x3a6ea5],
+  motoPaints: [0xffd23f, 0xe63946, 0xff8c42, 0x2a9d8f],
+  vestHiVis: 0xd4ff3a, // motoconchistas' chaleco; the player's is hazardOrange
+  shirts: [0xe63946, 0xf4c430, 0x2a9d8f, 0xffffff],
+  skinTones: [0x8d5524, 0xc68642, 0x5c3a1e, 0xa0673a],
+  glass: 0x34414f, // windows: dark, a touch cool, so heads behind them read
   civicPaints: [0xe63946, 0x2a9d8f, 0xf4c430], // loud, que se oiga
   guaguaYellow: 0xf4c430,
   camionOlive: 0x708238,
@@ -201,6 +215,13 @@ export const CONFIG = {
   // oncoming fronts out of the darkest toon step without flattening form.
   fillLight: 0.27,
   cintaShowM: 240, // FEEL: how far ahead La Cinta's arch starts rising out of the haze
+  // Hazard fog. Traffic, obstacles and pickups fade on their own curve,
+  // pow(smoothstep(fogNear, hazardFogFarM, depth), hazardFogPow): full color
+  // deep into the haze, gone only at the spawn line, so a car reads before the
+  // facade behind it does. The vitest check holds the telegraph rule on it.
+  hazardFogFarM: 150, // FEEL: where hazards vanish; keep at or under spawnAhead or cars pop in
+  hazardFogPow: 5, // FEEL: higher = hazards hold full color longer, then fade fast near the end
+  lampGlow: 0.6, // FEEL: how hard traffic head and tail lamps glow through the golden hour
 
   // Spawning. Pressure raised after the Phase 4 feel test.
   spawnAhead: 150,
@@ -418,6 +439,7 @@ export const CONFIG = {
   platanoTrailLen: 5,
   policiaLeadIn: 3, // ground plátanos leading into a bump; the arc itself follows the real jump
   jumpArcCount: 6, // plátanos laid along the launched rider's own parabola
+  rackTiers: [10, 25, 50], // FEEL: platanos this run that stack each bunch tier on the ride's rack
   powerupEvery: [18, 30],
   powerupUnlockSec: 20,
   // DECISION: every run's first power-up is a Bendición arriving about this

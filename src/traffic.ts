@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG, PALETTE, ROAD } from './config';
-import { toonMaterial, textTexture, worldMaterial, paint, vcToonMaterial } from './world';
+import { textTexture, worldMaterial, paint, getGradientMap } from './world';
 
 export type VehicleType = 'sedan' | 'guagua' | 'camion' | 'civic' | 'motoconcho' | 'guaguaParada' | 'cart';
 export type PowerupKind = 'cafecito' | 'bendicion' | 'iman';
@@ -144,17 +144,17 @@ interface Pickup {
   phase: number;
 }
 
+// Everything static on a vehicle is one merged, vertex-colored geometry per
+// pool slot: the paint job, the variety (publico, private car, jeepeta), the
+// lamps, plates and the people inside are all baked in, so a car costs one
+// draw. Only the animated or textured extras (blinkers, banner, underglow)
+// stay their own meshes, via addExtras.
 interface TypeAssets {
-  painted: THREE.BufferGeometry;
-  dark: THREE.BufferGeometry;
-  accent?: THREE.BufferGeometry;
-  accentColor?: number;
-  green?: THREE.BufferGeometry;
-  paints: readonly number[];
+  build: (slot: number) => THREE.BufferGeometry;
   halfW: number;
   halfL: number;
   pool: number;
-  addExtras?: (group: THREE.Group) => THREE.Object3D[];
+  addExtras?: (group: THREE.Group, slot: number) => THREE.Object3D[];
 }
 
 function box(w: number, h: number, d: number, x: number, y: number, z: number): THREE.BufferGeometry {
@@ -180,6 +180,19 @@ function cylX(r: number, len: number, x: number, y: number, z: number, seg = 10)
   return g;
 }
 
+function cyl(rTop: number, rBot: number, h: number, x: number, y: number, z: number, seg = 10): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(rTop, rBot, h, seg);
+  g.translate(x, y, z);
+  return g;
+}
+
+function sph(r: number, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1): THREE.BufferGeometry {
+  const g = new THREE.SphereGeometry(r, 7, 5);
+  g.scale(sx, sy, sz);
+  g.translate(x, y, z);
+  return g;
+}
+
 function rand(a: number, b: number): number {
   return a + Math.random() * (b - a);
 }
@@ -196,217 +209,606 @@ function pickWeighted<T>(items: ReadonlyArray<readonly [T, number]>): T {
 }
 
 // ---------------------------------------------------------------------------
-// Archetype geometry. Built once per type; pooled groups share the geometry
-// and differ only in paint material and small extras.
+// Hazard materials. Traffic, obstacles and pickups fade on their own fog
+// curve (CONFIG.hazardFogFarM, hazardFogPow): full color deep into the haze,
+// gone only at the spawn line, so a hazard reads before the scenery behind
+// it does. Lamps are vertex colors painted past 1.0; the traffic material
+// turns that overflow into glow, so head and tail lamps light up with no
+// extra draw and no extra material.
 // ---------------------------------------------------------------------------
 
-function sedanAssets(): TypeAssets {
-  const painted = mergeGeometries([
-    rbox(1.9, 0.55, 4.4, 0, 0.58, 0, 0.12),
-    rbox(1.65, 0.5, 2.1, 0, 1.05, -0.35, 0.14),
-  ])!;
-  const wheels: THREE.BufferGeometry[] = [];
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) wheels.push(cylX(0.34, 0.24, sx * 0.85, 0.34, sz * 1.4));
-  const wind = new THREE.BoxGeometry(1.4, 0.4, 0.08);
-  wind.rotateX(-0.18);
-  wind.translate(0, 1.05, 0.72);
-  const dark = mergeGeometries([...wheels, wind])!;
-  // El carro publico: taxi sign on the roof, one mismatched door
-  const accent = mergeGeometries([
-    box(0.55, 0.16, 0.34, 0, 1.42, -0.1),
-    box(0.06, 0.42, 1.1, 0.96, 0.62, 0.5),
-  ])!;
-  return {
-    painted, dark, accent, accentColor: PALETTE.laneDash,
-    paints: [0xd6ccc2, 0xd6ccc2, 0xb3d9ff, 0xf2e9dc, 0xa8e6cf],
-    halfW: 0.95, halfL: 2.2, pool: 14,
+const LAMP_GAIN = 2;
+
+const HAZARD_FOG = `
+#ifdef USE_FOG
+	float fogFactor = pow( smoothstep( fogNear, ${CONFIG.hazardFogFarM.toFixed(1)}, vFogDepth ), ${CONFIG.hazardFogPow.toFixed(2)} );
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif
+`;
+
+const LAMP_CHUNK = `
+#include <emissivemap_fragment>
+#ifdef USE_COLOR
+	totalEmissiveRadiance += vColor.rgb * ( ${CONFIG.lampGlow.toFixed(3)} * step( 1.02, max( vColor.r, max( vColor.g, vColor.b ) ) ) );
+#endif
+`;
+
+// Bend with the world (worldMaterial), fade on the hazard curve, and with
+// `lamps`, glow wherever the vertex color runs past 1.0.
+function hazardMaterial<T extends THREE.Material>(m: T, lamps = false): T {
+  worldMaterial(m);
+  const bend = m.onBeforeCompile;
+  const key = `${m.customProgramCacheKey()}haz${lamps ? 'lamp' : ''}`;
+  m.onBeforeCompile = (shader, renderer) => {
+    bend.call(m, shader, renderer);
+    let fs = shader.fragmentShader.replace('#include <fog_fragment>', HAZARD_FOG);
+    if (lamps) fs = fs.replace('#include <emissivemap_fragment>', LAMP_CHUNK);
+    shader.fragmentShader = fs;
   };
+  m.customProgramCacheKey = () => key;
+  return m;
 }
 
-function guaguaAssets(banner: THREE.Texture, withBlinkers: boolean): TypeAssets {
-  const painted = rbox(2.3, 1.7, 7, 0, 1.35, 0, 0.18);
-  const parts: THREE.BufferGeometry[] = [];
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push(cylX(0.42, 0.28, sx * 0.98, 0.42, sz * 2.5));
-  parts.push(box(2.34, 0.55, 5.2, 0, 1.8, -0.5)); // window band
-  parts.push(box(2.1, 0.6, 0.1, 0, 1.75, 3.46)); // windshield
-  parts.push(box(2.34, 0.28, 0.24, 0, 0.5, 3.5)); // bumper
-  parts.push(box(0.08, 0.1, 3.6, -0.95, 2.28, -0.4)); // roof rack rails
-  parts.push(box(0.08, 0.1, 3.6, 0.95, 2.28, -0.4));
-  const dark = mergeGeometries(parts)!;
-  const accent = mergeGeometries([
-    box(0.7, 0.42, 0.9, -0.5, 2.53, 0.3), // roof cargo
-    box(0.6, 0.5, 0.7, 0.5, 2.56, -1.2),
-    box(0.5, 0.36, 0.5, 0.15, 2.5, 1.35),
-  ])!;
+let _trafficMat: THREE.MeshToonMaterial | null = null;
+function trafficMaterial(): THREE.MeshToonMaterial {
+  if (!_trafficMat) {
+    _trafficMat = hazardMaterial(
+      new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: getGradientMap() }),
+      true,
+    );
+  }
+  return _trafficMat;
+}
+
+// Collects painted parts for one merged, vertex-colored geometry.
+class Kit {
+  private parts: THREE.BufferGeometry[] = [];
+
+  add(g: THREE.BufferGeometry, color: number): this {
+    this.parts.push(paint(g.index ? g : mergeVertices(g), color));
+    return this;
+  }
+
+  // A lamp: painted past 1.0, which the traffic material turns into glow.
+  lamp(g: THREE.BufferGeometry, color: number): this {
+    this.add(g, color);
+    const arr = (this.parts[this.parts.length - 1].getAttribute('color') as THREE.BufferAttribute)
+      .array as Float32Array;
+    for (let i = 0; i < arr.length; i++) arr[i] *= LAMP_GAIN;
+    return this;
+  }
+
+  // Geometry that already carries its own vertex colors (a racimo, a cup).
+  addColored(g: THREE.BufferGeometry): this {
+    this.parts.push(g.index ? g : mergeVertices(g));
+    return this;
+  }
+
+  build(): THREE.BufferGeometry {
+    const g = mergeGeometries(this.parts)!;
+    for (const p of this.parts) p.dispose();
+    this.parts = [];
+    return g;
+  }
+}
+
+function skinTone(slot: number, k = 0): number {
+  return PALETTE.skinTones[(slot + k) % PALETTE.skinTones.length];
+}
+
+// Somebody behind the glass: head, hair and shirt shoulders standing just
+// proud of the window, so a car seen from behind (or head-on) has people in
+// it. `out` is the side the window faces (-1 back, 1 front).
+function person(k: Kit, x: number, y: number, z: number, out: 1 | -1, seed: number, r = 0.12): void {
+  k.add(box(r * 3.2, r * 0.9, 0.03, x, y - r * 1.45, z), PALETTE.shirts[seed % PALETTE.shirts.length]);
+  k.add(sph(r, x, y, z, 1, 1.1, 0.3), skinTone(seed));
+  k.add(sph(r * 1.05, x, y + r * 0.38, z + out * 0.008, 1, 0.6, 0.3), 0x2a1d17);
+}
+
+// Dominican plate: white, with the blue band across the top.
+function drPlate(k: Kit, x: number, y: number, z: number, w = 0.5): void {
+  k.add(box(w, 0.15, 0.03, x, y, z), PALETTE.flagWhite);
+  k.add(box(w, 0.04, 0.036, x, y + 0.055, z), PALETTE.flagBlue);
+}
+
+// A mirrored pair of lamps: red at the back, warm white at the front. Same
+// direction traffic shows you its tail lamps, oncoming traffic its head
+// lamps, so direction reads at fog distance before the shape does.
+function lampPair(k: Kit, w: number, h: number, x: number, y: number, z: number, color: number): void {
+  k.lamp(box(w, h, 0.06, x, y, z), color);
+  k.lamp(box(w, h, 0.06, -x, y, z), color);
+}
+
+function wheels4(k: Kit, r: number, len: number, x: number, z: number, y = r): void {
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.add(cylX(r, len, sx * x, y, sz * z), PALETTE.darkParts);
+}
+
+// ---------------------------------------------------------------------------
+// Archetypes
+// ---------------------------------------------------------------------------
+
+// Sedan slots rotate three bodies: el carro publico (the brief's beige
+// Corolla with its roof sign and a door in primer), a private car in a
+// saturated paint, and la jeepeta. The hitbox stays the sedan's for all three.
+function sedanAssets(): TypeAssets {
   return {
-    painted, dark, accent, accentColor: PALETTE.laneDash,
-    paints: [PALETTE.guaguaYellow],
-    halfW: 1.15, halfL: 3.5, pool: withBlinkers ? 3 : 5,
-    addExtras: (group) => {
-      const refs: THREE.Object3D[] = [];
-      // "Dios es mi guia" above the windshield
-      const b = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.9, 0.3),
-        worldMaterial(new THREE.MeshBasicMaterial({ map: banner })),
-      );
-      b.position.set(0, 2.32, 3.52);
-      group.add(b);
-      if (withBlinkers) {
-        const mat = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.hazardOrange }));
-        for (const sx of [-1, 1]) {
-          const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.1), mat);
-          lamp.position.set(sx * 0.9, 1.0, -3.52);
-          group.add(lamp);
-          refs.push(lamp);
-        }
-      }
-      return refs;
+    halfW: 0.95, halfL: 2.2, pool: 14,
+    build: (slot) => {
+      const k = new Kit();
+      const kind = slot % 3;
+      const n = Math.floor(slot / 3);
+      if (kind === 2) jeepeta(k, slot, PALETTE.jeepetaPaints[n % PALETTE.jeepetaPaints.length]);
+      else sedan(k, slot, kind === 0 ? PALETTE.publicoBeige : PALETTE.sedanPaints[n % PALETTE.sedanPaints.length], kind === 0);
+      return k.build();
     },
   };
 }
 
-function camionAssets(): TypeAssets {
-  const painted = mergeGeometries([
-    rbox(2.2, 1.5, 1.7, 0, 1.15, 2.5, 0.14), // cab
-    box(2.4, 0.25, 4.3, 0, 0.75, -0.75), // bed
-    box(0.08, 0.5, 4.3, -1.16, 1.05, -0.75),
-    box(0.08, 0.5, 4.3, 1.16, 1.05, -0.75),
-    box(2.4, 0.5, 0.08, 0, 1.05, 1.35),
-  ])!;
-  const parts: THREE.BufferGeometry[] = [];
-  for (const sx of [-1, 1]) for (const zz of [2.6, -0.4, -2.2]) parts.push(cylX(0.4, 0.26, sx * 0.95, 0.4, zz));
-  parts.push(box(1.9, 0.55, 0.08, 0, 1.6, 3.36));
-  const dark = mergeGeometries(parts)!;
-  // Los platanos: two jittered layers on the bed
-  const load: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 10; i++) {
-    const layer = i < 6 ? 0 : 1;
-    load.push(
-      box(
-        0.55, 0.48, 0.55,
-        rand(-0.72, 0.72),
-        1.02 + layer * 0.42,
-        -0.75 + (layer === 0 ? (i - 2.5) * 0.62 : (i - 7.5) * 0.9),
-      ),
-    );
+function sedan(k: Kit, slot: number, body: number, publico: boolean): void {
+  k.add(rbox(1.9, 0.55, 4.4, 0, 0.58, 0, 0.12), body);
+  k.add(rbox(1.65, 0.5, 2.1, 0, 1.05, -0.35, 0.14), body);
+  const wind = new THREE.BoxGeometry(1.4, 0.4, 0.08);
+  wind.rotateX(-0.18);
+  wind.translate(0, 1.05, 0.72);
+  k.add(wind, PALETTE.glass);
+  k.add(box(1.36, 0.32, 0.06, 0, 1.07, -1.42), PALETTE.glass); // rear window
+  k.add(box(1.67, 0.28, 1.5, 0, 1.08, -0.32), PALETTE.glass); // side windows
+  wheels4(k, 0.34, 0.24, 0.85, 1.4);
+  k.add(box(1.96, 0.16, 0.14, 0, 0.38, 2.22), PALETTE.darkParts); // bumpers
+  k.add(box(1.96, 0.16, 0.14, 0, 0.38, -2.22), PALETTE.darkParts);
+  lampPair(k, 0.34, 0.15, 0.62, 0.68, -2.21, PALETTE.flagRed);
+  lampPair(k, 0.36, 0.16, 0.58, 0.65, 2.21, PALETTE.sunGlow);
+  drPlate(k, 0, 0.53, -2.225);
+  drPlate(k, 0, 0.53, 2.225);
+  // the driver sits on the left (+x), seen through both windows
+  person(k, 0.42, 1.12, -1.47, -1, slot);
+  person(k, 0.42, 1.12, 0.79, 1, slot);
+  if (publico) {
+    // el carro publico: the roof sign, one door in primer, and a back seat
+    // packed the way a concho runs it
+    k.add(box(0.55, 0.16, 0.34, 0, 1.42, -0.1), PALETTE.laneDash);
+    k.add(box(0.16, 0.05, 0.36, 0, 1.52, -0.1), PALETTE.flagRed);
+    const door = PALETTE.publicoDoors[Math.floor(slot / 3) % PALETTE.publicoDoors.length];
+    k.add(box(0.06, 0.42, 1.1, slot % 2 ? 0.96 : -0.96, 0.62, 0.5), door);
+    person(k, 0, 1.1, -1.47, -1, slot + 1);
+    person(k, -0.42, 1.1, -1.47, -1, slot + 2);
   }
+}
+
+// La jeepeta: taller, boxier, a spare tire on the tailgate. The status car.
+function jeepeta(k: Kit, slot: number, body: number): void {
+  k.add(rbox(1.95, 0.72, 4.4, 0, 0.76, 0, 0.14), body);
+  k.add(rbox(1.84, 0.6, 3.0, 0, 1.38, -0.4, 0.12), body);
+  k.add(box(1.86, 0.32, 2.6, 0, 1.42, -0.38), PALETTE.glass); // side glass
+  const wind = new THREE.BoxGeometry(1.6, 0.42, 0.07);
+  wind.rotateX(-0.28);
+  wind.translate(0, 1.4, 1.12);
+  k.add(wind, PALETTE.glass);
+  k.add(box(1.5, 0.36, 0.06, 0, 1.42, -1.92), PALETTE.glass); // rear window
+  wheels4(k, 0.39, 0.28, 0.9, 1.45);
+  k.add(box(0.06, 0.06, 2.4, 0.78, 1.71, -0.4), PALETTE.darkParts); // roof rails
+  k.add(box(0.06, 0.06, 2.4, -0.78, 1.71, -0.4), PALETTE.darkParts);
+  const spare = new THREE.CylinderGeometry(0.34, 0.34, 0.22, 12);
+  spare.rotateX(Math.PI / 2);
+  spare.translate(0, 0.98, -2.31);
+  k.add(spare, PALETTE.darkParts);
+  const hub = new THREE.CylinderGeometry(0.22, 0.22, 0.04, 12);
+  hub.rotateX(Math.PI / 2);
+  hub.translate(0, 0.98, -2.43);
+  k.add(hub, body);
+  k.add(box(1.98, 0.18, 0.16, 0, 0.44, 2.24), PALETTE.darkParts);
+  k.add(box(1.98, 0.18, 0.16, 0, 0.44, -2.24), PALETTE.darkParts);
+  k.add(box(0.9, 0.22, 0.05, 0, 0.84, 2.22), PALETTE.darkParts); // grille
+  lampPair(k, 0.16, 0.34, 0.84, 0.92, -2.21, PALETTE.flagRed);
+  lampPair(k, 0.36, 0.14, 0.64, 0.88, 2.21, PALETTE.sunGlow);
+  drPlate(k, 0, 0.46, -2.335);
+  drPlate(k, 0, 0.46, 2.335);
+  person(k, 0.42, 1.44, -1.97, -1, slot);
+  person(k, 0.42, 1.46, 1.2, 1, slot);
+}
+
+function guaguaAssets(banner: THREE.Texture, parked: boolean): TypeAssets {
+  // "DIOS ES MI GUIA" front and back in one mesh: the brief's banner above
+  // the windshield, and the same banner across the back, which is the side
+  // of a guagua the rider actually looks at.
+  const front = new THREE.PlaneGeometry(1.9, 0.3);
+  front.translate(0, 2.32, 3.52);
+  const back = new THREE.PlaneGeometry(2.0, 0.3);
+  back.rotateY(Math.PI);
+  back.translate(0, 2.05, -3.53);
+  const bannerGeo = mergeGeometries([front, back])!;
+  const bannerMat = hazardMaterial(new THREE.MeshBasicMaterial({ map: banner }));
+  const blinkGeo = mergeGeometries([
+    box(0.24, 0.34, 0.08, 0.95, 0.9, -3.58),
+    box(0.24, 0.34, 0.08, -0.95, 0.9, -3.58),
+  ])!;
+  const blinkMat = hazardMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.hazardOrange }));
+
   return {
-    painted, dark, green: mergeGeometries(load)!,
-    paints: [PALETTE.camionOlive],
+    halfW: 1.15, halfL: 3.5, pool: parked ? 3 : 5,
+    build: (slot) => {
+      const k = new Kit();
+      k.add(rbox(2.3, 1.7, 7, 0, 1.35, 0, 0.18), PALETTE.guaguaYellow);
+      k.add(box(2.32, 0.14, 6.6, 0, 1.12, 0), PALETTE.colmadoRed); // the stripe
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.add(cylX(0.42, 0.28, sx * 0.98, 0.42, sz * 2.5), PALETTE.darkParts);
+      k.add(box(2.34, 0.55, 5.2, 0, 1.8, -0.5), PALETTE.glass); // window band
+      k.add(box(2.1, 0.6, 0.1, 0, 1.75, 3.46), PALETTE.glass); // windshield
+      k.add(box(2.34, 0.28, 0.24, 0, 0.5, 3.5), PALETTE.darkParts); // bumpers
+      k.add(box(2.34, 0.26, 0.22, 0, 0.5, -3.5), PALETTE.darkParts);
+      k.add(box(0.08, 0.1, 3.6, -0.95, 2.28, -0.4), PALETTE.darkParts); // roof rack rails
+      k.add(box(0.08, 0.1, 3.6, 0.95, 2.28, -0.4), PALETTE.darkParts);
+      // roof cargo: whatever the barrio sent along today
+      k.add(box(0.7, 0.42, 0.9, -0.5, 2.53, 0.3), PALETTE.laneDash);
+      k.add(box(0.6, 0.5, 0.7, 0.5, 2.56, -1.2), PALETTE.shirts[slot % PALETTE.shirts.length]);
+      k.add(box(0.5, 0.36, 0.5, 0.15, 2.5, 1.35), PALETTE.laneDash);
+      // the back: rear window full of passengers, lamps, ladder, plate
+      k.add(box(1.3, 0.5, 0.06, 0.4, 1.6, -3.52), PALETTE.glass);
+      for (let i = 0; i < 3; i++) person(k, 0.84 - i * 0.4, 1.62, -3.57, -1, slot + i, 0.12);
+      lampPair(k, 0.2, 0.3, 0.95, 0.9, -3.52, PALETTE.flagRed);
+      lampPair(k, 0.3, 0.18, 0.85, 0.78, 3.53, PALETTE.sunGlow);
+      for (const lx of [-0.42, -0.7]) k.add(box(0.05, 1.3, 0.05, lx, 1.3, -3.58), PALETTE.darkParts);
+      for (const ly of [0.85, 1.2, 1.55, 1.88]) k.add(box(0.28, 0.04, 0.04, -0.56, ly, -3.58), PALETTE.darkParts);
+      drPlate(k, 0.35, 0.82, -3.535);
+      person(k, 0.7, 1.85, 3.53, 1, slot); // el chofer
+      return k.build();
+    },
+    addExtras: (group) => {
+      group.add(new THREE.Mesh(bannerGeo, bannerMat));
+      if (!parked) return [];
+      // hazard blinkers over the tail lamps, both in one mesh
+      const blink = new THREE.Mesh(blinkGeo, blinkMat);
+      group.add(blink);
+      // parked on the curb, loaded to one side
+      group.rotation.z = 0.045;
+      return [blink];
+    },
+  };
+}
+
+// One plátano finger for the racimos: a torus arc that leaves the stalk
+// heading out and curls up.
+function finger(r: number, tube = 0.042, arc = 1.35): THREE.BufferGeometry {
+  const g = new THREE.TorusGeometry(r, tube, 3, 3, arc);
+  g.rotateZ(-Math.PI / 2);
+  g.translate(0, r, 0);
+  return g;
+}
+
+// Un racimo: a stalk with three rings of fingers curling up around it.
+function racimo(x: number, y: number, z: number, rotY: number, tilt: number, variant: number): THREE.BufferGeometry {
+  const k = new Kit();
+  k.add(cyl(0.035, 0.05, 0.62, 0, 0.31, 0, 5), 0x6b5645);
+  for (let ring = 0; ring < 3; ring++) {
+    const green = (ring + variant) % 3 === 1 ? 0x8bc34a : PALETTE.platano;
+    for (let i = 0; i < 4; i++) {
+      const f = finger(0.17 - ring * 0.015);
+      f.translate(0.045, 0, 0);
+      f.rotateY((i / 4) * Math.PI * 2 + ring * 0.6 + variant);
+      f.translate(0, 0.1 + ring * 0.16, 0);
+      k.add(f, green);
+    }
+  }
+  const g = k.build();
+  g.rotateX(tilt);
+  g.rotateY(rotY);
+  g.translate(x, y, z);
+  return g;
+}
+
+function camionAssets(): TypeAssets {
+  return {
     halfW: 1.2, halfL: 3.2, pool: 4,
+    build: (slot) => {
+      const k = new Kit();
+      const olive = PALETTE.camionOlive;
+      k.add(rbox(2.2, 1.5, 1.7, 0, 1.15, 2.5, 0.14), olive); // cab
+      k.add(box(2.4, 0.25, 4.3, 0, 0.75, -0.75), olive); // bed
+      k.add(box(0.08, 0.5, 4.3, -1.16, 1.05, -0.75), olive);
+      k.add(box(0.08, 0.5, 4.3, 1.16, 1.05, -0.75), olive);
+      k.add(box(2.4, 0.5, 0.08, 0, 1.05, 1.35), olive);
+      k.add(box(2.4, 0.5, 0.08, 0, 1.05, -2.86), olive); // tailgate
+      for (const sx of [-1, 1]) for (const zz of [2.6, -0.4, -2.2]) k.add(cylX(0.4, 0.26, sx * 0.95, 0.4, zz), PALETTE.darkParts);
+      k.add(box(1.9, 0.55, 0.08, 0, 1.6, 3.36), PALETTE.glass); // windshield
+      k.add(box(2.22, 0.42, 0.9, 0, 1.58, 2.6), PALETTE.glass); // side windows
+      k.add(box(1.3, 0.34, 0.05, 0, 0.9, 3.37), PALETTE.darkParts); // grille
+      k.add(box(2.3, 0.2, 0.16, 0, 0.45, 3.38), PALETTE.darkParts); // bumper
+      for (const sx of [-1, 1]) k.add(box(0.5, 0.45, 0.04, sx * 0.95, 0.4, -2.74), PALETTE.darkParts); // mud flaps
+      lampPair(k, 0.24, 0.14, 0.98, 0.72, -2.93, PALETTE.flagRed);
+      lampPair(k, 0.28, 0.16, 0.78, 0.82, 3.37, PALETTE.sunGlow);
+      drPlate(k, 0, 0.5, -2.93);
+      person(k, 0.55, 1.66, 3.42, 1, slot);
+      // Los platanos: real racimos, two layers on the bed, never lettuce crates
+      const spots: Array<[number, number, number]> = [
+        [-0.52, 0.875, -2.3], [0.52, 0.875, -2.25], [-0.5, 0.875, -1.25], [0.54, 0.875, -1.2],
+        [-0.53, 0.875, -0.2], [0.5, 0.875, -0.15], [-0.5, 0.875, 0.85], [0.52, 0.875, 0.85],
+        [0.02, 1.2, -1.75], [-0.05, 1.2, -0.7], [0.04, 1.2, 0.35],
+      ];
+      spots.forEach(([x, y, z], i) => k.addColored(racimo(x, y, z, rand(0, 6.28), rand(-0.18, 0.18), i + slot)));
+      return k.build();
+    },
   };
 }
 
 function civicAssets(): TypeAssets {
-  const painted = mergeGeometries([
-    rbox(1.85, 0.42, 4.2, 0, 0.46, 0, 0.11),
-    rbox(1.55, 0.36, 1.9, 0, 0.83, -0.15, 0.12),
-    box(1.7, 0.07, 0.4, 0, 1.02, -2.0), // el alerón
-    box(0.08, 0.26, 0.08, -0.6, 0.85, -1.98),
-    box(0.08, 0.26, 0.08, 0.6, 0.85, -1.98),
-  ])!;
-  const parts: THREE.BufferGeometry[] = [];
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push(cylX(0.3, 0.26, sx * 0.83, 0.3, sz * 1.35));
-  const wind = new THREE.BoxGeometry(1.35, 0.34, 0.07);
-  wind.rotateX(-0.22);
-  wind.translate(0, 0.86, 0.68);
-  parts.push(wind);
-  const dark = mergeGeometries(parts)!;
+  const glowGeo = new THREE.PlaneGeometry(2.3, 4.7);
+  glowGeo.rotateX(-Math.PI / 2);
+  glowGeo.translate(0, 0.04, 0);
+  const glowMat = hazardMaterial(
+    new THREE.MeshBasicMaterial({ color: PALETTE.underglow, transparent: true, opacity: 0.5 }),
+  );
   return {
-    painted, dark,
-    paints: PALETTE.civicPaints,
     halfW: 0.93, halfL: 2.1, pool: 5,
+    build: (slot) => {
+      const k = new Kit();
+      const paintHex = PALETTE.civicPaints[slot % PALETTE.civicPaints.length];
+      k.add(rbox(1.85, 0.42, 4.2, 0, 0.46, 0, 0.11), paintHex);
+      k.add(rbox(1.55, 0.36, 1.9, 0, 0.83, -0.15, 0.12), paintHex);
+      k.add(box(1.7, 0.07, 0.4, 0, 1.02, -2.0), paintHex); // el aleron
+      k.add(box(0.08, 0.26, 0.08, -0.6, 0.85, -1.98), paintHex);
+      k.add(box(0.08, 0.26, 0.08, 0.6, 0.85, -1.98), paintHex);
+      wheels4(k, 0.3, 0.26, 0.83, 1.35);
+      const wind = new THREE.BoxGeometry(1.35, 0.34, 0.07);
+      wind.rotateX(-0.22);
+      wind.translate(0, 0.86, 0.68);
+      k.add(wind, PALETTE.glass);
+      k.add(box(1.3, 0.26, 0.05, 0, 0.84, -1.12), PALETTE.glass); // rear window
+      k.add(box(1.57, 0.22, 1.3, 0, 0.86, -0.1), PALETTE.glass); // side glass
+      k.lamp(box(1.6, 0.1, 0.05, 0, 0.58, -2.12), PALETTE.flagRed); // full-width tail bar
+      lampPair(k, 0.34, 0.1, 0.6, 0.52, 2.11, PALETTE.sunGlow);
+      drPlate(k, 0, 0.42, -2.125, 0.44);
+      const pipe = new THREE.CylinderGeometry(0.075, 0.075, 0.22, 10); // que se oiga
+      pipe.rotateX(Math.PI / 2);
+      pipe.translate(0.55, 0.3, -2.12);
+      k.add(pipe, 0xd9d9d9);
+      person(k, 0.42, 0.88, -1.17, -1, slot, 0.1);
+      return k.build();
+    },
     addExtras: (group) => {
-      const glow = new THREE.Mesh(
-        new THREE.PlaneGeometry(2.3, 4.7),
-        worldMaterial(
-          new THREE.MeshBasicMaterial({ color: PALETTE.underglow, transparent: true, opacity: 0.5 }),
-        ),
-      );
-      glow.rotation.x = -Math.PI / 2;
-      glow.position.y = 0.04;
-      group.add(glow);
+      group.add(new THREE.Mesh(glowGeo, glowMat));
       return [];
     },
   };
 }
 
+// Motoconchos: bright bikes and the lime chaleco, so a narrow hazard still
+// reads at distance; sometimes a side-saddle passenger.
 function motoconchoAssets(withPassenger: boolean): TypeAssets {
-  const painted = mergeGeometries([
-    box(0.3, 0.28, 1.1, 0, 0.55, 0.05),
-    box(0.24, 0.16, 0.4, 0, 0.72, 0.24),
-  ])!;
-  const parts: THREE.BufferGeometry[] = [
-    cylX(0.3, 0.16, 0, 0.3, 0.78),
-    cylX(0.3, 0.16, 0, 0.3, -0.72),
-    cylX(0.03, 0.5, 0, 0.92, 0.5),
-    box(0.3, 0.1, 0.75, 0, 0.72, -0.35),
-    box(0.06, 0.4, 0.06, 0, 0.52, 0.72),
-  ];
-  const dark = mergeGeometries(parts)!;
-  // Driver (and sometimes a side-saddle passenger) as the accent geometry;
-  // heads are separate skin-toned boxes merged into a second accent... keep it
-  // simple: torso+head in one accent geo would share color, so torsos live in
-  // accent and heads ride in addExtras with the shared skin material.
-  const torsos: THREE.BufferGeometry[] = [box(0.32, 0.46, 0.24, 0, 1.1, -0.02)];
-  if (withPassenger) {
-    torsos.push(box(0.3, 0.4, 0.22, 0, 1.06, -0.48));
-    torsos.push(box(0.42, 0.1, 0.12, 0.26, 0.78, -0.48)); // legs to one side
-  }
-  const headPos: Array<[number, number, number]> = [[0, 1.47, -0.02]];
-  if (withPassenger) headPos.push([0, 1.4, -0.48]);
   return {
-    painted, dark,
-    accent: mergeGeometries(torsos)!,
-    accentColor: 0, // varied per slot below
-    paints: [0xe63946, 0x3a5a8c, 0x2a9d8f],
     halfW: 0.4, halfL: 1.05, pool: withPassenger ? 4 : 6,
-    addExtras: (group) => {
-      const skin = toonMaterial(PALETTE.skin);
-      for (const [hx, hy, hz] of headPos) {
-        const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), skin);
-        head.position.set(hx, hy, hz);
-        group.add(head);
+    build: (i) => {
+      const slot = i + (withPassenger ? 2 : 0);
+      const k = new Kit();
+      const bike = PALETTE.motoPaints[slot % PALETTE.motoPaints.length];
+      const shirt = PALETTE.shirts[slot % PALETTE.shirts.length];
+      const jeans = 0x2f4a6f;
+      k.add(box(0.3, 0.28, 1.1, 0, 0.55, 0.05), bike);
+      k.add(box(0.24, 0.16, 0.4, 0, 0.72, 0.24), bike);
+      k.add(cylX(0.3, 0.16, 0, 0.3, 0.78), PALETTE.darkParts);
+      k.add(cylX(0.3, 0.16, 0, 0.3, -0.72), PALETTE.darkParts);
+      k.add(cylX(0.03, 0.5, 0, 0.92, 0.5), PALETTE.darkParts);
+      k.add(box(0.3, 0.1, 0.75, 0, 0.72, -0.35), PALETTE.darkParts);
+      k.add(box(0.06, 0.4, 0.06, 0, 0.52, 0.72), PALETTE.darkParts);
+      k.lamp(box(0.12, 0.08, 0.04, 0, 0.66, -0.52), PALETTE.flagRed);
+      k.lamp(box(0.14, 0.12, 0.05, 0, 0.86, 0.66), PALETTE.sunGlow);
+      k.add(box(0.16, 0.1, 0.02, 0, 0.48, -0.51), PALETTE.flagWhite);
+      // el motoconchista: jeans, arms to the bars, the chaleco, a gorra
+      for (const sx of [-1, 1]) {
+        k.add(box(0.12, 0.12, 0.4, sx * 0.14, 0.82, 0.1), jeans);
+        k.add(box(0.1, 0.4, 0.12, sx * 0.16, 0.56, 0.28), jeans);
+        const arm = new THREE.BoxGeometry(0.08, 0.08, 0.58);
+        arm.rotateX(0.58);
+        arm.translate(sx * 0.2, 1.08, 0.25);
+        k.add(arm, shirt);
       }
-      return [];
+      k.add(box(0.34, 0.46, 0.26, 0, 1.1, -0.02), PALETTE.vestHiVis);
+      k.add(box(0.35, 0.05, 0.27, 0, 1.0, -0.02), 0xd9d9d9); // reflective strip
+      k.add(sph(0.15, 0, 1.47, -0.02), skinTone(slot));
+      k.add(sph(0.16, 0, 1.53, -0.02, 1, 0.62, 1), slot % 2 ? PALETTE.flagRed : PALETTE.darkParts);
+      k.add(box(0.22, 0.03, 0.14, 0, 1.53, 0.14), slot % 2 ? PALETTE.flagRed : PALETTE.darkParts);
+      if (withPassenger) {
+        k.add(box(0.3, 0.4, 0.22, 0, 1.06, -0.48), PALETTE.shirts[(slot + 1) % PALETTE.shirts.length]);
+        k.add(box(0.42, 0.1, 0.12, 0.26, 0.78, -0.48), jeans); // legs to one side
+        k.add(sph(0.15, 0, 1.4, -0.48), skinTone(slot, 2));
+      }
+      return k.build();
     },
   };
 }
 
 function cartAssets(): TypeAssets {
-  const painted = mergeGeometries([
-    box(1.05, 0.62, 1.5, 0, 0.72, 0),
-    box(1.15, 0.08, 1.6, 0, 1.06, 0),
-  ])!;
-  const dark = mergeGeometries([
-    cylX(0.28, 0.12, 0, 0.28, 0.45),
-    cylX(0.28, 0.12, 0, 0.28, -0.45),
-    box(0.05, 1.5, 0.05, -0.35, 1.6, 0),
-  ])!;
   return {
-    painted, dark,
-    paints: [PALETTE.colmadoTeal, PALETTE.colmadoRed],
     halfW: 0.55, halfL: 0.8, pool: 3,
-    addExtras: (group) => {
-      const umbrella = new THREE.Mesh(
-        new THREE.ConeGeometry(1.05, 0.5, 8),
-        toonMaterial(PALETTE.colmadoRed),
-      );
-      umbrella.position.set(-0.35, 2.5, 0);
-      umbrella.castShadow = true;
-      group.add(umbrella);
-      return [];
+    build: (slot) => {
+      const k = new Kit();
+      const body = slot % 2 ? PALETTE.colmadoRed : PALETTE.colmadoTeal;
+      k.add(box(1.05, 0.62, 1.5, 0, 0.72, 0), body);
+      k.add(box(1.15, 0.08, 1.6, 0, 1.06, 0), body);
+      k.add(cylX(0.28, 0.12, 0, 0.28, 0.45), PALETTE.darkParts);
+      k.add(cylX(0.28, 0.12, 0, 0.28, -0.45), PALETTE.darkParts);
+      k.add(box(0.05, 1.5, 0.05, -0.35, 1.6, 0), PALETTE.darkParts);
+      const umbrella = new THREE.ConeGeometry(1.05, 0.5, 8);
+      umbrella.translate(-0.35, 2.5, 0);
+      k.add(umbrella, slot % 2 ? PALETTE.colmadoTeal : PALETTE.colmadoRed);
+      // the day's goods on top
+      k.add(sph(0.14, 0.25, 1.2, 0.35), PALETTE.hazardOrange);
+      k.add(sph(0.14, 0.2, 1.2, -0.3), PALETTE.guaguaYellow);
+      k.add(sph(0.13, -0.1, 1.19, 0.5), PALETTE.platano);
+      return k.build();
     },
   };
 }
 
 // ---------------------------------------------------------------------------
+// Pickup and obstacle art
+// ---------------------------------------------------------------------------
 
-const ACCENT_VARIED = [0xffd3b6, 0xb3d9ff, 0xf2e9dc, 0xcdb4db];
+// One plátano: a tapered torus arc, belly down and ends up, with dark tips
+// and a lighter belly. Its belly centerline sits at the origin; about 0.55 m
+// long. Shared by the pickups and the rider's rack.
+export function platanoFruit(): THREE.BufferGeometry {
+  const R = 0.34;
+  const TUBE = 0.1;
+  const ARC = 1.85;
+  const fruit = new THREE.TorusGeometry(R, TUBE, 5, 9, ARC);
+  const pos = fruit.getAttribute('position') as THREE.BufferAttribute;
+  const col = new Float32Array(pos.count * 3);
+  const green = new THREE.Color(PALETTE.platano);
+  const belly = new THREE.Color(0xc0ca33);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const u = Math.min(ARC, Math.max(0, Math.atan2(y, x)));
+    const cx = R * Math.cos(u);
+    const cy = R * Math.sin(u);
+    const taper = 0.45 + 0.55 * Math.sin((Math.PI * u) / ARC); // fat middle, pointed ends
+    const ox = (x - cx) * taper;
+    const oy = (y - cy) * taper;
+    pos.setXYZ(i, cx + ox, cy + oy, pos.getZ(i) * taper);
+    const outward = (ox * cx + oy * cy) / (R * TUBE * taper); // -1 inside the curve, 1 the belly
+    c.copy(green).lerp(belly, Math.max(0, outward) * 0.55);
+    col[i * 3] = c.r;
+    col[i * 3 + 1] = c.g;
+    col[i * 3 + 2] = c.b;
+  }
+  fruit.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  fruit.computeVertexNormals();
+  const tipA = new THREE.ConeGeometry(0.045, 0.12, 5);
+  tipA.rotateZ(Math.PI);
+  tipA.translate(R, -0.05, 0);
+  const tipB = new THREE.ConeGeometry(0.045, 0.12, 5);
+  tipB.rotateZ(ARC);
+  tipB.translate(R * Math.cos(ARC) - Math.sin(ARC) * 0.05, R * Math.sin(ARC) + Math.cos(ARC) * 0.05, 0);
+  const g = new Kit().addColored(fruit).add(tipA, 0x4a3b26).add(tipB, 0x4a3b26).build();
+  g.rotateZ(-Math.PI / 2 - ARC / 2);
+  g.translate(0, R, 0);
+  return g;
+}
+
+// An inverted hull: the same shape pushed out along its normals, drawn
+// back faces only, so it shows as a clean rim around the original.
+function shell(src: THREE.BufferGeometry, w: number): THREE.BufferGeometry {
+  const g = src.clone();
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const nor = g.getAttribute('normal') as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setXYZ(i, pos.getX(i) + nor.getX(i) * w, pos.getY(i) + nor.getY(i) * w, pos.getZ(i) + nor.getZ(i) * w);
+  }
+  return g;
+}
+
+// Power-up icons stand upright facing the rider inside a glowing gold ring,
+// 1.4 times the old size: a cafecito cup with steam, the Bendicion as a
+// shield wearing the flag's cross, the Iman as the classic horseshoe.
+function powerupIcon(kind: PowerupKind): THREE.BufferGeometry {
+  const k = new Kit();
+  k.lamp(new THREE.TorusGeometry(0.56, 0.05, 6, 28), PALETTE.gold);
+  if (kind === 'cafecito') {
+    const cup = new Kit()
+      .add(cyl(0.3, 0.24, 0.04, 0, -0.2, 0, 16), PALETTE.laneDash) // saucer
+      .add(cyl(0.2, 0.14, 0.28, 0, -0.04, 0, 14), PALETTE.flagWhite)
+      .add(cyl(0.185, 0.185, 0.02, 0, 0.1, 0, 14), 0x6f4e37) // el cafe
+      .add(new THREE.TorusGeometry(0.07, 0.024, 5, 12).translate(-0.21, -0.03, 0), PALETTE.flagWhite)
+      .build();
+    cup.rotateX(-0.35); // tip the cup at the rider so the coffee shows
+    k.addColored(cup);
+    k.lamp(sph(0.05, 0.04, 0.22, -0.06), PALETTE.flagWhite); // steam
+    k.lamp(sph(0.045, -0.04, 0.31, -0.08), PALETTE.flagWhite);
+    k.lamp(sph(0.04, 0.05, 0.4, -0.1), PALETTE.flagWhite);
+  } else if (kind === 'bendicion') {
+    const s = new THREE.Shape();
+    s.moveTo(-0.28, 0.3);
+    s.lineTo(0.28, 0.3);
+    s.lineTo(0.28, -0.02);
+    s.quadraticCurveTo(0.26, -0.24, 0, -0.38);
+    s.quadraticCurveTo(-0.26, -0.24, -0.28, -0.02);
+    s.closePath();
+    const plate = new THREE.ExtrudeGeometry(s, { depth: 0.08, bevelEnabled: false, curveSegments: 5 });
+    plate.translate(0, 0, -0.04);
+    const shield = new Kit().lamp(plate, PALETTE.gold);
+    // the flag's quadrants, built facing +z (blue at the hoist, top left)
+    const quad = (pts: Array<[number, number]>, color: number): void => {
+      const q = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+      shield.add(new THREE.ShapeGeometry(q).translate(0, 0, 0.045), color);
+    };
+    quad([[-0.22, 0.035], [-0.035, 0.035], [-0.035, 0.245], [-0.22, 0.245]], PALETTE.flagBlue);
+    quad([[0.035, 0.035], [0.22, 0.035], [0.22, 0.245], [0.035, 0.245]], PALETTE.flagRed);
+    quad([[-0.22, -0.035], [-0.035, -0.035], [-0.035, -0.29], [-0.2, -0.16]], PALETTE.flagRed);
+    quad([[0.035, -0.035], [0.2, -0.16], [0.035, -0.29], [0.035, -0.035]], PALETTE.flagBlue);
+    shield.add(box(0.07, 0.6, 0.02, 0, -0.03, 0.05), PALETTE.flagWhite); // la cruz
+    shield.add(box(0.46, 0.07, 0.02, 0, 0, 0.05), PALETTE.flagWhite);
+    shield.lamp(box(0.09, 0.09, 0.03, 0, 0, 0.058), PALETTE.gold); // el escudo
+    const g = shield.build();
+    g.rotateY(Math.PI); // face the rider, who looks down +z
+    k.addColored(g);
+  } else {
+    const m = new Kit()
+      .add(new THREE.TorusGeometry(0.2, 0.075, 8, 14, Math.PI).translate(0, 0.08, 0), PALETTE.flagRed)
+      .add(cyl(0.075, 0.075, 0.18, 0.2, -0.01, 0), PALETTE.flagRed)
+      .add(cyl(0.075, 0.075, 0.18, -0.2, -0.01, 0), PALETTE.flagRed)
+      .lamp(cyl(0.078, 0.078, 0.1, 0.2, -0.15, 0), 0xd9d9d9)
+      .lamp(cyl(0.078, 0.078, 0.1, -0.2, -0.15, 0), 0xd9d9d9)
+      .build();
+    m.rotateZ(0.22);
+    k.addColored(m);
+  }
+  const g = k.build();
+  g.translate(0, 0.35, 0);
+  return g;
+}
+
+function canvasTex(size: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d')!;
+  draw(g);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// A jittered ring of n points around the canvas center.
+function blob(g: CanvasRenderingContext2D, cx: number, cy: number, r: number, jitter: number, n: number): void {
+  g.beginPath();
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const rr = r + (Math.random() - 0.5) * 2 * jitter;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) g.moveTo(x, y);
+    else g.lineTo(x, y);
+  }
+  g.closePath();
+}
+
+// La rama: the branch every Dominican driver sticks in a pothole so the
+// next one sees it. A stick with a twig and a few leaf clusters.
+function ramaGeometry(): THREE.BufferGeometry {
+  const k = new Kit();
+  k.add(cyl(0.028, 0.045, 1.35, 0, 0.62, 0, 5), PALETTE.palmTrunk);
+  const twig = new THREE.CylinderGeometry(0.016, 0.024, 0.42, 4);
+  twig.rotateZ(-0.9);
+  twig.translate(0.14, 0.98, 0);
+  k.add(twig, PALETTE.palmTrunk);
+  const leaf = (x: number, y: number, z: number, s: number, color: number): void => {
+    const g = new THREE.OctahedronGeometry(0.2 * s, 0);
+    g.scale(1, 0.6, 1.3);
+    g.translate(x, y, z);
+    k.add(g, color);
+  };
+  leaf(0, 1.34, 0, 1, PALETTE.palmFronds);
+  leaf(0.17, 1.2, 0.08, 0.85, PALETTE.platano);
+  leaf(-0.13, 1.22, -0.07, 0.8, PALETTE.platano);
+  leaf(0.3, 1.1, -0.02, 0.75, PALETTE.palmFronds);
+  const g = k.build();
+  g.rotateZ(0.26); // stuck in at an angle, never straight
+  return g;
+}
 
 // Scratch buffer for the corridor sweep: flat [start, end, start, end, ...] so
 // spawn validation allocates nothing.
 const _corridorBlocks: number[] = [];
+const _m4 = new THREE.Matrix4();
 
 const HIT = CONFIG.vehicleHitboxScale;
 // The dashed line between your two lanes (mirrored on the oncoming side):
@@ -513,6 +915,12 @@ export class Traffic {
     setPiecesPlaced: 0,
   };
 
+  // Instanced art, filled from the pools every step by syncVisuals()
+  private blobs!: THREE.InstancedMesh;
+  private ramas!: THREE.InstancedMesh;
+  private platanoMesh!: THREE.InstancedMesh;
+  private platanoRim!: THREE.InstancedMesh;
+
   get activeCars(): number {
     return this.activeCount;
   }
@@ -548,28 +956,17 @@ export class Traffic {
       ['cart', cartAssets()],
     ];
 
-    const vcMat = vcToonMaterial();
+    const mat = trafficMaterial();
     for (const [type, a] of defs) {
       this.typeHalfW.set(type, a.halfW);
       this.typeHalfL.set(type, a.halfL);
       for (let i = 0; i < a.pool; i++) {
         const group = new THREE.Group();
-        // Every static part of a vehicle becomes one merged, vertex-colored
-        // mesh. The per-slot paint job is baked into the vertices, so 27 cars
-        // on screen cost 27 draws for their bodies instead of ~95. Only the
-        // animated or unlit extras (blinkers, banner, underglow, heads,
-        // umbrella) stay as their own meshes, via addExtras.
-        const parts = [paint(a.painted.clone(), a.paints[i % a.paints.length])];
-        parts.push(paint(a.dark.clone(), PALETTE.darkParts));
-        if (a.accent) {
-          const color = a.accentColor === 0 ? ACCENT_VARIED[i % ACCENT_VARIED.length] : a.accentColor!;
-          parts.push(paint(a.accent.clone(), color));
-        }
-        if (a.green) parts.push(paint(a.green.clone(), PALETTE.platano));
-        const body = new THREE.Mesh(mergeGeometries(parts)!, vcMat);
-        body.castShadow = true;
-        group.add(body);
-        const blinkers = a.addExtras ? a.addExtras(group) : [];
+        // DECISION: traffic casts no real shadow. The blob under every car
+        // grounds it at any distance (the sun's shadow camera only covers
+        // 45 m) and takes a dozen draws off the shadow pass in dense traffic.
+        group.add(new THREE.Mesh(a.build(i), mat));
+        const blinkers = a.addExtras ? a.addExtras(group, i) : [];
         group.visible = false;
         scene.add(group);
         this.vehicles.push({
@@ -582,6 +979,27 @@ export class Traffic {
       }
     }
 
+    // Blob shadows: one instanced draw for every car on the road
+    const blobGeo = new THREE.PlaneGeometry(1, 1);
+    blobGeo.rotateX(-Math.PI / 2);
+    const blobTex = canvasTex(64, (g) => {
+      const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+      grad.addColorStop(0, 'rgba(20,14,10,0.78)');
+      grad.addColorStop(0.55, 'rgba(20,14,10,0.55)');
+      grad.addColorStop(1, 'rgba(20,14,10,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+    });
+    this.blobs = new THREE.InstancedMesh(
+      blobGeo,
+      hazardMaterial(new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false })),
+      this.vehicles.length,
+    );
+    this.blobs.count = 0;
+    this.blobs.visible = false;
+    this.blobs.frustumCulled = false;
+    scene.add(this.blobs);
+
     this.buildObstacles(scene);
     this.buildPickups(scene);
   }
@@ -589,33 +1007,47 @@ export class Traffic {
   // ---------------- obstacles ----------------
 
   private buildObstacles(scene: THREE.Scene): void {
-    const hoyoTex = (() => {
-      const c = document.createElement('canvas');
-      c.width = c.height = 96;
-      const g = c.getContext('2d')!;
-      g.clearRect(0, 0, 96, 96);
-      g.fillStyle = '#6b6259';
-      g.beginPath();
-      g.arc(48, 48, 46, 0, Math.PI * 2);
+    // El hoyo: a jagged light rim you can see from far, a black core whose
+    // far wall catches the light, and cracks running out into the asphalt.
+    const hoyoTex = canvasTex(128, (g) => {
+      blob(g, 64, 64, 57, 4, 14);
+      g.fillStyle = '#9a8f82';
       g.fill();
-      g.fillStyle = '#16100d';
-      g.beginPath();
-      g.arc(48, 48, 39, 0, Math.PI * 2);
+      blob(g, 64, 64, 46, 4, 14);
+      const core = g.createLinearGradient(0, 20, 0, 110);
+      core.addColorStop(0, '#16100d');
+      core.addColorStop(0.6, '#1e1612');
+      core.addColorStop(1, '#4a3d33');
+      g.fillStyle = core;
       g.fill();
-      return new THREE.CanvasTexture(c);
-    })();
-
+      g.strokeStyle = 'rgba(20,14,10,0.6)';
+      g.lineWidth = 2;
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.random() * 1.2;
+        const kink = a + (Math.random() - 0.5) * 0.5;
+        g.beginPath();
+        g.moveTo(64 + Math.cos(a) * 50, 64 + Math.sin(a) * 50);
+        g.lineTo(64 + Math.cos(kink) * 57, 64 + Math.sin(kink) * 57);
+        g.lineTo(64 + Math.cos(a) * 63, 64 + Math.sin(a) * 63);
+        g.stroke();
+      }
+    });
+    const hoyoMat = hazardMaterial(new THREE.MeshBasicMaterial({ map: hoyoTex, transparent: true }));
+    const hoyoGeo = new THREE.CircleGeometry(0.85, 20);
     for (let i = 0; i < 8; i++) {
-      const mesh = new THREE.Mesh(
-        new THREE.CircleGeometry(0.85, 20),
-        worldMaterial(new THREE.MeshBasicMaterial({ map: hoyoTex, transparent: true })),
-      );
+      const mesh = new THREE.Mesh(hoyoGeo, hoyoMat);
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.y = 0.02;
       mesh.visible = false;
       scene.add(mesh);
       this.obstacles.push({ kind: 'hoyo', mesh, active: false, x: 0, z: 0, armed: true });
     }
+    this.ramas = new THREE.InstancedMesh(ramaGeometry(), trafficMaterial(), 8);
+    this.ramas.count = 0;
+    this.ramas.visible = false;
+    this.ramas.frustumCulled = false;
+    this.ramas.castShadow = true;
+    scene.add(this.ramas);
 
     const stripeTex = (() => {
       const c = document.createElement('canvas');
@@ -627,16 +1059,16 @@ export class Traffic {
         g.fillRect(i * 16, 0, 16, 16);
       }
       const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
       t.wrapS = THREE.RepeatWrapping;
       t.repeat.set(6, 1);
       return t;
     })();
 
+    const policiaMat = hazardMaterial(new THREE.MeshToonMaterial({ map: stripeTex, gradientMap: getGradientMap() }));
+    const policiaGeo = new THREE.BoxGeometry(ROAD.halfRoad * 2, 0.22, 1.0);
     for (let i = 0; i < 4; i++) {
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(ROAD.halfRoad * 2, 0.22, 1.0),
-        worldMaterial(new THREE.MeshToonMaterial({ map: stripeTex })),
-      );
+      const mesh = new THREE.Mesh(policiaGeo, policiaMat);
       mesh.position.y = 0.11;
       mesh.castShadow = true;
       mesh.visible = false;
@@ -644,13 +1076,37 @@ export class Traffic {
       this.obstacles.push({ kind: 'policia', mesh, active: false, x: 0, z: 0, armed: true });
     }
 
+    // El charco: glossy sky blue with a bright rim and a glint, so it reads
+    // wet, not painted on.
+    const charcoTex = canvasTex(128, (g) => {
+      blob(g, 64, 64, 56, 5, 16);
+      g.fillStyle = 'rgba(77,182,201,0.82)';
+      g.fill();
+      g.lineWidth = 3;
+      g.strokeStyle = 'rgba(255,255,255,0.6)';
+      g.stroke();
+      const sky = g.createRadialGradient(56, 44, 4, 56, 44, 40);
+      sky.addColorStop(0, 'rgba(210,244,250,0.7)');
+      sky.addColorStop(1, 'rgba(210,244,250,0)');
+      g.fillStyle = sky;
+      g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.9)';
+      for (const [x, y, w, r] of [[50, 50, 22, -0.5], [78, 76, 12, -0.5]]) {
+        g.save();
+        g.translate(x, y);
+        g.rotate(r);
+        g.beginPath();
+        g.ellipse(0, 0, w, 3, 0, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+    });
+    const charcoMat = hazardMaterial(
+      new THREE.MeshBasicMaterial({ map: charcoTex, transparent: true, depthWrite: false }),
+    );
+    const charcoGeo = new THREE.CircleGeometry(1, 20);
     for (let i = 0; i < 5; i++) {
-      const mesh = new THREE.Mesh(
-        new THREE.CircleGeometry(1, 20),
-        worldMaterial(
-          new THREE.MeshBasicMaterial({ color: PALETTE.charco, transparent: true, opacity: 0.5 }),
-        ),
-      );
+      const mesh = new THREE.Mesh(charcoGeo, charcoMat);
       mesh.rotation.x = -Math.PI / 2;
       mesh.scale.set(1.15, 1.7, 1);
       mesh.position.y = 0.015;
@@ -663,90 +1119,124 @@ export class Traffic {
   // ---------------- pickups ----------------
 
   private buildPickups(scene: THREE.Scene): void {
-    // An actual platano: five box segments walking an arc (ends up, belly
-    // down), tapered toward both ends, with dark tips. The old three fanned
-    // sticks read as anything but a banana.
-    const platanoGeo = (() => {
-      const fruit: THREE.BufferGeometry[] = [];
-      const tips: THREE.BufferGeometry[] = [];
-      const SEG = 5;
-      const R = 0.34;
-      const ARC = 1.85;
-      const step = (ARC * R) / SEG;
-      const place = (g: THREE.BufferGeometry, a: number): void => {
-        g.rotateZ(a - Math.PI / 2); // long axis follows the arc tangent
-        g.translate(Math.sin(a) * R, 0.2 + R - Math.cos(a) * R, 0);
-      };
-      for (let i = 0; i < SEG; i++) {
-        const t = (i + 0.5) / SEG;
-        const thick = 0.11 * (0.6 + 0.5 * Math.sin(Math.PI * t)); // fat middle
-        const g = new THREE.BoxGeometry(thick, step + 0.03, thick);
-        place(g, -ARC / 2 + ARC * t);
-        fruit.push(g);
-      }
-      for (const sgn of [-1, 1]) {
-        const tip = new THREE.BoxGeometry(0.06, 0.1, 0.06);
-        place(tip, sgn * (ARC / 2 + 0.08));
-        tips.push(tip);
-      }
-      return { fruit: mergeGeometries(fruit)!, tips: mergeGeometries(tips)! };
-    })();
-    const platanoMat = toonMaterial(PALETTE.platano);
-    const tipMat = toonMaterial(0x4a3b26);
-    for (let i = 0; i < 40; i++) {
+    // Los platanos: every one of them is one instanced draw, plus one more
+    // for the gold rim that says "grab me". Each pickup keeps a Group as a
+    // transform proxy (not in the scene); syncVisuals copies it in.
+    const fruit = platanoFruit();
+    fruit.scale(1.35, 1.35, 1.35);
+    fruit.translate(0, 0.27, 0);
+    const PLATANOS = 40;
+    this.platanoMesh = new THREE.InstancedMesh(fruit, trafficMaterial(), PLATANOS);
+    this.platanoRim = new THREE.InstancedMesh(
+      shell(fruit, 0.045),
+      hazardMaterial(new THREE.MeshBasicMaterial({ color: 0xffe082, side: THREE.BackSide })),
+      PLATANOS,
+    );
+    for (const m of [this.platanoMesh, this.platanoRim]) {
+      m.count = 0;
+      m.visible = false;
+      m.frustumCulled = false;
+      scene.add(m);
+    }
+    for (let i = 0; i < PLATANOS; i++) {
       const group = new THREE.Group();
-      group.add(new THREE.Mesh(platanoGeo.fruit, platanoMat));
-      group.add(new THREE.Mesh(platanoGeo.tips, tipMat));
       group.rotation.z = 0.14; // a little rake so the spin shows the curve
       group.visible = false;
-      scene.add(group);
       this.pickups.push({ kind: 'platano', group, active: false, x: 0, y: 0.55, z: 0, phase: Math.random() * 7 });
     }
 
-    const ringGeo = new THREE.TorusGeometry(0.42, 0.045, 8, 20);
-    ringGeo.rotateX(Math.PI / 2);
-    const gold = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold }));
-    const addPowerup = (kind: PowerupKind, build: (g: THREE.Group) => void, count: number): void => {
-      for (let i = 0; i < count; i++) {
+    // Power-ups: one merged icon each, plus a light beam that marks it from
+    // 80 m out. The names stay Spanish in EN (HANDOFF section 8).
+    const beamTex = (() => {
+      const c = document.createElement('canvas');
+      c.width = 2;
+      c.height = 64;
+      const g = c.getContext('2d')!;
+      const grad = g.createLinearGradient(0, 64, 0, 0);
+      grad.addColorStop(0, 'rgb(96,96,96)');
+      grad.addColorStop(1, 'rgb(0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 2, 64);
+      return new THREE.CanvasTexture(c);
+    })();
+    const beamGeo = new THREE.CylinderGeometry(0.62, 0.62, 3.6, 16, 1, true);
+    beamGeo.translate(0, 0.95, 0);
+    const beams: Record<PowerupKind, number> = { cafecito: 0xff9f43, bendicion: PALETTE.gold, iman: 0xff3b3b };
+    for (const kind of ['cafecito', 'bendicion', 'iman'] as const) {
+      const icon = powerupIcon(kind);
+      const beamMat = worldMaterial(
+        new THREE.MeshBasicMaterial({
+          color: beams[kind],
+          alphaMap: beamTex,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+        }),
+      );
+      for (let i = 0; i < 2; i++) {
         const group = new THREE.Group();
-        const ring = new THREE.Mesh(ringGeo, gold);
-        ring.position.y = 0.1;
-        group.add(ring);
-        build(group);
+        group.add(new THREE.Mesh(icon, trafficMaterial()), new THREE.Mesh(beamGeo, beamMat));
         group.visible = false;
         scene.add(group);
         this.pickups.push({ kind, group, active: false, x: 0, y: 0.7, z: 0, phase: Math.random() * 7 });
       }
-    };
-    addPowerup('cafecito', (g) => {
-      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.26, 12), toonMaterial(0x6f4e37));
-      cup.position.y = 0.42;
-      const foam = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.06, 12), toonMaterial(PALETTE.laneDash));
-      foam.position.y = 0.56;
-      g.add(cup, foam);
-    }, 2);
-    addPowerup('bendicion', (g) => {
-      const badge = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.58, 0.1), gold);
-      badge.position.y = 0.55;
-      const inner = new THREE.Mesh(
-        new THREE.BoxGeometry(0.32, 0.4, 0.12),
-        worldMaterial(new THREE.MeshBasicMaterial({ color: 0xffffff })),
-      );
-      inner.position.y = 0.55;
-      g.add(badge, inner);
-    }, 2);
-    addPowerup('iman', (g) => {
-      const red = toonMaterial(PALETTE.flagRed);
-      const l = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.4, 0.15), red);
-      l.position.set(-0.17, 0.5, 0);
-      const r = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.4, 0.15), red);
-      r.position.set(0.17, 0.5, 0);
-      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.49, 0.16, 0.15), red);
-      bridge.position.set(0, 0.72, 0);
-      const tips = new THREE.Mesh(new THREE.BoxGeometry(0.49, 0.07, 0.16), toonMaterial(0xd9d9d9));
-      tips.position.set(0, 0.32, 0);
-      g.add(l, r, bridge, tips);
-    }, 2);
+    }
+  }
+
+  // Everything that only changes how traffic LOOKS, after the step moved it:
+  // bob and lean, blob shadows, the ramas in the hoyos, the platano
+  // instances, and power-ups turned to face the rider. Allocation-free.
+  private syncVisuals(): void {
+    const t = this.time;
+    let n = 0;
+    for (const v of this.vehicles) {
+      if (!v.active) continue;
+      if (v.speed > 0) {
+        // every moving vehicle rides its springs; guaguas sit heavy on the
+        // curb side and sway with it
+        v.group.position.y = Math.abs(Math.sin(t * 7 + v.driftPhase)) * 0.03;
+        if (v.type === 'guagua') v.group.rotation.z = 0.035 + Math.sin(t * 2.1 + v.driftPhase) * 0.015;
+      }
+      // the low sun sits ahead and to the sea side, so the blob stretches
+      // back toward the rider and a little inland
+      _m4.makeScale(v.halfW * 2.5, 1, v.halfL * 2.3 + 1);
+      _m4.setPosition(v.x - 0.25, 0.025, v.z - 0.6);
+      this.blobs.setMatrixAt(n++, _m4);
+    }
+    this.blobs.count = n;
+    this.blobs.visible = n > 0; // an empty instanced mesh still costs a draw call
+    this.blobs.instanceMatrix.needsUpdate = true;
+
+    n = 0;
+    for (const o of this.obstacles) {
+      if (!o.active || o.kind !== 'hoyo') continue;
+      _m4.makeRotationY(o.x * 5.3);
+      _m4.setPosition(o.x, 0, o.z);
+      this.ramas.setMatrixAt(n++, _m4);
+    }
+    this.ramas.count = n;
+    this.ramas.visible = n > 0;
+    this.ramas.instanceMatrix.needsUpdate = true;
+
+    n = 0;
+    for (const p of this.pickups) {
+      if (!p.active) continue;
+      if (p.kind === 'platano') {
+        p.group.updateMatrix();
+        this.platanoMesh.setMatrixAt(n, p.group.matrix);
+        this.platanoRim.setMatrixAt(n, p.group.matrix);
+        n++;
+      } else {
+        // a gentle sway instead of the spin: the icon never goes edge-on
+        p.group.rotation.y = Math.sin(t * 1.7 + p.phase) * 0.35;
+      }
+    }
+    this.platanoMesh.count = n;
+    this.platanoRim.count = n;
+    this.platanoMesh.visible = this.platanoRim.visible = n > 0;
+    this.platanoMesh.instanceMatrix.needsUpdate = true;
+    this.platanoRim.instanceMatrix.needsUpdate = true;
   }
 
   // ---------------- placement validation ----------------
@@ -1674,6 +2164,7 @@ export class Traffic {
       }
     }
 
+    this.syncVisuals();
     if (!live) return;
 
     // ---------------- spawning ----------------
@@ -1981,5 +2472,6 @@ export class Traffic {
     this.lastCafecito = false;
     this.lastShielded = false;
     this.elapsed = 0;
+    this.syncVisuals();
   }
 }
