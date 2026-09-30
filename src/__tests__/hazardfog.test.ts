@@ -28,12 +28,26 @@ function halfVisibleAt(): number {
 
 describe('hazard fog', () => {
   it('a vehicle is at least half visible telegraphMinSec before it reaches you, at max closing speed', () => {
-    const fastestRide = Math.max(...Object.values(VEHICLES).map((v) => v.speedCap * v.speedMult));
+    // Same bound as the telegraph test in config.test.ts: gas and the
+    // cafecito never stack and share the sacred gasMaxMps ceiling.
+    const fastestRide = Math.max(
+      ...Object.values(VEHICLES).map((v) => {
+        const cruise = v.speedCap * v.speedMult;
+        const ceiling = Math.max(cruise, CONFIG.gasMaxMps);
+        return Math.max(
+          cruise,
+          Math.min(cruise * CONFIG.gasSpeedMult, ceiling),
+          Math.min(cruise * CONFIG.cafecitoBoost, ceiling),
+        );
+      }),
+    );
     const speeds = Object.values(CONFIG.vehicleSpeeds) as ReadonlyArray<readonly [number, number]>;
     const fastestOncoming = Math.max(...speeds.map((r) => r[1]));
-    // same bound as the telegraph test in config.test.ts: gas and cafecito never stack
-    const closing = fastestRide * Math.max(CONFIG.cafecitoBoost, CONFIG.gasSpeedMult) + fastestOncoming;
-    expect(halfVisibleAt() / closing).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
+    const closing = fastestRide + fastestOncoming;
+    // Fog depth is measured from the camera; the rider sits camBack (plus the
+    // gas pull-back) in front of it.
+    const fromRider = halfVisibleAt() - (CONFIG.camBack + CONFIG.camGasPullBack);
+    expect(fromRider / closing).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
   });
 
   it('hazards fade in at the spawn line instead of popping in', () => {
