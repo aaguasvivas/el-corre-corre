@@ -163,6 +163,7 @@ export class Sim {
     c.shielded = false;
     c.cafecito = false;
     c.magnet = false;
+    c.live = true; // an override holds for its own step only
     if (over) Object.assign(c, over);
     this.traffic.step(c);
     return c;
