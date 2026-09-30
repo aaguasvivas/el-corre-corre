@@ -2397,6 +2397,7 @@ class Walkers {
   private z = new Float32Array(WALKER_CAP);
   private dir = new Float32Array(WALKER_CAP);
   private live = new Uint8Array(WALKER_CAP);
+  private spawnT = 0;
 
   constructor(scene: THREE.Scene) {
     const geo = walkerGeometry();
@@ -2458,13 +2459,16 @@ class Walkers {
     let alive = 0;
     for (let i = 0; i < WALKER_CAP; i++) alive += this.live[i];
     const want = WALKERS_PER_TRAMO[tramo];
+    // top the street back up out in the haze, one person at a time, or
+    // scattered along it on the title screen so it never starts empty
+    this.spawnT -= dt;
+    let spawnOne = alive < want && this.spawnT <= 0;
     for (let i = 0; i < WALKER_CAP; i++) {
       if (!this.live[i]) {
-        // top the street back up out in the haze, or scattered along it on
-        // the title screen so it never starts empty
-        if (alive < want && Math.random() < dt * 3) {
+        if (spawnOne) {
           this.spawn(i, attract && alive < want / 2 ? rand(10, 150) : rand(120, 200), tramo);
-          alive++;
+          this.spawnT = rand(0.2, 0.5);
+          spawnOne = false;
         }
         continue;
       }
