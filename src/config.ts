@@ -151,7 +151,10 @@ export const PINTURAS: Record<VehicleId, ReadonlyArray<Pintura>> = {
 
 export const CONFIG = {
   // Simulation
-  fixedDt: 1 / 120, // fixed sim step; feel is framerate-independent
+  // Max sim step (1/120 s). Every rendered frame advances exactly its real
+  // dt, split into equal substeps no longer than this, so feel stays
+  // framerate-independent without the judder of a fixed accumulator.
+  fixedDt: 1 / 120,
   maxFrameDt: 0.1, // clamp huge frame gaps (tab switches) so nothing teleports
 
   // Forward motion. Phone feel test: "start off slow but pick up speed",
@@ -381,6 +384,10 @@ export const CONFIG = {
   wheelieWobble: 0.09, // FEEL: how shaky the bike gets deep into a hold
   wheelieCooldownBase: 1.1, // FEEL: cooldown = base + held seconds * perSec
   wheelieCooldownPerSec: 0.65,
+  // FEEL: a flick up this early before the cooldown ends still fires when it
+  // ends; an older one is dropped, so a caballito never starts by itself
+  // seconds later in the middle of a dodge. A held W or Space still fires.
+  trickBufferSec: 0.2,
   wheeliePointsPerSec: 5,
   swipeUpPx: 48, // FEEL: upward swipe distance that starts a caballito
   swipeDownPx: 42, // FEEL: downward swipe that drops it early
@@ -480,24 +487,102 @@ export const CONFIG = {
   gasPitchRad: 0.06, // FEEL: the rider tucks forward this much on gas (the Civic squats instead)
   brakePitchRad: 0.05, // FEEL: the rider sits back this much on the brake (the Civic dives)
   pedalPitchResponse: 12, // FEEL: how fast the ride answers the pedal visually; it should feel instant
+  // El freno caliente. Bots that braked all run long outlived the ones that
+  // cruised, which made the brake the dominant way to play. Heat rises while
+  // the brake bites (in proportion to how hard) and falls while it does not.
+  // About two seconds of full brake overheat the pads: the brake fades to
+  // nothing and stays off until the heat drops under brakeResumeHeat. Taps
+  // and 1 to 2 s holds work fully, so braking stays a tactical tool.
+  brakeHeatMaxSec: 2.0, // FEEL: seconds of full brake before the pads overheat
+  brakeCoolSec: 3.0, // FEEL: seconds for fully hot pads to cool to cold with the pedal up
+  brakeResumeHeat: 0.35, // FEEL: overheated pads bite again below this heat (0..1); the hysteresis
+  brakeFadeSec: 0.25, // FEEL: an overheating brake fades out over this long, and a cooled one comes back as fast
+  // FEEL: cooling rate while the pedal stays down on overheated pads. Under 1,
+  // holding a dead brake keeps it dead longer: let go and it recovers sooner.
+  brakeHotHoldCool: 0.5,
+  brakeSmokeEvery: 0.07, // FEEL: seconds between smoke puffs at the rear wheel while the pads are hot
   imanSec: 8,
   imanRadius: 6,
   imanPullSpeed: 15,
   shieldGraceSec: 0.9, // brief invulnerability after the Bendicion absorbs a hit
+  // La Bendición's second half, like a hoverboard save: the car it took is
+  // shoved aside with a spin and a bocinazo, and every car on your line in
+  // the next shoveClearM is eased out of the way, so a save never becomes a
+  // second crash. Cars slide there, they never teleport.
+  shoveClearM: 15, // FEEL: how far ahead the save clears your line
+  shoveMarginM: 1.0, // FEEL: side gap a shoved car leaves between its hitbox and your circle
+  shoveRate: 9, // FEEL: how fast a shoved car slides over, per second (eased)
+  shoveSpinSec: 0.6, // FEEL: how long the hit car takes to spin once around
 
   // Crash and restart. FEEL: this loop is the whole game
-  crashSlowmoSec: 0.5, // real seconds of slow motion before the card appears
-  crashTimeScale: 0.2, // sim speed during the slow-mo
-  // FEEL: the brief wants OTRA VEZ responsive within 0.5 s of the crash. The
-  // card lands at crashSlowmoSec; this guard only has to outlast the stray
-  // pointerup from the finger that was still steering.
-  restartDebounceSec: 0.15, // ignore taps this long after the card shows
+  // FEEL: real seconds from the impact to the card. Covers the impact frame,
+  // the flip and the first ground contact of the tumble.
+  crashSlowmoSec: 0.41,
+  crashTimeScale: 0.2, // FEEL: sim speed during the slow-mo (traffic crawls)
+  crashImpactSec: 0.07, // FEEL: the impact frame: the sim holds still this long before the slow-mo
+  crashFlashAlpha: 0.35, // FEEL: white flash over the screen at the impact...
+  crashFlashMs: 150, // ...fading out over this long
+  // FEEL: the road scroll stops this fast (real seconds, time constant) once
+  // you are down, so the car that hit you stays in frame instead of rolling
+  // over the tumble.
+  crashScrollTau: 0.08,
+  killerFlash: 0.6, // FEEL: white rim on the vehicle that hit you...
+  killerFlashSec: 0.25, // ...fading out over this long
+  crashCamToKiller: 0.15, // FEEL: how far the camera's aim eases toward what hit you
+  // The tumble runs in real time while the world crawls: the rider flies
+  // off the ride toward the lens, flips, bounces and lies there under the
+  // stars, and the ride slides out from under.
+  tumbleLaunchVy: 5, // FEEL: how high the rider pops (m/s up)
+  tumbleBackVz: -1.5, // FEEL: m/s toward the camera; keeps the tumble in the lower half of the frame
+  tumbleGravity: 26, // FEEL: cartoon gravity; the first bounce lands as the card does
+  tumbleSpinX: 9, // FEEL: flip speed, rad/s
+  tumbleSpinZ: 4, // FEEL: max sideways spin, rad/s
+  rideSlideVx: 3, // FEEL: m/s the ride slides out sideways...
+  rideSlideDecay: 4, // ...and how fast that slide dies, per second
+  // FEEL: OTRA VEZ is live this long after the card shows. The restart
+  // listens on pointerdown, so a lifting finger can never trigger it; this
+  // only swallows a tap in the same frame as the card. Card plus guard is
+  // the brief's 0.5 s from crash to a tappable OTRA VEZ.
+  restartDebounceSec: 0.08,
   closeCallShare: 0.15, // FEEL: "te quedaste a N" shows when within this fraction of the record
+  // FEEL: after SEGUIR (and the pause a phone call or an app switch forces)
+  // the world stays frozen for a 3, 2, 1 before ¡DALE!, so the thumbs can
+  // find the glass again. The steering finger may pre-aim meanwhile.
+  resumeCountdownSec: 1.5,
 
   // Juice
-  shakeHoyo: 0.22, // FEEL: camera jolt when you eat a pothole
-  shakeShield: 0.3,
-  shakeCrash: 0.5,
+  // Trauma camera shake: each event adds trauma (0..1), trauma decays in a
+  // straight line, and the shake is trauma squared, so small hits stay
+  // subtle and a crash spikes. The shake is a rotation driven by smooth
+  // noise on real time, so it keeps its rate through the slow-mo.
+  traumaHoyo: 0.35, // FEEL: a pothole jolt
+  traumaShield: 0.45, // FEEL: the Bendición taking a hit
+  traumaScrape: 0.2, // FEEL: grinding the edge
+  traumaCrashMin: 0.55, // FEEL: a crash at low closing speed...
+  traumaCrashMax: 0.95, // ...and at high closing speed
+  traumaCrashSpeed: [10, 60], // m/s closing speed mapped onto traumaCrashMin..Max
+  traumaDecayPerSec: 1.4, // FEEL: how fast the shake dies
+  shakeYawDeg: 1.5, // FEEL: max yaw at full trauma
+  shakePitchDeg: 1.2, // FEEL: max pitch at full trauma
+  shakeRollDeg: 2.5, // FEEL: max roll at full trauma
+  shakeMoveM: 0.04, // FEEL: max camera translation at full trauma; rotation reads, translation smears
+  // FEEL: under the system's reduced-motion setting, shake, FOV kicks and the
+  // steering roll run at this fraction.
+  reducedMotionScale: 0.3,
+  // Micro time-dip: a skill peak (ladder tier 5 and up, La Cinta, WP-D's
+  // razor pass) slows the sim for a blink, a soft hit-stop. It only slows
+  // time, so the telegraph rule can only gain.
+  dipScale: 0.3, // FEEL: sim speed at the bottom of a dip
+  dipHoldMs: 45, // FEEL: how long it holds there...
+  dipReturnMs: 110, // ...and how long it eases back (easeOutQuad)
+  dipRecordHoldMs: 90, // FEEL: bursting La Cinta holds longer
+  dipMinGapMs: 400, // FEEL: never two dips closer than this
+  dipMinRunSec: 15, // DECISION: no dips in the first 15 s; the opening teaches, it does not stutter
+  // Haptics budget (Apple HIG: a haptic that is fine now and then tires
+  // when frequent). One haptic per floor, crash always goes through.
+  hapticFloorMs: 60, // FEEL: minimum gap between any two haptics
+  hapticPlatanoGapMs: 120, // FEEL: plátanos tick at most this often...
+  hapticPlatanoMediumEvery: 10, // ...and every Nth plátano of the run lands medium
   dustMinVelX: 4.2, // FEEL: how hard you must carve before tire dust kicks up
 
   // Phase 3: el Malecon

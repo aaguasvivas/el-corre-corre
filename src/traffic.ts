@@ -89,6 +89,10 @@ interface Vehicle {
   lineSide: number; // -1 / +1: which side of it the racing line runs
   dropT: number; // >= 0: el camión botando plátanos, seconds to the next drop
   noRebase: boolean; // set pieces and line motoconchos never swing onto the seam
+  shoveTo: number; // NaN, or the x a Bendición save is sliding it to
+  spinT: number; // seconds into the save's spin; <0 means not spinning
+  spinDir: number;
+  yaw0: number; // its heading before the spin
 }
 
 // Read-only views for tests and the traffic lab.
@@ -103,6 +107,12 @@ export interface VehicleView {
   readonly halfW: number;
   readonly halfL: number;
   readonly overtakeT: number;
+}
+
+// The vehicle the rider ran into: what the crash flashes and looks at, and
+// what a Bendición save shoves aside.
+export interface VehicleHit extends VehicleView {
+  readonly group: THREE.Group;
 }
 
 export interface PickupView {
@@ -976,7 +986,7 @@ export class Traffic {
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
           driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
           threat: false, threatX: 0, honked: false, lineN: 0, lineSide: 1,
-          dropT: -1, noRebase: false,
+          dropT: -1, noRebase: false, shoveTo: NaN, spinT: -1, spinDir: 1, yaw0: 0,
         });
       }
     }
@@ -1477,6 +1487,8 @@ export class Traffic {
       v.dropT = -1;
       v.overtakeT = -1;
       v.noRebase = onLine;
+      v.shoveTo = NaN;
+      v.spinT = -1;
       v.speed = speed;
       v.cruise = speed;
       v.driftAmp = drift;
@@ -2035,6 +2047,24 @@ export class Traffic {
         this.activeCount--;
         continue;
       }
+      // A Bendición save slides the base over (eased, never a teleport) and
+      // spins the car once around.
+      if (!Number.isNaN(v.shoveTo)) {
+        v.baseX += (v.shoveTo - v.baseX) * Math.min(1, CONFIG.shoveRate * dt);
+        if (Math.abs(v.shoveTo - v.baseX) < 0.02) {
+          v.baseX = v.shoveTo;
+          v.shoveTo = NaN;
+        }
+      }
+      if (v.spinT >= 0) {
+        v.spinT += dt;
+        const k = Math.min(1, v.spinT / CONFIG.shoveSpinSec);
+        v.group.rotation.y = v.yaw0 + v.spinDir * Math.PI * 2 * (1 - (1 - k) * (1 - k));
+        if (k >= 1) {
+          v.group.rotation.y = v.yaw0;
+          v.spinT = -1;
+        }
+      }
       // x is derived fresh every frame: base, plus lane drift, plus the
       // overtake swing. Never accumulated, so nothing can walk off its lane.
       let vx = v.baseX;
@@ -2377,6 +2407,11 @@ export class Traffic {
   // ---------------- queries ----------------
 
   checkCollision(px: number, pz: number, pr: number): boolean {
+    return this.hitVehicle(px, pz, pr) !== null;
+  }
+
+  // The vehicle whose hitbox the rider's circle touches, or null.
+  hitVehicle(px: number, pz: number, pr: number): VehicleHit | null {
     for (const v of this.vehicles) {
       if (!v.active) continue;
       const dzAbs = Math.abs(v.z - pz);
@@ -2385,9 +2420,47 @@ export class Traffic {
       const hl = v.halfL * HIT;
       const dx = Math.max(Math.abs(px - v.x) - hw, 0);
       const dz = Math.max(dzAbs - hl, 0);
-      if (dx * dx + dz * dz < pr * pr) return true;
+      if (dx * dx + dz * dz < pr * pr) return v;
     }
-    return false;
+    return null;
+  }
+
+  // ---------------- crash and save ----------------
+
+  // The crash: what hit you stops dead where it is, so it stays in frame.
+  stopVehicle(hit: VehicleHit): void {
+    const v = hit as Vehicle;
+    v.speed = 0;
+    v.cruise = 0;
+  }
+
+  // La Bendición's second half. The car it took slides off the rider's line
+  // with a spin, and every car on that line within shoveClearM ahead slides
+  // off it too, so a save never turns into a second crash.
+  shove(hit: VehicleHit, px: number, pr: number): void {
+    const v = hit as Vehicle;
+    this.slideOff(v, px, pr);
+    v.spinT = 0;
+    v.spinDir = v.x >= px ? 1 : -1;
+    v.yaw0 = v.group.rotation.y;
+    for (const o of this.vehicles) {
+      if (!o.active || o === v || o.z < 0 || o.z - o.halfL > CONFIG.shoveClearM) continue;
+      if (Math.abs(o.x - px) >= o.halfW * HIT + pr + CONFIG.shoveMarginM) continue;
+      this.slideOff(o, px, pr);
+    }
+  }
+
+  // Aim a vehicle at the nearest spot beside the rider's line, on its own
+  // side of the rider, or the other side if the road runs out.
+  private slideOff(v: Vehicle, px: number, pr: number): void {
+    const need = v.halfW * HIT + pr + CONFIG.shoveMarginM;
+    const lim = ROAD.edgeX - v.halfW;
+    let to = px + (v.x >= px ? need : -need);
+    if (Math.abs(to) > lim) to = px + (v.x >= px ? -need : need);
+    v.shoveTo = Math.max(-lim, Math.min(lim, to));
+    v.driftAmp = 0;
+    v.overtakeT = -1;
+    v.noRebase = true;
   }
 
   // Test hooks for automated checks; gameplay never calls these.

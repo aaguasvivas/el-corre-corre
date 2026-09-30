@@ -41,6 +41,7 @@ export interface PlayerCallbacks {
   onScrape: () => void;
   onWheelieEnd: () => void;
   onLand: () => void;
+  onTrickReady: () => void; // the caballito / derrape cooldown just ran out
 }
 
 type FxKind = 'spark' | 'splash' | 'trail' | 'dust';
@@ -52,7 +53,21 @@ interface Rig {
   paint: number; // the pintura this rig was built with
   rack: THREE.Mesh; // the platanos stacked on the ride, revealed by draw range
   rackCounts: number[]; // index count that shows tiers 1..3
+  // The tumble split. The rider is the tail of the merged body's index
+  // buffer: at the crash the body stops drawing that range and the tumble
+  // proxy draws only it, from the same buffers. No extra draw while riding.
+  body: THREE.Mesh;
+  riderStart: number;
+  riderGeo: THREE.BufferGeometry;
 }
+
+// Where each ride's rider tumbles from: the pivot (the body's middle) in rig
+// space. The proxy spins around it.
+const RIDER_PIVOT: Record<VehicleId, readonly [number, number]> = {
+  motor: [1.15, -0.1],
+  pasola: [1.15, -0.12],
+  civic: [1.22, -0.15],
+};
 
 // Factory paints (pintura index 0 in config's PINTURAS).
 const DEFAULT_PAINT: Record<VehicleId, number> = {
@@ -77,7 +92,28 @@ interface Particle {
 const FX_KINDS: readonly FxKind[] = ['spark', 'splash', 'trail', 'dust'];
 const FX_POOL = 30;
 const RACK_POP_SEC = 0.15;
+const STAR_COUNT = 5;
+const RIDER_REST_Y = 0.3; // the tumbling rider's pivot height lying on the road
 const _m4 = new THREE.Matrix4();
+const _v3 = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _one = new THREE.Vector3(1, 1, 1);
+
+// A cartoon dizzy star: five points, a little thickness, gold.
+function starGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? 0.14 : 0.06;
+    const a = Math.PI / 2 + (i * Math.PI) / 5;
+    if (i === 0) shape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    else shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  shape.closePath();
+  const g = new THREE.ExtrudeGeometry(shape, { depth: 0.03, bevelEnabled: false });
+  g.translate(0, 0, -0.015);
+  return g;
+}
 
 // Soft round particles: one instanced billboard draw per kind. The quad is
 // built around the instance center in view space, after the bend, so it
@@ -104,6 +140,20 @@ varying vec2 vUv;
 varying float vFade;
 void main() {
   gl_FragColor = vec4( uColor, texture2D( uMap, vUv ).a * vFade );
+  #include <colorspace_fragment>
+}
+`;
+
+// The crash's "what hit you" flash: a white rim drawn over the vehicle's
+// own geometry, plus a little fill so the whole body lights.
+const HIT_FS = `
+uniform vec3 uColor;
+uniform float uGlow;
+varying vec3 vEccN;
+varying vec3 vEccV;
+void main() {
+  float rim = pow( 1.0 - abs( dot( normalize( vEccN ), normalize( vEccV ) ) ), 2.0 );
+  gl_FragColor = vec4( uColor * ( 0.3 + rim ) * uGlow, 1.0 );
   #include <colorspace_fragment>
 }
 `;
@@ -189,10 +239,13 @@ export class Player {
   private paintHex: number = DEFAULT_PAINT.motor;
   private buildTarget!: THREE.Group;
   private staticParts: THREE.BufferGeometry[] = [];
+  private riderMark = -1; // staticParts index where the rider's parts begin
+  private lastBody!: THREE.Mesh; // what finishRig just built...
+  private lastRiderStart = 0; // ...and the index where its rider begins
   private aura!: THREE.Mesh;
   private glowShell!: THREE.Mesh;
   private glowU = { value: 1 };
-  private stars!: THREE.Group;
+  private stars!: THREE.InstancedMesh;
   private leanVis = 0;
   private wheelieVis = 0;
   private time = 0;
@@ -206,6 +259,7 @@ export class Player {
   private pedal: -1 | 0 | 1 = 0;
   private touchActive = false;
   private touchWheelieHold = false;
+  private touchWheelieAt = 0; // when the flick up that latched it happened (sim time)
   private touchTargetX = START_X;
   private pointerId: number | null = null;
   private lastPointerX = 0;
@@ -236,6 +290,10 @@ export class Player {
   // effects on handling
   private charcoT = 0;
 
+  // el freno caliente: smoke off the rear wheel while the pads are cooked
+  private brakeHot = false;
+  private smokeAcc = 0;
+
   // power-ups
   private shielded = false;
   private glowOn = false;
@@ -243,12 +301,24 @@ export class Player {
   private trailAcc = 0;
   private dustAcc = 0;
 
+  // The crash. Everything here runs on real time (updateTumble), while the
+  // world crawls in the slow-mo.
   private tumbling = false;
   private settling = false;
+  private riderPivot = new THREE.Group(); // in the scene, not under root
+  private riderProxy!: THREE.Mesh;
   private tumbleVy = 0;
   private tumbleVz = 0;
   private spinX = 0;
   private spinZ = 0;
+  private slideVx = 0; // the ride sliding out from under
+  private rideVy = 0; // a ride that crashed airborne falls back down
+  private fallSide = 1;
+  private sparkAcc = 0;
+  private starSpin = 0;
+  private hitFlash!: THREE.Mesh;
+  private hitFlashU = { value: 0 };
+  private hitFlashT = 0;
 
   private particles: Particle[] = [];
   private fx!: Record<FxKind, THREE.InstancedMesh>;
@@ -265,6 +335,8 @@ export class Player {
     this.root.position.set(START_X, 0, 0);
     this.root.add(this.leanGroup);
     scene.add(this.root);
+    scene.add(this.riderPivot);
+    scene.add(this.stars);
     this.buildFx(scene);
     this.bindInput();
   }
@@ -330,22 +402,40 @@ export class Player {
     this.glowShell.visible = false;
     this.root.add(this.glowShell);
 
-    // Cartoon stars for the tumble
-    this.stars = new THREE.Group();
-    const starGeo = mergeGeometries([
-      new THREE.BoxGeometry(0.3, 0.07, 0.02),
-      new THREE.BoxGeometry(0.07, 0.3, 0.02),
-    ])!;
-    const starMat = worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold }));
-    for (let i = 0; i < 3; i++) {
-      const s = new THREE.Mesh(starGeo, starMat);
-      const a = (i / 3) * Math.PI * 2;
-      s.position.set(Math.cos(a) * 0.55, 0, Math.sin(a) * 0.55);
-      this.stars.add(s);
-    }
-    this.stars.position.y = 1.1;
+    // Cartoon dizzy stars for the tumble: five real stars, one draw. They
+    // live in world space and follow the tumbling rider (updateTumble).
+    this.stars = new THREE.InstancedMesh(
+      starGeometry(),
+      worldMaterial(new THREE.MeshBasicMaterial({ color: PALETTE.gold })),
+      STAR_COUNT,
+    );
+    this.stars.frustumCulled = false;
     this.stars.visible = false;
-    this.root.add(this.stars);
+
+    // The rider's half of the tumble split: its geometry is swapped to the
+    // current rig's rider range at the crash.
+    this.riderProxy = new THREE.Mesh(new THREE.BufferGeometry(), vcToonMaterial());
+    this.riderProxy.castShadow = true;
+    this.riderPivot.add(this.riderProxy);
+    this.riderPivot.visible = false;
+
+    // What hit you flashes: a white rim over its own geometry, parented to
+    // it for the flash only.
+    this.hitFlash = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      worldMaterial(
+        new THREE.ShaderMaterial({
+          uniforms: { uColor: { value: new THREE.Color(0xffffff) }, uGlow: this.hitFlashU },
+          vertexShader: GLOW_VS,
+          fragmentShader: HIT_FS,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      ),
+    );
+    this.hitFlash.scale.setScalar(1.02);
+    this.hitFlash.visible = false;
   }
 
   // Rigs are cached per vehicle: swapping rides on the title screen is a
@@ -370,6 +460,7 @@ export class Player {
         const m = o as THREE.Mesh;
         if (m.geometry) m.geometry.dispose();
       });
+      rig.riderGeo.dispose();
       rig = undefined;
       this.rigs[id] = undefined;
     }
@@ -383,7 +474,25 @@ export class Player {
       else this.buildMoto();
       const { rack, counts } = this.buildRack(id);
       group.add(rack);
-      rig = { group, wheels: this.wheels, wheelRadius: this.wheelRadius, paint: want, rack, rackCounts: counts };
+      // The tumble proxy's geometry: the same buffers as the body, drawing
+      // only the rider's range.
+      const bodyGeo = this.lastBody.geometry;
+      const riderGeo = new THREE.BufferGeometry();
+      riderGeo.setIndex(bodyGeo.index);
+      for (const name of Object.keys(bodyGeo.attributes)) riderGeo.setAttribute(name, bodyGeo.attributes[name]);
+      riderGeo.boundingSphere = bodyGeo.boundingSphere;
+      riderGeo.setDrawRange(this.lastRiderStart, Infinity);
+      rig = {
+        group,
+        wheels: this.wheels,
+        wheelRadius: this.wheelRadius,
+        paint: want,
+        rack,
+        rackCounts: counts,
+        body: this.lastBody,
+        riderStart: this.lastRiderStart,
+        riderGeo,
+      };
       this.rigs[id] = rig;
       this.leanGroup.add(group);
       this.applyRack(rig);
@@ -468,15 +577,24 @@ export class Player {
     this.staticParts.push(paint(geo, color));
   }
 
+  // Merges the static parts. The rider's parts come last (riderMark), so
+  // the rider is the tail of the index buffer: lastRiderStart.
   private finishRig(): void {
-    if (this.staticParts.length === 0) return;
+    let start = 0;
+    const mark = this.riderMark < 0 ? this.staticParts.length : this.riderMark;
+    for (let i = 0; i < mark; i++) start += this.staticParts[i].index!.count;
     const m = new THREE.Mesh(mergeGeometries(this.staticParts)!, vcToonMaterial());
     m.castShadow = true;
+    m.geometry.computeBoundingSphere();
     this.buildTarget.add(m);
     this.staticParts = [];
+    this.riderMark = -1;
+    this.lastBody = m;
+    this.lastRiderStart = start;
   }
 
   private buildRider(upright: boolean): void {
+    this.riderMark = this.staticParts.length; // everything from here tumbles
     const shirt = PALETTE.colmadoTeal;
     const jeans = 0x2f4a6f;
     const blue = PALETTE.flagBlue;
@@ -614,11 +732,20 @@ export class Player {
     this.addStatic(new THREE.BoxGeometry(1.55, 0.07, 0.38), red, 0, 1.0, -1.85); // el aleron
     this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, -0.55, 0.84, -1.83);
     this.addStatic(new THREE.BoxGeometry(0.08, 0.24, 0.08), dark, 0.55, 0.84, -1.83);
+    this.addStatic(new THREE.BoxGeometry(0.52, 0.05, 0.52), dark, 0, 1.01, -0.15); // the sunroof opening
+    // the back: rear window, full-width tail bar, plate
+    this.addStatic(new THREE.BoxGeometry(1.2, 0.24, 0.04), dark, 0, 0.84, -1.06);
+    this.addStatic(new THREE.BoxGeometry(1.4, 0.12, 0.03), dark, 0, 0.58, -1.955); // smoked housing
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.07, 0.04), PALETTE.flagRed, 0.45, 0.58, -1.96);
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.07, 0.04), PALETTE.flagRed, -0.45, 0.58, -1.96);
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.13, 0.02), PALETTE.flagWhite, 0, 0.42, -1.96);
+    this.addStatic(new THREE.BoxGeometry(0.4, 0.035, 0.024), PALETTE.flagBlue, 0, 0.47, -1.96);
     // El tiguere standing out the sunroof. The head used to sit half inside
     // the roof volume, which read as clipping no matter what rim was under
     // it. Now a torso rises from the opening and the whole head floats
     // clear above the roofline: unmistakably a person, never a stuck ball.
-    this.addStatic(new THREE.BoxGeometry(0.52, 0.05, 0.52), dark, 0, 1.01, -0.15); // the opening
+    // Built last: he is the part that flies out in a crash.
+    this.riderMark = this.staticParts.length;
     this.addStatic(new THREE.BoxGeometry(0.3, 0.26, 0.2), PALETTE.hazardOrange, 0, 1.12, -0.15); // shoulders, in the chaleco
     this.addStatic(new THREE.BoxGeometry(0.31, 0.03, 0.21), PALETTE.flagWhite, 0, 1.08, -0.15);
     this.addStatic(new THREE.SphereGeometry(0.15, 12, 10), PALETTE.skin, 0, 1.36, -0.15);
@@ -627,13 +754,6 @@ export class Player {
     this.addStatic(crown, blue, 0, 1.4, -0.15);
     this.addStatic(capStripe(0.172), PALETTE.flagWhite, 0, 1.4, -0.15);
     this.addStatic(new THREE.BoxGeometry(0.24, 0.03, 0.14), blue, 0, 1.43, 0.02);
-    // the back: rear window, full-width tail bar, plate
-    this.addStatic(new THREE.BoxGeometry(1.2, 0.24, 0.04), dark, 0, 0.84, -1.06);
-    this.addStatic(new THREE.BoxGeometry(1.4, 0.12, 0.03), dark, 0, 0.58, -1.955); // smoked housing
-    this.addStatic(new THREE.BoxGeometry(0.4, 0.07, 0.04), PALETTE.flagRed, 0.45, 0.58, -1.96);
-    this.addStatic(new THREE.BoxGeometry(0.4, 0.07, 0.04), PALETTE.flagRed, -0.45, 0.58, -1.96);
-    this.addStatic(new THREE.BoxGeometry(0.4, 0.13, 0.02), PALETTE.flagWhite, 0, 0.42, -1.96);
-    this.addStatic(new THREE.BoxGeometry(0.4, 0.035, 0.024), PALETTE.flagBlue, 0, 0.47, -1.96);
     this.finishRig();
     // underglow, que se vea
     const glowPlane = new THREE.Mesh(
@@ -758,8 +878,11 @@ export class Player {
         this.keys.add(e.code);
         e.preventDefault();
       } else if (WHEELIE_KEYS.includes(e.code) && this.cb.isSteeringActive()) {
-        this.wheelieKeys.add(e.code);
         e.preventDefault();
+        // Only a fresh press arms the trick: the auto-repeat of a Space held
+        // through OTRA VEZ must not open the next run with a caballito.
+        if (e.repeat && !this.wheelieKeys.has(e.code)) return;
+        this.wheelieKeys.add(e.code);
       } else if (THROTTLE_KEYS.includes(e.code)) {
         this.throttleKeys.add(e.code);
         e.preventDefault();
@@ -820,6 +943,7 @@ export class Player {
         this.swipeRefY = e.clientY;
         this.swipeRefX = e.clientX;
         this.touchWheelieHold = true;
+        this.touchWheelieAt = this.time;
       } else if (-dy > CONFIG.swipeDownPx && -dy > acrossX * CONFIG.swipeDominance) {
         this.swipeRefY = e.clientY;
         this.swipeRefX = e.clientX;
@@ -880,6 +1004,16 @@ export class Player {
     this.cb.onWheelieEnd();
   }
 
+  // The trick is ready again: a little spark off the front, main adds the click.
+  readySpark(): void {
+    this.emit('spark', 5, this.x, 0.9, this.vehicle === 'civic' ? 1.9 : 0.8, 2);
+  }
+
+  // El freno caliente: the pads smoke while they are overheated.
+  setBrakeHot(on: boolean): void {
+    this.brakeHot = on;
+  }
+
   // An exhaust puff the moment the gas goes down.
   gasPuff(): void {
     this.emit('dust', 5, this.x, 0.3, this.vehicle === 'civic' ? -2.1 : -0.95, 1.6);
@@ -936,7 +1070,13 @@ export class Player {
 
     this.readThrottle();
 
-    // El caballito: hold to keep it up, authority decays while you do
+    // El caballito: hold to keep it up, authority decays while you do. A
+    // flick that could not start one (cooldown, airtime) is only buffered
+    // for trickBufferSec, never latched: a caballito that starts on its own
+    // seconds later steals steering in the middle of a dodge.
+    if (this.touchWheelieHold && !this.wheelieActive && this.time - this.touchWheelieAt > CONFIG.trickBufferSec) {
+      this.touchWheelieHold = false;
+    }
     const held = this.wheelieKeys.size > 0 || this.touchWheelieHold;
     if (!held) this.wheelieLatch = false;
     if (
@@ -957,7 +1097,10 @@ export class Player {
       wheelieDecay = Math.min(1, this.wheelieT / CONFIG.wheelieMaxSec);
       if (!held || this.wheelieT >= CONFIG.wheelieMaxSec) this.endWheelie();
     }
-    if (this.wheelieCooldownT > 0) this.wheelieCooldownT -= dt;
+    if (this.wheelieCooldownT > 0) {
+      this.wheelieCooldownT -= dt;
+      if (this.wheelieCooldownT <= 0) this.cb.onTrickReady();
+    }
 
     let authority = 1;
     if (this.wheelieActive) {
@@ -1017,6 +1160,19 @@ export class Player {
       while (this.dustAcc > 0.055) {
         this.dustAcc -= 0.055;
         this.emit('dust', 1, this.x - Math.sign(this.velX || 1) * 0.3, 0.12, drifting ? -1.4 : -0.6, 1.2);
+      }
+    }
+
+    // Cooked brake pads smoke off the rear wheel
+    if (this.brakeHot) {
+      this.smokeAcc += dt;
+      while (this.smokeAcc > CONFIG.brakeSmokeEvery) {
+        this.smokeAcc -= CONFIG.brakeSmokeEvery;
+        if (this.vehicle === 'civic') {
+          this.emit('dust', 1, this.x + (Math.random() < 0.5 ? -0.76 : 0.76), 0.3, -1.3, 1);
+        } else {
+          this.emit('dust', 1, this.x, 0.35, this.vehicle === 'pasola' ? -0.55 : -0.62, 1);
+        }
       }
     }
 
@@ -1138,6 +1294,13 @@ export class Player {
       }
     }
 
+    // what hit you: its flash fades on real time
+    if (this.hitFlashT > 0) {
+      this.hitFlashT = Math.max(0, this.hitFlashT - dt);
+      this.hitFlashU.value = CONFIG.killerFlash * (this.hitFlashT / CONFIG.killerFlashSec);
+      if (this.hitFlashT === 0) this.dropHitFlash();
+    }
+
     // the rack's pop when a new tier lands
     if (this.rackPop > 0) {
       this.rackPop = Math.max(0, this.rackPop - dt);
@@ -1146,37 +1309,64 @@ export class Player {
     }
   }
 
-  crash(): void {
+  // The crash. The rider leaves the ride: the body stops drawing the
+  // rider's index range and the tumble proxy draws only that range, from the
+  // same buffers, so the split costs no draw call while riding. The rider
+  // pops up and back toward the lens (the tumble stays in the lower half of
+  // the frame), flips and bounces under the stars, while the ride slides
+  // out the other way. side: +1 or -1, world x away from what was hit.
+  // killer: the vehicle that did it, which flashes.
+  crash(side: number, killer: THREE.Group | null): void {
     this.tumbling = true;
     this.settling = false;
-    this.tumbleVy = 4.5;
-    this.tumbleVz = 2.4;
-    this.spinX = 8 + Math.random() * 5;
-    this.spinZ = (Math.random() - 0.5) * 6;
     this.wheelieActive = false;
     this.airborne = false;
+    this.brakeHot = false;
     this.setGraceBlink(false);
     this.setGlow(false);
+    this.fallSide = side;
+    const rig = this.rigs[this.vehicle];
+    const [py, pz] = RIDER_PIVOT[this.vehicle];
+    if (rig) {
+      rig.body.geometry.setDrawRange(0, rig.riderStart);
+      this.riderProxy.geometry = rig.riderGeo;
+    }
+    this.riderProxy.position.set(0, -py, -pz);
+    this.riderPivot.position.set(this.x, this.root.position.y + py, pz);
+    this.riderPivot.rotation.set(this.leanGroup.rotation.x, this.root.rotation.y, this.leanGroup.rotation.z);
+    this.riderPivot.visible = true;
+    this.tumbleVy = CONFIG.tumbleLaunchVy;
+    this.tumbleVz = CONFIG.tumbleBackVz;
+    this.spinX = CONFIG.tumbleSpinX * (0.9 + Math.random() * 0.2);
+    this.spinZ = -side * CONFIG.tumbleSpinZ * (0.5 + Math.random() * 0.5);
+    this.slideVx = side * CONFIG.rideSlideVx;
+    this.rideVy = 0;
+    this.sparkAcc = 0;
+    this.emit('dust', 8, this.x, 0.5, 0.8, 2.5);
+    this.emit('spark', 8, this.x, 0.6, 0.8, 3);
     this.stars.visible = true;
+    this.placeStars();
+    if (killer) this.flashHit(killer);
   }
 
-  // Comic tumble: exaggerated gravity, a bounce, then settle flat, with the
-  // cartoon stars doing their orbit. No blood, ever.
+  // Comic tumble, on real time: cartoon gravity, a bounce, then the rider
+  // settles flat under the stars. No blood, ever.
   updateTumble(dt: number): void {
     if (!this.tumbling) return;
-    this.stars.rotation.y += dt * 5;
-    this.stars.position.y = 1.0 + Math.sin(this.time) * 0.05;
     this.time += dt;
+    const p = this.riderPivot;
     if (!this.settling) {
-      this.root.position.y += this.tumbleVy * dt;
-      this.root.position.z += this.tumbleVz * dt;
-      this.tumbleVy -= 22 * dt;
-      this.leanGroup.rotation.x += this.spinX * dt;
-      this.leanGroup.rotation.z += this.spinZ * dt;
-      if (this.root.position.y <= 0 && this.tumbleVy < 0) {
-        this.root.position.y = 0;
+      p.position.x += this.fallSide * 0.6 * dt;
+      p.position.y += this.tumbleVy * dt;
+      p.position.z += this.tumbleVz * dt;
+      this.tumbleVy -= CONFIG.tumbleGravity * dt;
+      p.rotation.x += this.spinX * dt;
+      p.rotation.z += this.spinZ * dt;
+      if (p.position.y <= RIDER_REST_Y && this.tumbleVy < 0) {
+        p.position.y = RIDER_REST_Y;
         if (Math.abs(this.tumbleVy) > 2.5) {
           this.tumbleVy = -this.tumbleVy * 0.4;
+          this.tumbleVz *= 0.5;
           this.spinX *= 0.6;
           this.spinZ *= 0.6;
         } else {
@@ -1184,13 +1374,70 @@ export class Player {
         }
       }
     } else {
-      const snap = (a: number, stepAngle: number): number => Math.round(a / stepAngle) * stepAngle;
-      const rx = this.leanGroup.rotation.x;
-      const rz = this.leanGroup.rotation.z;
+      // lie flat, on the back or the belly, whichever is nearer
       const k = Math.min(1, 10 * dt);
-      this.leanGroup.rotation.x += (snap(rx, Math.PI) - rx) * k;
-      this.leanGroup.rotation.z += (snap(rz, Math.PI / 2) - rz) * k;
+      const rx = p.rotation.x;
+      const rz = p.rotation.z;
+      const flatX = Math.round((rx - Math.PI / 2) / Math.PI) * Math.PI + Math.PI / 2;
+      p.rotation.x += (flatX - rx) * k;
+      p.rotation.z += (Math.round(rz / Math.PI) * Math.PI - rz) * k;
     }
+
+    // the ride slides out from under, and a bike goes down on its side
+    this.root.position.x += this.slideVx * dt;
+    this.slideVx *= Math.exp(-CONFIG.rideSlideDecay * dt);
+    if (this.root.position.y > 0) {
+      this.rideVy -= CONFIG.tumbleGravity * dt;
+      this.root.position.y = Math.max(0, this.root.position.y + this.rideVy * dt);
+    }
+    const lk = Math.min(1, 9 * dt);
+    if (this.vehicle === 'civic') {
+      this.root.rotation.y += this.slideVx * 0.2 * dt;
+    } else {
+      this.leanGroup.rotation.z += (-this.fallSide * 1.3 - this.leanGroup.rotation.z) * lk;
+      if (Math.abs(this.slideVx) > 0.6) {
+        this.sparkAcc += dt;
+        while (this.sparkAcc > 0.05) {
+          this.sparkAcc -= 0.05;
+          this.emit('spark', 1, this.root.position.x + this.fallSide * 0.3, 0.1, 0, 2, -this.fallSide);
+        }
+      }
+    }
+    this.leanGroup.rotation.x += -this.leanGroup.rotation.x * lk;
+    this.leanGroup.position.y += -this.leanGroup.position.y * lk;
+    this.placeStars();
+  }
+
+  // Five stars circling over the rider, each spinning on its own.
+  private placeStars(): void {
+    this.starSpin = this.time * 5;
+    const c = this.riderPivot.position;
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const a = this.starSpin + (i * Math.PI * 2) / STAR_COUNT;
+      _v3.set(c.x + Math.cos(a) * 0.42, c.y + 0.62 + Math.sin(a * 2 + i) * 0.05, c.z + Math.sin(a) * 0.42);
+      _e.set(0, 0, this.starSpin * 1.6 + i);
+      _q.setFromEuler(_e);
+      _m4.compose(_v3, _q, _one);
+      this.stars.setMatrixAt(i, _m4);
+    }
+    this.stars.instanceMatrix.needsUpdate = true;
+  }
+
+  private flashHit(target: THREE.Group): void {
+    const body = target.children[0] as THREE.Mesh | undefined;
+    if (!body?.geometry) return;
+    this.hitFlash.geometry = body.geometry;
+    target.add(this.hitFlash);
+    this.hitFlash.visible = true;
+    this.hitFlashT = CONFIG.killerFlashSec;
+    this.hitFlashU.value = CONFIG.killerFlash;
+  }
+
+  private dropHitFlash(): void {
+    this.hitFlashT = 0;
+    this.hitFlashU.value = 0;
+    this.hitFlash.visible = false;
+    this.hitFlash.removeFromParent();
   }
 
   reset(): void {
@@ -1221,11 +1468,20 @@ export class Player {
     this.airVy = 0;
     this.charcoT = 0;
     this.dustAcc = 0;
+    this.touchWheelieAt = 0;
+    this.brakeHot = false;
+    this.smokeAcc = 0;
+    this.slideVx = 0;
     this.setShield(false);
     this.setGraceBlink(false);
     this.setGlow(false);
     this.setRackCount(0);
     this.stars.visible = false;
+    this.riderPivot.visible = false;
+    for (const key of Object.keys(this.rigs) as VehicleId[]) {
+      this.rigs[key]?.body.geometry.setDrawRange(0, Infinity);
+    }
+    this.dropHitFlash();
     this.root.position.set(START_X, 0, 0);
     this.root.rotation.set(0, 0, 0);
     this.leanGroup.rotation.set(0, 0, 0);
