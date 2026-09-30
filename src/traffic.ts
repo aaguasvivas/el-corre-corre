@@ -1050,7 +1050,12 @@ export class Traffic {
         this.vehicles.push({
           type, group, active: false, lane: 0, baseX: 0, x: 0, z: 0, dir: 1,
           speed: 10, halfW: a.halfW, halfL: a.halfL, passed: false,
-          driftPhase: Math.random() * 7, driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
+          // DECISION: the phase comes from the slot, spread by the golden
+          // angle, not from Math.random. Building the art draws randoms too
+          // (every geometry and material takes some for its uuid), so a
+          // random phase here changed with every art edit and reshuffled the
+          // traffic that the seeded tests replay.
+          driftPhase: (this.vehicles.length * 2.39996) % (Math.PI * 2), driftAmp: 0, overtakeT: -1, cruise: 0, blinkers,
           threat: false, threatX: 0, honked: false, lineN: 0, lineSide: 1,
           dropT: -1, noRebase: false,
         });
