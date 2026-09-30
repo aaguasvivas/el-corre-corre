@@ -1,6 +1,9 @@
 # EL CORRE CORRE — Build Brief & Phased Plan
 > Drop this file in the repo root as `CLAUDE.md` (or `AGENTS.md`). It is the living source of truth: vision, spec, phase plan, and quality bar. Build the phases **in order**. The game must run and be playable at the end of every phase.
 ---
+## Next-level pass (2026-09-29/30)
+Decisions that update this brief live in [docs/audit/PLAN.md](docs/audit/PLAN.md): the pedals, speed risk and reward, Los Mandaos lifting the no-meta rule, record semantics, the pinturas economy, and el freno caliente. Where PLAN.md and this brief disagree, PLAN.md is the owner's newer decision. Current values live in `src/config.ts`; HANDOFF.md section 3 describes them.
+---
 ## The vision
 **El Corre Corre** — you're on a motor flying down the Malecón of Santo Domingo at golden hour, weaving through Caribbean traffic. Overtake guaguas, thread the gap between a carro público and a plátano truck, swing into the oncoming lane because that's how it's done, pop a wheelie over a pothole, collect plátanos, and chase your récord while a dembow beat pumps.
 **Cultural grounding (commit to it):** "El corre corre" is Dominican slang for the daily hustle — the rush, the beautiful chaos. The game must radiate *dominicanidad*: pastel colonial facades, colmados with hand-painted signs, guaguas with roof racks and "Dios es mi guía" windshield banners, motoconchos, the turquoise Caribbean on the left, palms, tangled power lines, flags, and UI copy in Dominican Spanish. This is not a generic city runner with a palm tree.
