@@ -318,8 +318,12 @@ async function lab(suites) {
     const growing = gaps.every((g, i) => i === 0 || g >= gaps[i - 1] - 1e-4);
     check('tape-stop: steps stretch across the slow-mo (tempo falls with the pitch)', gaps.length >= 3 && growing && gaps[gaps.length - 1] > stepDur * 1.25, JSON.stringify(gaps));
     const at = (tt) => trace.reduce((a, r) => (Math.abs(r[0] - tt) < Math.abs(a[0] - tt) ? r : a));
-    const end = at(CR + CONFIG.crashSlowmoSec - 0.02);
-    check('tape-stop: low-pass down near tapeStopHz and the bus near silent as the card lands', end[1] === 'tapestop' && end[2] <= CONFIG.tapeStopHz * 1.5 && end[3] < 0.03, JSON.stringify(end));
+    // Sampled as the card lands (the trace row nearest it): a fixed offset
+    // before the card read a different point of the fade whenever
+    // crashSlowmoSec changed. By then the engine may already have handed
+    // over to the idle mode's quiet gap, which is still the tape-stop's end.
+    const end = at(CR + CONFIG.crashSlowmoSec);
+    check('tape-stop: low-pass down near tapeStopHz and the bus near silent as the card lands', (end[1] === 'tapestop' || end[1] === 'idle') && end[2] <= CONFIG.tapeStopHz * 1.5 && end[3] < 0.03, JSON.stringify(end));
     const gapRow = at(CR + CONFIG.crashSlowmoSec + CONFIG.idleMusicDelaySec * 0.5);
     check('a quiet beat between the tape-stop and the idle groove', gapRow && gapRow[1] === 'idle' && gapRow[3] < 0.02, JSON.stringify(gapRow));
     const idleRow = at(CR + CONFIG.crashSlowmoSec + CONFIG.idleMusicDelaySec + 1.2);

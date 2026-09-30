@@ -1446,6 +1446,7 @@ export class UI {
 
   banner(text: string): void {
     this.bannerEl.textContent = text;
+    this.bannerEl.classList.toggle('long', text.length > 15);
     this.bannerEl.classList.remove('show');
     void this.bannerEl.offsetWidth;
     this.bannerEl.classList.add('show');

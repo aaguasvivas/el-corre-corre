@@ -342,6 +342,7 @@ const SCENES = [
     id: 'mandao-toast',
     what: 'Mid-run: a mandao gets done (10 plátanos) and its toast drops in',
     settle: 450,
+    toast: true,
     run: async (s) => {
       await s.start();
       await s.tick(1);
@@ -682,6 +683,9 @@ const SCENES = [
       await s.start();
       await s.tick(3);
       await s.clearFx();
+      // A fresh save's LA META tape stands at 400 m; the jump to 499 m would
+      // burst it in the same frame, so this run chases a far record instead.
+      await s.ecc('setRecordDist', 5000);
       await s.ecc('setDistance', 499);
       if (!(await s.play(1, 'e.distMult() >= 2'))) throw new Error('no tier');
     },
@@ -710,7 +714,7 @@ const SCENES = [
   },
   {
     id: 'store-record',
-    what: 'Store: bursting La Cinta, confetti and the new record banner',
+    what: 'Store: bursting La Cinta, confetti and the ¡MÁS LEJOS QUE NUNCA! banner',
     only: ['iphone69'],
     settle: 250,
     run: async (s) => {
@@ -1004,17 +1008,27 @@ async function main() {
           // (the pulsing prompt and pill, the vignette, the speed lines) are
           // posed at mid-cycle, their peak, so a frame never depends on the
           // wall-clock phase a loop happened to be in.
+          // The mandao toasts are the exception: a scene that rides far in
+          // a fast tick finishes mandaos sim minutes before the capture while
+          // the wall clock has barely moved, so their queued toasts (2.2 s
+          // each on the wall clock) would still hang over the frame. They
+          // show only in the scene made for them (toast: true).
           if (sc.settle !== 'finish') await sleep(sc.settle);
-          await page.evaluate((finish) => {
-            for (const a of document.getAnimations()) {
-              const t = a.effect?.getComputedTiming();
-              if (t?.endTime === Infinity) {
-                a.pause();
-                a.currentTime = Number(t.duration) * 0.5;
-              } else if (finish) a.finish();
-              else a.pause();
-            }
-          }, sc.settle === 'finish');
+          await page.evaluate(
+            (finish, keepToast) => {
+              if (!keepToast) document.getElementById('mandao-toast').style.display = 'none';
+              for (const a of document.getAnimations()) {
+                const t = a.effect?.getComputedTiming();
+                if (t?.endTime === Infinity) {
+                  a.pause();
+                  a.currentTime = Number(t.duration) * 0.5;
+                } else if (finish) a.finish();
+                else a.pause();
+              }
+            },
+            sc.settle === 'finish',
+            sc.toast === true,
+          );
           const probe = await page.evaluate(() => {
             const e = window.__ecc;
             return `state=${e.state()} tramo=${e.tramo()} run=${e.runDist()}m x=${e.x().toFixed(2)} v=${e.effSpeed()} combo=${e.combo()} cv=${e.cv()} wheelie=${e.wheelie()} cars=${e.cars()} audio=${e.audio().ctx}`;

@@ -1194,6 +1194,13 @@ body {
   animation: banner-pop 1.8s ease forwards;
 }
 
+/* The longer banners ("¡MÁS LEJOS QUE NUNCA!", "¡LLEGASTE A LA META!")
+   ran off both edges at the size that fits "¡NUEVO RÉCORD!"; they get a
+   size that fits a 320 px phone. */
+#banner.long {
+  font-size: clamp(20px, min(6vh, 7vw), 56px);
+}
+
 /* The resume countdown (3, 2, 1, ¡DALE!). Minimal: WP-E styles it. */
 #countdown {
   position: absolute;

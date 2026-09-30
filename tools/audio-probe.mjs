@@ -249,7 +249,10 @@ try {
   const riserAt = await ecc('runDist');
   const burst = await play(4, "e.audio().music.riser === false");
   const riserCalls = await calls('tapeRiser');
-  check('La Cinta: the riser turns on inside tapeRiserM, farthest() at the burst, riser off after', rose && burst && riserCalls.length >= 2 && riserCalls[0].args[0] === true && (await calls('farthest')).length === 1, JSON.stringify({ rose, burst, riserAt, riserCalls }));
+  // A fresh save rides toward LA META at 400 m, so the roll may already be
+  // on when the tape moves; what matters is an on, then off after the burst.
+  const firstOn = riserCalls.findIndex((c) => c.args[0] === true);
+  check('La Cinta: the riser turns on inside tapeRiserM, farthest() at the burst, riser off after', rose && burst && firstOn >= 0 && riserCalls[riserCalls.length - 1].args[0] === false && (await calls('farthest')).length === 1, JSON.stringify({ rose, burst, riserAt, riserCalls }));
 
   // ---- a plátano string climbs a semitone per pickup
   await clearCalls();
@@ -278,9 +281,14 @@ try {
   await ecc('spawnPickup', 'bendicion', await ecc('x'), 12);
   await fast('e.powerups().shielded', 3);
   const bellsBefore = (await calls('bell')).length;
+  // A hit inside the cafecito's grace or the invincibility plows through
+  // without touching the shield, and the road may refuse a spawn: wait both
+  // out, so the check measures the save and not the traffic of the moment.
+  await fast('e.powerups().cafecitoT === 0 && e.powerups().cafGraceT === 0 && e.powerups().invincibleT === 0', 6);
+  await ecc('clearTraffic');
   await ecc('god', false);
   // a slow car dead ahead on the rider's own line
-  await ecc('spawnVehicle', 'sedan', 1, 30, 1, await ecc('x'), 4);
+  for (let i = 0; i < 30 && !(await ecc('spawnVehicle', 'sedan', 1, 30, 1, await ecc('x'), 4)); i++) await ecc('tick', 1 / 30);
   await fast("!e.powerups().shielded || e.state() !== 'playing'", 4);
   await ecc('god', true);
   check('shield break: shieldBreak() once, the run goes on', (await calls('shieldBreak')).length === 1 && (await ecc('state')) === 'playing' && bellsBefore === 1, JSON.stringify({ sb: await calls('shieldBreak'), state: await ecc('state'), bellsBefore }));
@@ -319,9 +327,13 @@ try {
   a = await au();
   const stopP = await calls('stopRun');
   check('pause: stopRun(false), the idle radio under the pause card', (await ecc('state')) === 'paused' && stopP.length === 1 && stopP[0].args[0] === false && a.music.mode === 'idle', JSON.stringify({ stopP, m: a.music }));
+  // SEGUIR counts 3, 2, 1 with the world frozen; the band comes back at GO.
   await page.keyboard.press('Space');
   await play(0.5);
+  const inCount = (await ecc('state')) === 'countdown' && (await calls('resumeRun')).length === 0;
+  await play(1.3);
   a = await au();
+  check('resume countdown: no resumeRun before GO', inCount, '');
   check('resume: resumeRun, run mode, same tramo', (await calls('resumeRun')).length === 1 && a.music.mode === 'run' && a.music.tramo === 'zona', JSON.stringify(a.music));
 
   // ---- the crash: a tape-stop over the slow-mo, a breath, then the radio
