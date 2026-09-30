@@ -27,6 +27,13 @@ import { AudioEngine, type AudioUpdateCtx } from './audio';
 import { haptics } from './haptics';
 import { BrakeHeat } from './brakeHeat';
 import { submitScore } from './leaderboard';
+import { backupSaves, restoreSaves } from './storage';
+
+// A save the OS wiped from the web view comes back from the native mirror
+// before anything below reads localStorage. The web has no mirror and does
+// not wait.
+const restoring = restoreSaves();
+if (restoring) await restoring;
 
 // countdown: the 3, 2, 1 after SEGUIR, world frozen (resumeCountdownSec).
 type GameState = 'title' | 'playing' | 'paused' | 'countdown' | 'crashing' | 'gameover';
@@ -316,6 +323,7 @@ function goToMenu(): void {
   // Quitting from PAUSE abandons a live run, so bank it before wiping it.
   if (state === 'paused') missions.finishRun(score);
   score.persist();
+  backupSaves();
   state = 'title';
   resetRunState();
   ui.showTitle(score.record);
@@ -569,6 +577,7 @@ function pauseGame(): void {
   state = 'paused';
   score.persist();
   missions.persist(score); // a pause may be the last thing a killed app does
+  backupSaves();
   ui.showPause(missions.view());
   if (wasRunning) audio.stopRun(false);
   audio.click();
@@ -629,7 +638,9 @@ window.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && (state === 'playing' || state === 'countdown')) pauseGame();
+  if (!document.hidden) return;
+  if (state === 'playing' || state === 'countdown') pauseGame(); // it backs up the saves
+  else backupSaves(); // a pintura bought or a language switched on a menu
 });
 
 // Portrait framing: a tall frame gets a higher, steeper camera and follows
@@ -1048,6 +1059,7 @@ function advance(dt: number, now: number): void {
     state = 'gameover';
     gameOverAt = now;
     lastRun = finishRunRecords();
+    backupSaves();
     submitScore(lastRun.points, selectedVehicle);
     ui.showGameOver(lastRun, missions.view(), nextPintura(selectedVehicle, ownedPinturas(selectedVehicle), score.bank));
   } else if (state === 'gameover') {
