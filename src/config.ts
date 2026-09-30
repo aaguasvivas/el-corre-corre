@@ -552,6 +552,52 @@ export const CONFIG = {
   comboBassAt: 5, // bass pulse joins at this combo
   hornEvery: [7, 16], // FEEL: seconds between ambient bocinazos
   riffVolume: 0.15, // FEEL: the melodic pluck riding over the dembow
+
+  // The master limiter: every sound leaves through one compressor, so a
+  // near-miss, a plátano, a horn and a bell over the full dembow never clip.
+  limiterThresholdDb: -8, // FEEL: where the limiter starts to hold the mix down
+  limiterKneeDb: 6,
+  limiterRatio: 8,
+  limiterAttackSec: 0.002,
+  limiterReleaseSec: 0.12,
+  // DECISION: the compressor adds an automatic makeup gain (about +4 dB at
+  // these settings, measured offline); the trim takes it back out, so
+  // everything under the threshold plays exactly as loud as before.
+  masterTrim: 0.62,
+  musicDuckLevel: 0.55, // FEEL: music level under a big stinger (record, mandao, tramo)
+
+  // Music between runs and at the crash. FEEL: the colmado radio on the
+  // title and the game-over card, and a tape-stop instead of a hard cut.
+  idleMusicHz: 700, // FEEL: the idle groove's low-pass; lower sounds further away
+  idleMusicLevel: 0.8, // FEEL: idle groove bus level, relative to musicVolume
+  idleKickGain: 0.45,
+  idleRiffGain: 0.6,
+  idleMusicDelaySec: 0.6, // FEEL: the quiet beat between the tape-stop and the idle groove
+  tapeStopHz: 350, // FEEL: where the crash sweeps the band's low-pass down to
+  tapeStopOctaves: 1, // FEEL: how far the tape drags pitch and tempo down over the slow-mo
+
+  // Intensity layers. FEEL: they enter on the next beat and leave at the end
+  // of the bar plus one bar, so a flickering combo never chops a phrase.
+  layerInSec: 0.3, // fade-in of a layer entry
+  layerOutSec: 1.2, // fade-out of a layer exit
+  musicRunHz: 9000, // FEEL: the band's low-pass at cruise; the gas opens it all the way
+  musicOpenHz: 18000,
+  gasLayerAt: 0.5, // the gas layer (open hats) joins this far into the felt gas; matches the ×1.5 gate
+  gasLayerVolume: 0.7, // FEEL: open hats a fondo
+  comboBreakDipHz: 900, // FEEL: a broken chain dips the band's low-pass here...
+  comboBreakDipSec: 0.35, // ...and back, over this long
+  tramoColorVolume: 0.8, // FEEL: the tramo instruments (güira, requinto, accordion, tambora) against the dembow
+
+  // Rewards you can hear
+  nearMissPluckVolume: 0.12, // FEEL: the pentatonic pluck that climbs with the combo
+  // DECISION: the razor band for the sound only (brighter whoosh and pluck).
+  // Research put the tight graze at 0.5 m; if the score adopts a razor band
+  // of its own, the sound must read that one instead of this key.
+  nearMissRazorM: 0.5,
+  platanoStreakSec: 0.45, // FEEL: pickups closer than this are one string, rising a semitone each
+  platanoStreakMax: 12, // semitones a string may climb
+  tapeRiserM: 60, // FEEL: the snare roll starts this many meters before La Cinta
+  cafecitoTicks: 3, // warning ticks in the cafecito's last second
 } as const;
 
 // Derived road geometry, shared everywhere

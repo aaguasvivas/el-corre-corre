@@ -264,14 +264,17 @@ const ui = new UI(document.getElementById('ui')!, {
 ui.setMuted(audio.muted);
 
 const traffic = new Traffic(scene, {
-  onNearMiss: (x, z) => {
+  onNearMiss: (x, z, clearance) => {
     const r = score.nearMiss();
     const s = w2s(x, 1.3, Math.max(z, 1.5));
     ui.popup(`${ui.nextNearMissText()} +${r.pts}`, s.x, s.y, r.combo >= 5 ? 'pop-md' : 'pop-sm');
     const hit = ui.ladderHitText(r.combo);
-    if (hit) ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
+    if (hit) {
+      ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
+      audio.ladder(r.combo);
+    }
     ui.setCombo(r.combo, ui.ladderTierText(r.combo));
-    audio.nearMiss(panOf(x));
+    audio.nearMiss(panOf(x), r.combo, clearance <= CONFIG.nearMissRazorM);
     if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
     haptics.light();
   },
@@ -361,7 +364,7 @@ player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
 world.onObeliscoPass = () => {
   if (state !== 'playing') return;
   ui.popupObelisco();
-  audio.bell();
+  audio.obelisco();
 };
 
 // Los Tramos: the world announces border crossings; traffic changes its mix,
@@ -369,9 +372,10 @@ world.onObeliscoPass = () => {
 // too, so traffic always follows, but the popup is for live runs only.
 world.onTramoChange = (t) => {
   traffic.setTramo(t);
+  audio.setTramo(t); // the band changes color at the next bar
   if (state === 'playing') {
     ui.popupTramo(t);
-    audio.bell();
+    audio.tramo();
   }
 };
 
@@ -434,7 +438,7 @@ function resume(): void {
   if (state !== 'paused') return;
   state = 'playing';
   ui.hidePause();
-  audio.startRun();
+  audio.resumeRun();
   audio.click();
 }
 
@@ -534,7 +538,14 @@ function stepSim(h: number): void {
   if (hoyoTimer > 0) hoyoTimer = Math.max(0, hoyoTimer - h);
   if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - h);
   if (cafecitoT > 0) {
+    const cafBefore = cafecitoT;
     cafecitoT = Math.max(0, cafecitoT - h);
+    // The last second ticks cafecitoTicks times, so the end never surprises.
+    const n = CONFIG.cafecitoTicks;
+    const tickLeft = Math.ceil(cafecitoT * n);
+    if (state === 'playing' && tickLeft >= 1 && tickLeft <= n && tickLeft !== Math.ceil(cafBefore * n)) {
+      audio.cafecitoTick(tickLeft);
+    }
     if (cafecitoT === 0) {
       // The cafecito ends ghosted: a blinking grace second to get out of
       // whatever you were plowing through, never a death on the last tick.
@@ -548,7 +559,10 @@ function stepSim(h: number): void {
     if (cafGraceT === 0) player.setGraceBlink(false);
   }
   cafMult += ((cafecitoT > 0 ? CONFIG.cafecitoBoost : 1) - cafMult) * Math.min(1, (3 / CONFIG.cafecitoEaseSec) * h);
-  if (imanT > 0) imanT = Math.max(0, imanT - h);
+  if (imanT > 0) {
+    imanT = Math.max(0, imanT - h);
+    if (imanT === 0 && state === 'playing') audio.imanEnd();
+  }
 
   const slow = Math.max(
     scrapeTimer > 0 ? CONFIG.scrapeSpeedLoss * (scrapeTimer / CONFIG.scrapeSlowSec) : 0,
@@ -632,7 +646,7 @@ function stepSim(h: number): void {
       ui.setDistMult(shownMult);
       if (shownMult > 1) {
         ui.popupMultUp(shownMult);
-        audio.powerup('cafecito');
+        audio.multUp(shownMult);
         haptics.medium();
       }
     }
@@ -644,19 +658,22 @@ function stepSim(h: number): void {
         player.useShield();
         invincibleT = CONFIG.shieldGraceSec;
         addShake(CONFIG.shakeShield);
-        audio.bell();
+        audio.shieldBreak();
         haptics.medium();
       } else {
         doCrash();
       }
     }
 
-    // La Cinta del Récord (the world places it; this is the burst)
+    // La Cinta del Récord (the world places it; this is the burst). Its last
+    // meters get a snare roll.
+    const toTape = score.recordDist - score.distance;
+    audio.tapeRiser(!tapeBurst && score.recordDist > 0 && toTape > 0 && toTape <= CONFIG.tapeRiserM);
     if (!tapeBurst && score.recordDist > 0 && score.distance >= score.recordDist) {
       tapeBurst = true;
       world.burstTape();
       ui.bannerNewRecord();
-      audio.recordBreak();
+      audio.farthest();
       haptics.heavy();
     }
   } else {
@@ -825,6 +842,7 @@ let testGod = false;
     muted: audio.muted,
     ctx: audio.ctxState,
     layers: audio.layerGains,
+    music: audio.musicState,
   }),
   vehicle: () => selectedVehicle,
   selectVehicle: (id: VehicleId) => selectVehicle(id),
