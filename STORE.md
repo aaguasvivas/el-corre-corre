@@ -134,22 +134,25 @@ no alpha.
 
 | # | Shot | Scene in `tools/shots.mjs` |
 |---|---|---|
-| 1 | A fondo en contra vía: ¡DALE! pressed, the x2 pill, the x1.5 tag, a near-miss popup | `store-gas-cv` (to add; `store-contravia` does not hold the gas) |
-| 2 | A near-miss chain up to ¡LEYENDA DEL MALECÓN! | `store-leyenda` (to add; `hud-max` fakes the count) |
-| 3 | La Zona with La Puerta del Conde and a caballito | `store-zona` (check that the gate is in frame) |
+| 1 | A fondo en contra vía: ¡DALE! pressed, the x2 pill, the x1.5 tag, a near-miss popup | `store-gas-cv` |
+| 2 | A near-miss chain up to ¡LEYENDA DEL MALECÓN! with the x15 count | `store-leyenda` |
+| 3 | La Zona with La Puerta del Conde and a caballito | `store-puerta` (reaches its count by real dodges) |
 | 4 | El Campo with the green road sign | `tramo-campo` |
 | 5 | The crash with the stars | `crash` |
 | 6 | Game over with the mandao stamps and a level up | `gameover-levelup` |
 | 7 | Bursting La Cinta with confetti | `store-record` |
 | 8 | Title with the ride tabs and the paint tray | `title-rich` |
 
-Capture both locales into the ignored `docs/shots/` folder:
+Upload order is the table order. The current set is committed in
+`docs/store/screenshots/es/` (es-MX) and `docs/store/screenshots/en/`
+(en-US), 8 PNGs each, named `<scene>-iphone69.png`. Regenerate both locales
+after any visible change:
 
 ```bash
-S=store-gas-cv,store-leyenda,store-zona,tramo-campo,crash,gameover-levelup,store-record,title-rich
-sh tools/heavy.sh node tools/shots.mjs --scenes $S --viewports iphone69 --out docs/shots/store/es
-sh tools/heavy.sh node tools/shots.mjs --scenes $S --viewports iphone69 --lang en --out docs/shots/store/en
-for f in docs/shots/store/*/*.png; do sips -g pixelWidth -g pixelHeight -g hasAlpha "$f"; done
+S=store-gas-cv,store-leyenda,store-puerta,tramo-campo,crash,gameover-levelup,store-record,title-rich
+sh tools/heavy.sh node tools/shots.mjs --scenes $S --viewports iphone69 --out docs/store/screenshots/es
+sh tools/heavy.sh node tools/shots.mjs --scenes $S --viewports iphone69 --lang en --out docs/store/screenshots/en
+for f in docs/store/screenshots/*/*.png; do sips -g pixelWidth -g pixelHeight -g hasAlpha "$f"; done
 ```
 
 Every file must print 1320, 2868 and `hasAlpha: no`. Look at every image
