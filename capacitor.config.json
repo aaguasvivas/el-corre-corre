@@ -1,5 +1,9 @@
 {
   "appId": "dev.elcorrecorre.app",
   "appName": "El Corre Corre",
-  "webDir": "dist"
+  "webDir": "dist",
+  "backgroundColor": "#6EC6E6",
+  "ios": {
+    "backgroundColor": "#6EC6E6"
+  }
 }
