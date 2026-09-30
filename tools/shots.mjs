@@ -268,6 +268,17 @@ function helpers(page, vp) {
       await ecc('tick', 1 / 60);
     },
 
+    // A Bendición picked up on a long god-mode ride wraps the rider in its
+    // bubble: spend it on a car (the shield takes the hit), then carry on.
+    spendShield: async () => {
+      if (!(await ecc('powerups')).shielded) return;
+      await ecc('god', false);
+      await ecc('clearTraffic');
+      await s.spawn('sedan', 1, 7, 1, await ecc('x'));
+      if (!(await s.tickUntil('!e.powerups().shielded', 5, 1 / 60))) throw new Error('the shield never took the hit');
+      await ecc('god', true);
+    },
+
     // Where a pedal is on screen: the centre of #pedal-gas or #pedal-brake.
     pedalAt: (which) =>
       page.evaluate((sel) => {
@@ -915,6 +926,8 @@ const SCENES = [
     settle: 600,
     run: async (s) => {
       await s.start();
+      await s.rideTo(1900);
+      await s.spendShield();
       await s.rideTo(1975);
       await s.clearFx();
       if (!(await s.play(4, "e.tramo() === 'campo'"))) throw new Error('no border crossing');
@@ -1014,17 +1027,9 @@ const SCENES = [
     run: async (s, vp) => {
       await s.start();
       await s.rideTo(1300);
-      // A Bendición picked up on the way would wrap the rider in its bubble:
-      // spend it on a car (the shield takes the hit), then ride on.
-      if ((await s.ecc('powerups')).shielded) {
-        await s.ecc('god', false);
-        await s.ecc('clearTraffic');
-        await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
-        if (!(await s.tickUntil('!e.powerups().shielded', 5, 1 / 60))) throw new Error('the shield never took the hit');
-        await s.ecc('god', true);
-      }
-      // the gate stands puertaOffsetM into La Zona: stop about 40 m short
-      await s.rideTo(1380);
+      await s.spendShield();
+      // the gate stands puertaOffsetM into La Zona: stop about 55 m short
+      await s.rideTo(1365);
       await s.unghost();
       await s.clearFx();
       const x = vp.width / 2;
