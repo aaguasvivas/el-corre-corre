@@ -81,6 +81,7 @@ export interface Mandao {
   tutorial: boolean;
   progress: number; // this run, or the running total for a lifetime kind
   done: boolean;
+  justDone: boolean; // it got done during the current or last run (the card stamps these)
   base: number; // lifetime kinds: progress banked before this run
 }
 
@@ -104,7 +105,11 @@ export interface MandaosView {
   daily: Mandao;
   dailyDay: string;
   streak: number; // days in a row, 0 when the streak is not alive
-  perRun(kind: MandaoKind): boolean;
+}
+
+// Whether a kind's copy says "in one run" (the goal restarts every run).
+export function mandaoPerRun(kind: MandaoKind): boolean {
+  return KINDS[kind].perRun;
 }
 
 const KEY_MANDAOS = 'ecc.v1.mandaos';
@@ -168,7 +173,7 @@ const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFin
 const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 function makeMandao(kind: MandaoKind, target: number, reward: number, tutorial: boolean): Mandao {
-  return { kind, target, reward, tutorial, progress: 0, done: false, base: 0 };
+  return { kind, target, reward, tutorial, progress: 0, done: false, justDone: false, base: 0 };
 }
 
 function parseMandao(o: unknown): Mandao | null {
@@ -282,13 +287,13 @@ export class Missions {
       daily: this.daily,
       dailyDay: this.dailyDay,
       streak: alive ? this.streakN : 0,
-      perRun: (k) => KINDS[k].perRun,
     };
   }
 
   // ---------------- internals ----------------
 
   private resetForRun(m: Mandao): void {
+    m.justDone = false;
     if (m.done) {
       m.progress = m.target;
       return;
@@ -304,6 +309,7 @@ export class Missions {
     m.progress = p < m.target ? p : m.target;
     if (p < m.target) return false;
     m.done = true;
+    m.justDone = true;
     return true;
   }
 
