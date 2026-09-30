@@ -5,22 +5,45 @@ import { describe, expect, it } from 'vitest';
 import { CONFIG, PINTURAS, VEHICLES, type VehicleId } from '../config';
 
 describe('CONFIG invariants from the brief', () => {
-  it('telegraph invariant: anything that can kill you is visible for >= telegraphMinSec at max closing speed', () => {
-    const fastestRide = Math.max(...Object.values(VEHICLES).map((v) => v.speedCap * v.speedMult));
+  it('telegraph invariant: a threat is readable for >= telegraphMinSec at the fastest the rider can go', () => {
+    // Readable means at most 70% fogged. three.js linear fog is
+    // smoothstep(fogNear, fogFar, depth), so the 70% line sits at depth
+    // fogNear + t70 * (fogFar - fogNear) from the CAMERA; the rider is
+    // camBack (plus the gas pull-back) in front of it. CONFIG.fogFar is the
+    // nearest fog any tramo uses, so this is the worst tramo. Depth is taken
+    // straight ahead: the camera's downward pitch only makes real depth
+    // (and so the fog) smaller, which makes this bound conservative.
+    let t70 = 0.5;
+    for (let lo = 0, hi = 1, i = 0; i < 40; i++) {
+      t70 = (lo + hi) / 2;
+      if (t70 * t70 * (3 - 2 * t70) < 0.7) lo = t70;
+      else hi = t70;
+    }
+    const fogDepth70 = CONFIG.fogNear + t70 * (CONFIG.fogFar - CONFIG.fogNear);
+    const readable = fogDepth70 - (CONFIG.camBack + CONFIG.camGasPullBack);
+    // Every archetype's top speed, civics included, even though civics only
+    // spawn same-direction today: the bound must not depend on spawner rules.
     const speeds = Object.values(CONFIG.vehicleSpeeds) as ReadonlyArray<readonly [number, number]>;
     const fastestOncoming = Math.max(...speeds.map((r) => r[1]));
-    // gas and cafecito never stack, so the bound is the larger of the two
-    const closing = fastestRide * Math.max(CONFIG.cafecitoBoost, CONFIG.gasSpeedMult) + fastestOncoming;
-    expect(CONFIG.spawnAhead / closing).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
+    for (const [id, v] of Object.entries(VEHICLES)) {
+      const cruise = v.speedCap * v.speedMult;
+      // Gas and the cafecito share the sacred ceiling (main.ts stepSim).
+      const ceiling = Math.max(cruise, CONFIG.gasMaxMps);
+      const gas = Math.min(cruise * CONFIG.gasSpeedMult, ceiling);
+      const cafecito = Math.min(cruise * CONFIG.cafecitoBoost, ceiling);
+      const fastest = Math.max(cruise, gas, cafecito);
+      expect(readable / (fastest + fastestOncoming), `${id} at ${fastest.toFixed(1)} m/s`).toBeGreaterThanOrEqual(
+        CONFIG.telegraphMinSec,
+      );
+    }
+    // Threats are born beyond the readable line, so they fade in rather than pop.
+    expect(CONFIG.spawnAhead).toBeGreaterThan(readable);
   });
 
-  it('fog never hides what the spawner promised you could see', () => {
-    // spawnAhead can sit beyond fogFar (the world fades in), but the reaction
-    // window itself must be inside clear air at max closing speed
-    const fastestRide = Math.max(...Object.values(VEHICLES).map((v) => v.speedCap * v.speedMult));
-    const speeds = Object.values(CONFIG.vehicleSpeeds) as ReadonlyArray<readonly [number, number]>;
-    const fastestOncoming = Math.max(...speeds.map((r) => r[1]));
-    expect(CONFIG.fogFar / (fastestRide + fastestOncoming)).toBeGreaterThanOrEqual(CONFIG.telegraphMinSec);
+  it('the gas always has headroom: the ceiling sits above every ride at cruise', () => {
+    for (const v of Object.values(VEHICLES)) {
+      expect(CONFIG.gasMaxMps).toBeGreaterThan(v.speedCap * v.speedMult);
+    }
   });
 
   it('no tramo pulls its fog in closer than the fog the telegraph rule was checked against', () => {
@@ -46,11 +69,16 @@ describe('CONFIG invariants from the brief', () => {
     }
   });
 
-  it('the throttle never stops the run and the brake floor keeps the gentle start survivable', () => {
+  it('the pedal never stops the run, the brake bites, and speed is paid for', () => {
     expect(CONFIG.brakeSpeedMult).toBeGreaterThan(0.5);
     expect(CONFIG.brakeSpeedMult).toBeLessThan(1);
     expect(CONFIG.gasSpeedMult).toBeGreaterThan(1);
     expect(CONFIG.gasSpeedMult).toBeLessThanOrEqual(CONFIG.cafecitoBoost);
+    expect(CONFIG.brakeResponse).toBeGreaterThan(CONFIG.gasResponse);
+    // risk = score: the gas pays, the brake costs
+    expect(CONFIG.gasScoreMult).toBeGreaterThan(1);
+    expect(CONFIG.brakeScoreMult).toBeLessThan(1);
+    expect(CONFIG.brakeScoreMult).toBeGreaterThan(0);
   });
 
   it('the tour is coherent: the Obelisco offset lands inside a Malecon stretch', () => {

@@ -1,7 +1,8 @@
 // audio.ts: el sonido del barrio. 100% WebAudio synthesis, zero assets, zero
 // network. Dembow sequencer with intensity layers tied to combo and contra
-// via, an engine that tracks speed and revs on the caballito, bocinazos with
-// a doppler bend, a quiet wave wash, and the full SFX set.
+// via, an engine that tracks speed, revs on the caballito and answers el
+// pedal, bocinazos with a doppler bend, a quiet wave wash, and the full SFX
+// set.
 //
 // The AudioContext is created and resumed on the first user gesture (iOS
 // unlock). Every public call is safe to make before that: it just no-ops.
@@ -35,6 +36,8 @@ export interface AudioUpdateCtx {
   combo: number;
   contraVia: boolean;
   wheelie: boolean;
+  gas: number; // 0..1, how far into the gas the felt speed is (not the raw press)
+  brake: number; // 0..1, how far into the brake the felt speed is
 }
 
 function readMute(): boolean {
@@ -69,6 +72,7 @@ export class AudioEngine {
   private step = 0;
   private nextStepAt = 0;
   private wheeliePrev = false;
+  private revBlipUntil = 0; // a short over-rev on the gas engage, then the engine settles
   private nextHornAt = 0;
   private resumeCooldown = 0;
 
@@ -250,14 +254,21 @@ export class AudioEngine {
         this.nextStepAt += stepDur;
       }
 
-      // Engine tracks speed; revs on the caballito
-      const baseF = 58 + 74 * u.speedNorm;
-      const targetF = baseF * (u.wheelie ? 1.5 : 1);
-      const quick = u.wheelie && !this.wheeliePrev;
+      // Engine tracks speed; revs on the caballito. The pedal has its own
+      // voice on top of speed, so gas still sounds like gas at the speed cap
+      // and the brake is audible at the very start of a run.
+      const baseF =
+        (58 + 74 * u.speedNorm) * (1 + CONFIG.engineGasRev * u.gas) * (1 - CONFIG.engineBrakeDrop * u.brake);
+      const blip = now < this.revBlipUntil;
+      const targetF = baseF * (u.wheelie ? 1.5 : 1) * (blip ? 1.18 : 1);
+      const quick = (u.wheelie && !this.wheeliePrev) || blip;
       this.engineOsc.frequency.setTargetAtTime(targetF, now, quick ? 0.03 : 0.12);
-      this.engineFilter.frequency.setTargetAtTime(380 + 680 * u.speedNorm, now, 0.15);
+      this.engineFilter.frequency.setTargetAtTime(380 + 680 * u.speedNorm + 700 * u.gas - 120 * u.brake, now, 0.15);
       this.engineGain.gain.setTargetAtTime(
-        (0.055 + (CONFIG.engineVolume - 0.055) * u.speedNorm) * (u.wheelie ? 1.3 : 1),
+        (0.055 + (CONFIG.engineVolume - 0.055) * u.speedNorm) *
+          (u.wheelie ? 1.3 : 1) *
+          (1 + 0.35 * u.gas) *
+          (1 - 0.2 * u.brake),
         now,
         0.15,
       );
@@ -531,6 +542,46 @@ export class AudioEngine {
     src.connect(f).connect(g).connect(this.sfxBus);
     src.start(t, Math.random() * 0.6);
     src.stop(t + 0.35);
+  }
+
+  // El pedal. The press itself must sound at once, even though the speed
+  // eases in behind it: a turbo whoosh and an over-rev on gas...
+  turbo(): void {
+    if (!this.ready()) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    this.revBlipUntil = t + 0.15;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.2;
+    f.frequency.setValueAtTime(600, t);
+    f.frequency.exponentialRampToValueAtTime(2400, t + 0.25);
+    const g = ctx.createGain();
+    this.env(g, t, CONFIG.pedalSfxVolume, 0.25, 0.02);
+    src.connect(f).connect(g).connect(this.sfxBus);
+    src.start(t, Math.random() * 0.6);
+    src.stop(t + 0.35);
+  }
+
+  // ...and a tire chirp on the brake.
+  brake(): void {
+    if (!this.ready()) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 4;
+    f.frequency.setValueAtTime(2600, t);
+    f.frequency.exponentialRampToValueAtTime(900, t + 0.2);
+    const g = ctx.createGain();
+    this.env(g, t, CONFIG.pedalSfxVolume * 0.9, 0.2, 0.006);
+    src.connect(f).connect(g).connect(this.sfxBus);
+    src.start(t, Math.random() * 0.6);
+    src.stop(t + 0.3);
   }
 
   splash(): void {

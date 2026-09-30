@@ -48,6 +48,19 @@ describe('Score: the multiplier stack', () => {
     expect(s.points).toBe(100); // reset drops the gas flag
   });
 
+  it('braking pays brakeScoreMult on everything, and reset drops it', () => {
+    const s = new Score();
+    s.setVehicle('motor');
+    s.setBrake(true);
+    s.step(100, 1, { airborne: false, wheelie: false });
+    expect(s.points).toBe(Math.floor(100 * CONFIG.brakeScoreMult));
+    const nm = s.nearMiss();
+    expect(nm.pts).toBe(Math.round(CONFIG.nearMissPoints * CONFIG.brakeScoreMult));
+    s.reset();
+    s.step(100, 1, { airborne: false, wheelie: false });
+    expect(s.points).toBe(100);
+  });
+
   it('near-miss points scale with the combo, and the combo decays after comboDecaySec', () => {
     const s = new Score();
     s.setVehicle('motor');

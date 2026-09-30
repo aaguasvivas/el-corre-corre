@@ -2,7 +2,7 @@
 // the share card. Spanish-first with an EN flip. The slang stays Dominican in
 // both languages.
 
-import { VEHICLES, type VehicleId } from './config';
+import { CONFIG, VEHICLES, type VehicleId } from './config';
 import { LADDER_STEPS, type RunResult } from './score';
 import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
@@ -10,6 +10,7 @@ import type { SetPieceKind } from './traffic';
 
 type Lang = 'es' | 'en';
 const LANG_KEY = 'ecc.v1.lang';
+const PEDAL_SEEN_KEY = 'ecc.v1.pedalSeen'; // '1' once the gas pedal has been pressed, ever
 const POPUP_POOL = 12;
 
 const STRINGS = {
@@ -46,9 +47,12 @@ const STRINGS = {
     cvPill: '¡EN CONTRA VÍA! ×2',
     trickPillBike: '¡CABALLITO! ×1.5',
     trickPillCar: '¡DERRAPE! ×1.5',
-    gasPill: '¡A FONDO! ×1.25',
-    ctrlThrottleTouch: 'Dedo arriba: gas · dedo abajo: freno',
+    ctrlThrottleTouch: 'Aguanta ¡DALE! pa’ acelerar · FRENO pa’ frenar',
     ctrlThrottleKey: '↑ acelera · ↓ frena',
+    pedalGas: '¡DALE!',
+    pedalBrake: 'FRENO',
+    ariaGas: 'Acelerar',
+    ariaBrake: 'Frenar',
     trickBike: '¡CABALLITO!',
     trickCar: '¡DERRAPE!',
     air: '¡AIRE!',
@@ -105,9 +109,12 @@ const STRINGS = {
     cvPill: 'WRONG WAY! ×2',
     trickPillBike: 'WHEELIE! ×1.5',
     trickPillCar: 'DRIFT! ×1.5',
-    gasPill: 'FLOORED! ×1.25',
-    ctrlThrottleTouch: 'Finger up: gas · finger down: brake',
+    ctrlThrottleTouch: 'Hold GAS to speed up · BRAKE to slow down',
     ctrlThrottleKey: '↑ gas · ↓ brake',
+    pedalGas: 'GAS',
+    pedalBrake: 'BRAKE',
+    ariaGas: 'Gas',
+    ariaBrake: 'Brake',
     trickBike: 'WHEELIE!',
     trickCar: 'DRIFT!',
     air: 'AIR!',
@@ -171,6 +178,7 @@ const FLAG_SVG = `<svg class="flag-svg" viewBox="0 0 80 50" role="img" aria-labe
 </svg>`;
 
 export interface UICallbacks {
+  onPedal(v: -1 | 0 | 1): void; // el pedal: -1 FRENO held, 0 released, 1 ¡DALE! held
   onStart(): void;
   onRestart(): void;
   onResume(): void;
@@ -189,6 +197,19 @@ function readLang(): Lang {
   } catch {
     return 'es';
   }
+}
+
+function readPedalSeen(): boolean {
+  try {
+    return localStorage.getItem(PEDAL_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+// "×1.5" from 1.5: the pedal tags read the real multipliers, never a copy.
+function multTag(m: number): string {
+  return `×${m}`;
 }
 
 function clampPct(v: number, lo: number, hi: number): number {
@@ -257,9 +278,25 @@ export class UI {
   private comboEl: HTMLElement;
   private cvEl: HTMLElement;
   private cabEl: HTMLElement;
-  private gasEl: HTMLElement;
   private gasShown = false;
+  private brakeShown = false;
   private speedLinesShown = -1;
+  // El pedal. One pointer owns the cluster; every finger that ever landed on
+  // it stays reserved (never steers, never swipes) until it lifts, even
+  // after a pause or a crash released the pedal under it.
+  private pedalsEl: HTMLElement;
+  private pedalGasEl: HTMLElement;
+  private pedalBrakeEl: HTMLElement;
+  private pedalSpeedEl: HTMLElement;
+  private pedalKmhEl: HTMLElement;
+  private pedalLive = false;
+  private pedalOwner: number | null = null;
+  private pedalReserved = new Set<number>();
+  private pedalValue: -1 | 0 | 1 = 0;
+  private pedalSplit = 0;
+  private pedalShown: -1 | 0 | 1 = 0;
+  private kmhShown = -1;
+  private pedalSeen = readPedalSeen();
   private ctrlThrottleEl: HTMLElement;
   private platEl: HTMLElement;
   private multEl: HTMLElement;
@@ -310,12 +347,18 @@ export class UI {
         <div id="hud-combo" class="hidden"><span id="combo-text"></span><i id="combo-bar"></i></div>
         <div id="hud-cv" class="hidden">¡EN CONTRA VÍA! ×2</div>
         <div id="hud-cab" class="hidden">¡CABALLITO! ×1.5</div>
-        <div id="hud-gas" class="hidden"></div>
         <div id="hud-record"></div>
         <div id="hud-left">
           <button id="hud-pause" type="button" aria-label="Pausa"><i></i><i></i></button>
           <div id="hud-platanos">${BANANA_SVG}<span id="plat-n">0</span></div>
           <div id="hud-mult" class="hidden">×2</div>
+        </div>
+        <div id="pedals" class="hidden">
+          <div id="pedal-speed" class="pedal-speed"><b id="pedal-kmh">0</b><span>km/h</span></div>
+          <b class="pedal-mult pedal-mult-brake">${multTag(CONFIG.brakeScoreMult)}</b>
+          <b class="pedal-mult pedal-mult-gas">${multTag(CONFIG.gasScoreMult)}</b>
+          <button id="pedal-brake" class="pedal pedal-brake" type="button"><i class="pedal-tread"></i><span class="pedal-label"></span></button>
+          <button id="pedal-gas" class="pedal pedal-gas" type="button"><i class="pedal-tread"></i><span class="pedal-label"></span></button>
         </div>
       </div>
       <div id="popup-layer"></div>
@@ -385,7 +428,12 @@ export class UI {
     this.comboEl = q('#hud-combo');
     this.cvEl = q('#hud-cv');
     this.cabEl = q('#hud-cab');
-    this.gasEl = q('#hud-gas');
+    this.pedalsEl = q('#pedals');
+    this.pedalGasEl = q('#pedal-gas');
+    this.pedalBrakeEl = q('#pedal-brake');
+    this.pedalSpeedEl = q('#pedal-speed');
+    this.pedalKmhEl = q('#pedal-kmh');
+    this.pedalGasEl.classList.toggle('hint', !this.pedalSeen);
     this.ctrlThrottleEl = q('#ctrl-throttle');
     this.platEl = q('#plat-n');
     this.multEl = q('#hud-mult');
@@ -488,8 +536,136 @@ export class UI {
       e.stopPropagation();
       this.cb.onPause();
     });
+    this.bindPedals();
 
     this.applyLang();
+  }
+
+  // ---------------- el pedal ----------------
+
+  // The whole cluster is one hit zone, larger than the art. The buttons have
+  // pointer-events: none, so every event targets the cluster itself. Both
+  // pointerdown AND pointermove stop here: the window handlers in player.ts
+  // adopt any pressed finger that moves, and a pedal thumb that reached them
+  // would steer the bike the moment the steering thumb lifted.
+  private bindPedals(): void {
+    const el = this.pedalsEl;
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.pedalReserved.add(e.pointerId);
+      if (!this.pedalLive || this.pedalOwner !== null) return;
+      this.pedalOwner = e.pointerId;
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        // a pointer that is already gone; the window lift below still ends it
+      }
+      const b = this.pedalBrakeEl.getBoundingClientRect();
+      const g = this.pedalGasEl.getBoundingClientRect();
+      this.pedalSplit = (b.right + g.left) / 2;
+      this.setPedalValue(this.pedalZone(e.clientX));
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!this.pedalReserved.has(e.pointerId)) return;
+      e.stopPropagation();
+      // Rocking the thumb between FRENO and GAS re-zones without lifting.
+      if (e.pointerId === this.pedalOwner) this.setPedalValue(this.pedalZone(e.clientX));
+    });
+    el.addEventListener('lostpointercapture', (e) => {
+      if (e.pointerId === this.pedalOwner) this.releasePedal();
+    });
+    // A lift anywhere ends that finger's claim. Capture phase, so it runs
+    // before anything else can see the event.
+    const lift = (e: PointerEvent): void => {
+      if (e.pointerId === this.pedalOwner) this.releasePedal();
+      this.pedalReserved.delete(e.pointerId);
+    };
+    window.addEventListener('pointerup', lift, { capture: true });
+    window.addEventListener('pointercancel', lift, { capture: true });
+    window.addEventListener('blur', () => {
+      this.releasePedal();
+      this.pedalReserved.clear();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.releasePedal();
+    });
+  }
+
+  // Which pedal is under the owning thumb: left of the gap is FRENO, right of
+  // it is GAS, all the way to the screen edge, so a thumb that slides off
+  // the art keeps what it was holding. 6 px of hysteresis at the gap.
+  private pedalZone(x: number): -1 | 1 {
+    if (this.pedalValue === 1) return x < this.pedalSplit - 6 ? -1 : 1;
+    if (this.pedalValue === -1) return x > this.pedalSplit + 6 ? 1 : -1;
+    return x < this.pedalSplit ? -1 : 1;
+  }
+
+  private setPedalValue(v: -1 | 0 | 1): void {
+    if (v === this.pedalValue) return;
+    this.pedalValue = v;
+    this.showPedal(v); // the press shows in this frame, before the sim moves
+    this.cb.onPedal(v);
+  }
+
+  // Lets go of the pedal. The finger stays reserved until it lifts, so
+  // resuming a pause or starting the next run needs a fresh press.
+  releasePedal(): void {
+    if (this.pedalOwner !== null) {
+      const id = this.pedalOwner;
+      this.pedalOwner = null;
+      try {
+        if (this.pedalsEl.hasPointerCapture(id)) this.pedalsEl.releasePointerCapture(id);
+      } catch {
+        // already released
+      }
+    }
+    this.setPedalValue(0);
+  }
+
+  // Shown and pressable only during a live run.
+  setPedalLive(on: boolean): void {
+    this.pedalLive = on;
+    if (!on) this.releasePedal();
+    this.pedalsEl.classList.toggle('hidden', !on);
+  }
+
+  // Player's hook: a finger that landed on the pedal never steers.
+  isPedalPointer(id: number): boolean {
+    return this.pedalReserved.has(id);
+  }
+
+  // The pressed look. Called by the pedal itself and every frame from the
+  // live throttle, so the arrow keys press the pedals too.
+  showPedal(v: -1 | 0 | 1): void {
+    if (v === this.pedalShown) return;
+    this.pedalShown = v;
+    this.pedalGasEl.classList.toggle('down', v === 1);
+    this.pedalBrakeEl.classList.toggle('down', v === -1);
+    if (v === 1 && !this.pedalSeen) {
+      this.pedalSeen = true;
+      this.pedalGasEl.classList.remove('hint');
+      try {
+        localStorage.setItem(PEDAL_SEEN_KEY, '1');
+      } catch {
+        // fine, it breathes again next launch
+      }
+    }
+  }
+
+  // Braking pays ×0.5: the tag rides above FRENO while it applies.
+  setBrake(on: boolean): void {
+    if (on === this.brakeShown) return;
+    this.brakeShown = on;
+    this.pedalsEl.classList.toggle('brake-on', on);
+  }
+
+  // The speedometer above the pedals, in km/h. Written only when the
+  // rounded number changes.
+  setSpeedKmh(kmh: number): void {
+    if (kmh === this.kmhShown) return;
+    this.kmhShown = kmh;
+    this.pedalKmhEl.textContent = String(kmh);
   }
 
   private t(): (typeof STRINGS)[Lang] {
@@ -522,7 +698,10 @@ export class UI {
     this.cvEl.textContent = t.cvPill;
     this.cabEl.textContent =
       this.selectedVehicle === 'civic' ? t.trickPillCar : t.trickPillBike;
-    this.gasEl.textContent = t.gasPill;
+    this.pedalGasEl.setAttribute('aria-label', t.ariaGas);
+    this.pedalBrakeEl.setAttribute('aria-label', t.ariaBrake);
+    this.pedalGasEl.querySelector('.pedal-label')!.textContent = t.pedalGas;
+    this.pedalBrakeEl.querySelector('.pedal-label')!.textContent = t.pedalBrake;
     this.subtitleEl.textContent = t.subtitle;
     const touch = this.inputMode === 'touch';
     this.ctrlThrottleEl.textContent = touch ? t.ctrlThrottleTouch : t.ctrlThrottleKey;
@@ -626,6 +805,8 @@ export class UI {
     this.setContraVia(false);
     this.setCaballito(false);
     this.setGas(false);
+    this.setBrake(false);
+    this.setPedalLive(false);
   }
 
   showPlaying(record: number): void {
@@ -640,6 +821,9 @@ export class UI {
     this.setContraVia(false);
     this.setCaballito(false);
     this.setGas(false);
+    this.setBrake(false);
+    this.showPedal(0);
+    this.setPedalLive(true);
     this.multShown = 1;
     this.multEl.classList.add('hidden');
     for (const p of this.popups) p.classList.remove('go');
@@ -676,14 +860,18 @@ export class UI {
     this.setContraVia(false);
     this.setCaballito(false);
     this.setGas(false);
+    this.setBrake(false);
+    this.setPedalLive(false);
   }
 
   showPause(): void {
     this.pause.classList.remove('hidden');
+    this.setPedalLive(false);
   }
 
   hidePause(): void {
     this.pause.classList.add('hidden');
+    this.setPedalLive(true);
   }
 
   setScore(n: number): void {
@@ -750,10 +938,14 @@ export class UI {
     if (el) el.style.opacity = String(q / 20);
   }
 
+  // A fondo pays ×1.5: the GAS pedal glows, its tag shows, and the
+  // speedometer turns gold, all only once the surge is really felt.
   setGas(on: boolean): void {
     if (on === this.gasShown) return;
     this.gasShown = on;
-    this.gasEl.classList.toggle('hidden', !on);
+    this.pedalsEl.classList.toggle('gas-on', on);
+    this.pedalGasEl.classList.toggle('on', on);
+    this.pedalSpeedEl.classList.toggle('fast', on);
   }
 
   setMuted(m: boolean): void {

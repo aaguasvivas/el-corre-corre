@@ -1,5 +1,6 @@
-// player.ts: input, continuous steering physics, the held caballito, airtime,
-// edge scrape, power-up states, the three rides, and the crash tumble.
+// player.ts: input (steering, el pedal's throttle), continuous steering
+// physics, the held caballito, airtime, edge scrape, power-up states, the
+// three rides, the tail light, and the crash tumble.
 // Steering is a velocity-target model: input sets a desired lateral velocity,
 // acceleration chases it, damping glides it out. Continuous across the full
 // road width, never lane-snapped.
@@ -27,8 +28,15 @@ function rgeo(w: number, h: number, d: number, r: number): THREE.BufferGeometry 
 }
 const START_X = -3.4; // middle of your half of the road
 
+// Tail light: a dim lens at cruise, full red while braking.
+const TAIL_DARK = new THREE.Color(0x5a0a0e);
+const TAIL_LIT = new THREE.Color(0xff2a2a);
+
 export interface PlayerCallbacks {
   isSteeringActive: () => boolean;
+  // A finger that landed on el pedal: it never steers and never feeds the
+  // caballito swipe, even after the steering thumb lifts.
+  isReservedPointer: (id: number) => boolean;
   onScrape: () => void;
   onWheelieEnd: () => void;
   onLand: () => void;
@@ -71,8 +79,8 @@ export class Player {
   x = START_X;
   velX = 0;
   vehicle: VehicleId = 'motor';
-  // El acelerador: -1 full brake .. 0 cruise .. +1 a fondo. Keys or the
-  // finger's height above where it landed; main eases speed toward it.
+  // El pedal: -1 full brake .. 0 cruise .. +1 a fondo. The on-screen pedal
+  // or ArrowUp / ArrowDown; main eases speed toward it.
   throttle = 0;
 
   private root = new THREE.Group();
@@ -98,7 +106,7 @@ export class Player {
   private keys = new Set<string>();
   private wheelieKeys = new Set<string>();
   private throttleKeys = new Set<string>();
-  private touchOriginY = 0;
+  private pedal: -1 | 0 | 1 = 0;
   private touchActive = false;
   private touchWheelieHold = false;
   private touchTargetX = START_X;
@@ -117,6 +125,11 @@ export class Player {
   private wheelieLatch = false; // must release before the next one arms
   private driftYawVis = 0;
   private driftSign = 1;
+  private pedalPitchVis = 0; // the ride's forward / back pitch answering the pedal
+  private brakeGlow = 0; // tail light, 0 dark .. 1 full red
+  private brakeLight!: THREE.Mesh;
+  private brakeLightMat!: THREE.MeshBasicMaterial;
+  private brakeLightGeo: Partial<Record<VehicleId, THREE.BufferGeometry>> = {};
 
   // airtime
   private airborne = false;
@@ -276,6 +289,35 @@ export class Player {
     }
     this.wheels = rig.wheels;
     this.wheelRadius = rig.wheelRadius;
+    this.attachBrakeLight(id);
+  }
+
+  // El pedal's in-world half: a tail light that glows while you brake. It is
+  // its own mesh on the lean group (so it follows lean, caballito and pedal
+  // pitch) instead of a part of any rig, so the ride builders and a pintura
+  // rebuild never touch it. One mesh, one geometry per ride: +1 draw call.
+  private attachBrakeLight(id: VehicleId): void {
+    if (!this.brakeLight) {
+      this.brakeLightMat = worldMaterial(new THREE.MeshBasicMaterial({ color: TAIL_DARK }));
+      this.brakeLight = new THREE.Mesh(new THREE.BufferGeometry(), this.brakeLightMat);
+      this.leanGroup.add(this.brakeLight);
+    }
+    let geo = this.brakeLightGeo[id];
+    if (!geo) {
+      if (id === 'civic') {
+        // two lamps on the trunk face, either side of the racing stripe
+        geo = mergeGeometries([
+          new THREE.BoxGeometry(0.34, 0.09, 0.04).translate(-0.55, 0.52, -1.965),
+          new THREE.BoxGeometry(0.34, 0.09, 0.04).translate(0.55, 0.52, -1.965),
+        ])!;
+      } else if (id === 'pasola') {
+        geo = new THREE.BoxGeometry(0.18, 0.08, 0.04).translate(0, 0.62, -0.685);
+      } else {
+        geo = new THREE.BoxGeometry(0.16, 0.07, 0.04).translate(0, 0.72, -0.655);
+      }
+      this.brakeLightGeo[id] = geo;
+    }
+    this.brakeLight.geometry = geo;
   }
 
   // Meshes that have to stay their own object: the wheels (they spin) and the
@@ -498,6 +540,7 @@ export class Player {
 
     window.addEventListener('pointerdown', (e) => {
       if (!this.cb.isSteeringActive() || this.pointerId !== null) return;
+      if (this.cb.isReservedPointer(e.pointerId)) return;
       this.adoptPointer(e);
     });
     window.addEventListener('pointermove', (e) => {
@@ -507,21 +550,15 @@ export class Player {
         // thumb that tapped OTRA VEZ (its pointerdown was rejected while the
         // state was still gameover), and a second thumb still planted when
         // the steering one lifts. buttons !== 0 keeps a hovering mouse out.
+        // The pedal thumb is the exception: it is never adopted.
         if (e.buttons === 0 || !this.cb.isSteeringActive()) return;
+        if (this.cb.isReservedPointer(e.pointerId)) return;
         this.adoptPointer(e);
         return; // no phantom dx on the frame we take over
       }
       if (!this.touchActive || e.pointerId !== this.pointerId) return;
       const dx = e.clientX - this.lastPointerX;
       this.lastPointerX = e.clientX;
-      // Throttle by height: hold the finger above where it landed for gas,
-      // below it for brake, with a dead zone so a dodge stays a dodge. A
-      // fast flick is still the caballito (handled below); a slow slide is
-      // the throttle, and the two coexist: a flick up and hold is gas AND
-      // caballito, which is exactly how a tiguere would ride it.
-      const up = this.touchOriginY - e.clientY;
-      const mag = Math.max(0, Math.abs(up) - CONFIG.touchThrottleDeadPx) / CONFIG.touchThrottleRangePx;
-      this.throttle = clamp(mag, 0, 1) * Math.sign(up);
       // Screen right is world -x, so the drag flips sign here.
       // innerWidth can read 0 for a frame during a rotation or a viewport
       // switch; 0/0 would poison the target with NaN and blank the world.
@@ -560,7 +597,6 @@ export class Player {
   private adoptPointer(e: PointerEvent): void {
     this.pointerId = e.pointerId;
     this.lastPointerX = e.clientX;
-    this.touchOriginY = e.clientY;
     this.touchActive = true;
     this.touchTargetX = this.x;
     this.swipeRefX = e.clientX;
@@ -572,7 +608,20 @@ export class Player {
     this.touchActive = false;
     this.touchWheelieHold = false;
     this.pointerId = null;
-    this.throttle = 0;
+  }
+
+  // El pedal: -1 FRENO, 0 released, 1 ¡DALE!. Held values win over the
+  // arrow keys; releasing hands the throttle back to them.
+  setPedal(v: -1 | 0 | 1): void {
+    this.pedal = v;
+    this.readThrottle(); // live at once, not on the next sim step
+  }
+
+  private readThrottle(): void {
+    this.throttle =
+      this.pedal !== 0
+        ? this.pedal
+        : (this.throttleKeys.has('ArrowUp') ? 1 : 0) - (this.throttleKeys.has('ArrowDown') ? 1 : 0);
   }
 
   launch(vy: number): void {
@@ -590,6 +639,11 @@ export class Player {
     this.wheelieActive = false;
     this.wheelieCooldownT = CONFIG.wheelieCooldownBase + this.wheelieT * CONFIG.wheelieCooldownPerSec;
     this.cb.onWheelieEnd();
+  }
+
+  // An exhaust puff the moment the gas goes down.
+  gasPuff(): void {
+    this.emit('dust', 5, this.x, 0.3, this.vehicle === 'civic' ? -2.1 : -0.95, 1.6);
   }
 
   applyCharco(): void {
@@ -641,10 +695,7 @@ export class Player {
       }
     }
 
-    if (!this.touchActive) {
-      this.throttle =
-        (this.throttleKeys.has('ArrowUp') ? 1 : 0) - (this.throttleKeys.has('ArrowDown') ? 1 : 0);
-    }
+    this.readThrottle();
 
     // El caballito: hold to keep it up, authority decays while you do
     const held = this.wheelieKeys.size > 0 || this.touchWheelieHold;
@@ -757,7 +808,18 @@ export class Player {
     this.leanGroup.rotation.z = this.leanVis + wobble;
     const wheelieTarget = this.wheelieActive && this.vehicle !== 'civic' ? this.wheelieAngleMax : 0;
     this.wheelieVis += (wheelieTarget - this.wheelieVis) * Math.min(1, 11 * dt);
-    this.leanGroup.rotation.x = -this.wheelieVis;
+    // El pedal on the model, ahead of the eased speed: the rider tucks
+    // forward on gas and sits back on the brake. The rider is part of the
+    // rig, so the whole rig pitches. DECISION: the Civic does what a car
+    // does instead, squatting under power and diving under the brakes.
+    const th = this.throttle;
+    const pitchTarget =
+      (th > 0 ? CONFIG.gasPitchRad : CONFIG.brakePitchRad) * th * (this.vehicle === 'civic' ? -0.5 : 1);
+    const kp = Math.min(1, CONFIG.pedalPitchResponse * dt);
+    this.pedalPitchVis += (pitchTarget - this.pedalPitchVis) * kp;
+    this.leanGroup.rotation.x = -this.wheelieVis + this.pedalPitchVis;
+    this.brakeGlow += ((th <= -CONFIG.gasEngageAt ? 1 : 0) - this.brakeGlow) * Math.min(1, 2 * kp);
+    this.brakeLightMat.color.lerpColors(TAIL_DARK, TAIL_LIT, this.brakeGlow);
     this.leanGroup.position.y = Math.sin(this.wheelieVis) * this.wheelieLift;
     if (Math.abs(this.velX) > 0.6) this.driftSign = this.velX > 0 ? 1 : -1;
     const driftTarget = drifting ? this.driftSign * CONFIG.driftYaw : 0;
@@ -873,6 +935,11 @@ export class Player {
     this.wheelieVis = 0;
     this.touchTargetX = START_X;
     this.endTouch();
+    this.pedal = 0;
+    this.throttle = 0;
+    this.pedalPitchVis = 0;
+    this.brakeGlow = 0;
+    this.brakeLightMat.color.copy(TAIL_DARK);
     this.wheelieKeys.clear();
     this.tumbling = false;
     this.settling = false;

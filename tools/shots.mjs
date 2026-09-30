@@ -254,6 +254,13 @@ function helpers(page, vp) {
       return done;
     },
 
+    // Where a pedal is on screen: the centre of #pedal-gas or #pedal-brake.
+    pedalAt: (which) =>
+      page.evaluate((sel) => {
+        const r = document.querySelector(sel).getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }, which === 'gas' ? '#pedal-gas' : '#pedal-brake'),
+
     // Drag a finger sideways until the rider sits at world x (a feedback
     // loop, so the pixel-to-metre guess only has to be close).
     steerTo: async (targetX) => {
@@ -364,19 +371,43 @@ const SCENES = [
   },
   {
     id: 'gas',
-    what: 'A fondo: throttle held until the speed lines saturate',
+    what: 'A fondo at the speed cap: GAS pedal held, x1.5 tag, gold km/h, full speed lines',
     settle: 'finish',
-    run: async (s, vp) => {
+    run: async (s) => {
       await s.start();
-      const x = vp.width / 2;
-      const y = vp.height * 0.75;
-      await s.down(x, y);
-      await sleep(260); // slow slide, so it reads as throttle, not a flick
-      await s.move(x, y - 190);
-      // The lines saturate near top speed a fondo: about two minutes into a
-      // run, which is also where the lap brings the rider back to the Malecon.
-      if (!(await s.tickUntil('e.effSpeed() >= 44', 180, 4))) throw new Error('never reached top speed');
+      const p = await s.pedalAt('gas');
+      await s.down(p.x, p.y);
+      // Top speed a fondo: about two minutes into a run, which is also where
+      // the lap brings the rider back to the Malecon.
+      if (!(await s.tickUntil('e.effSpeed() >= 50', 180, 4))) throw new Error('never reached top speed');
       await s.unghost();
+      if (!(await s.ecc('gas')).gasOn) throw new Error('gas is not paying');
+    },
+  },
+  {
+    id: 'gas-early',
+    what: 'A fondo 6 s into a run: the pedal answers at low speed too',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(5);
+      const p = await s.pedalAt('gas');
+      await s.down(p.x, p.y);
+      await s.tick(1.2);
+      if (!(await s.ecc('gas')).gasOn) throw new Error('gas is not paying');
+    },
+  },
+  {
+    id: 'brake',
+    what: 'Frenando: FRENO held, x0.5 tag, tail light on',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(4);
+      const p = await s.pedalAt('brake');
+      await s.down(p.x, p.y);
+      await s.tick(0.8);
+      if (!(await s.ecc('gas')).brakeOn) throw new Error('brake is not engaged');
     },
   },
   {
@@ -449,10 +480,18 @@ const SCENES = [
       await s.ecc('god', false);
       await s.ecc('clearTraffic');
       // Every run hands out a Bendición around 14 s, so the first car may
-      // only take the shield: keep sending one until the rider goes down.
+      // only take the shield: keep sending one until the rider goes down. A
+      // slower car can also hold the spot for a moment (the spawner will not
+      // stack one car on another), so a refused spawn is offered again while
+      // the run is live.
       let crashed = false;
-      for (let i = 0; i < 3 && !crashed; i++) {
-        await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+      for (let i = 0; i < 4 && !crashed; i++) {
+        try {
+          await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+        } catch (err) {
+          if (i >= 3 || (await s.ecc('state')) !== 'playing') throw err;
+          continue;
+        }
         crashed = await s.play(2.5, "e.state() === 'crashing'");
       }
       if (!crashed) throw new Error('no crash');
