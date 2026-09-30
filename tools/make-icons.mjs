@@ -170,16 +170,27 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
+// RGB, with no alpha channel: App Store Connect wants the marketing icon
+// without one. Every pixel drawn here is opaque; a transparent one would be
+// a drawing bug, so it stops the script instead of turning black.
 function encodePng(size, px) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
   ihdr.writeUInt32BE(size, 4);
   ihdr[8] = 8;   // bit depth
-  ihdr[9] = 6;   // RGBA
-  const raw = Buffer.alloc(size * (size * 4 + 1));
+  ihdr[9] = 2;   // RGB
+  const stride = size * 3 + 1;
+  const raw = Buffer.alloc(size * stride);
   for (let y = 0; y < size; y++) {
-    raw[y * (size * 4 + 1)] = 0; // filter: none
-    Buffer.from(px.buffer, y * size * 4, size * 4).copy(raw, y * (size * 4 + 1) + 1);
+    raw[y * stride] = 0; // filter: none
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      if (px[i + 3] !== 255) throw new Error(`pixel ${x},${y} is not opaque (alpha ${px[i + 3]})`);
+      const o = y * stride + 1 + x * 3;
+      raw[o] = px[i];
+      raw[o + 1] = px[i + 1];
+      raw[o + 2] = px[i + 2];
+    }
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

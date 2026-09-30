@@ -1,0 +1,2 @@
+/* The share sheet's "Guardar imagen" asks for this before it adds the run card to Fotos. */
+"NSPhotoLibraryAddUsageDescription" = "El juego guarda en Fotos la tarjeta de tu corrida solo cuando tú lo pides.";

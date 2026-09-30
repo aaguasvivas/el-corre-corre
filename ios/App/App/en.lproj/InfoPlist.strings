@@ -1,0 +1,2 @@
+/* The share sheet's "Save Image" asks for this before it adds the run card to Photos. */
+"NSPhotoLibraryAddUsageDescription" = "The game saves your run card to Photos only when you ask.";
