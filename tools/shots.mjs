@@ -340,17 +340,15 @@ const SCENES = [
   },
   {
     id: 'mandao-toast',
-    what: 'Mid-run: a mandao gets done (10 plátanos) and its toast drops in',
+    what: 'Mid-run: a mandao gets done (10 plátanos) and its gold card drops into the announcement lane',
     settle: 450,
-    toast: true,
     run: async (s) => {
       await s.start();
       await s.tick(1);
       await s.ecc('clearTraffic');
       const x = await s.ecc('x');
       for (let i = 0; i < 10; i++) await s.ecc('spawnPickup', 'platano', x, 8 + i * 2.2);
-      const shown = "document.getElementById('mandao-toast').classList.contains('show')";
-      if (!(await s.play(4, shown))) throw new Error('no mandao toast');
+      if (!(await s.play(4, "e.hud().kind === 'mandao'"))) throw new Error('no mandao card');
     },
   },
   {
@@ -691,6 +689,108 @@ const SCENES = [
     },
   },
 
+  // The in-run HUD at its limits.
+  {
+    id: 'hud-max',
+    what: 'The top band at its fullest: ×15 LEYENDA tier, contra vía and caballito pills, the multiplier on fire, a long score, La Cinta chip',
+    settle: 360,
+    run: async (s, vp) => {
+      await s.start();
+      await s.tick(2);
+      await s.ecc('clearTraffic');
+      // A long score: a burst of near-misses, then that combo dies out.
+      for (let i = 0; i < 160; i++) await s.ecc('nearMiss', 0.8);
+      await s.tick(4.6);
+      await s.ecc('setRecordDist', 9000);
+      await s.rideTo(520); // the ×2 tier: with contra vía and the caballito, ×6
+      await s.clearFx();
+      await s.steerTo(3.4); // en contra vía
+      await s.ecc('setRecordDist', (await s.ecc('runDist')) + 152);
+      const x = vp.width / 2;
+      const y = vp.height * 0.72;
+      await s.down(x, y);
+      await s.move(x, y - 80); // flick and hold: the caballito
+      await s.tick(0.1);
+      for (let i = 0; i < 15; i++) {
+        await s.ecc('nearMiss', 0.8);
+        await s.play(0.06);
+      }
+      await s.play(0.3);
+    },
+  },
+  {
+    id: 'popups-edge',
+    what: 'Popups at the right kerb: a razor pass and a plátano string adding into one "+N", clamped inside the screen',
+    settle: 140,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1.5);
+      await s.ecc('clearTraffic');
+      await s.steerTo(-6.3);
+      await s.ecc('clearTraffic');
+      const x = await s.ecc('x');
+      for (let i = 0; i < 5; i++) await s.ecc('spawnPickup', 'platano', x, 7 + i * 2.2);
+      await s.play(0.5);
+      await s.ecc('nearMiss', 0.2);
+      await s.play(0.25);
+    },
+  },
+  {
+    id: 'coach-steer',
+    what: 'First launch: the steering hint above the pedals',
+    coach: 0,
+    settle: 400,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1.7);
+    },
+  },
+  {
+    id: 'coach-cv',
+    what: 'The contra vía hint (steering already learned)',
+    coach: 1,
+    settle: 400,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1.7);
+    },
+  },
+  {
+    id: 'coach-gas',
+    what: 'The gas hint, pointing at the pedal (everything else learned)',
+    coach: 7,
+    settle: 400,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1.7);
+    },
+  },
+  {
+    id: 'cafecito',
+    what: 'El cafecito on the pedals: the gold ring draining, CAFECITO, FRENO dimmed',
+    settle: 'finish',
+    run: async (s) => {
+      await s.start();
+      await s.tick(2);
+      await s.ecc('clearTraffic');
+      await s.ecc('spawnPickup', 'cafecito', await s.ecc('x'), 6);
+      if (!(await s.tickUntil('e.powerups().cafecitoT > 0', 2, 1 / 30))) throw new Error('no cafecito');
+      await s.tick(1.6);
+    },
+  },
+  {
+    id: 'tramo-campo',
+    what: 'The road sign crossing into El Campo (YA ESTÁS EN EL CAMPO)',
+    settle: 600,
+    run: async (s) => {
+      await s.start();
+      await s.rideTo(1975);
+      await s.clearFx();
+      if (!(await s.play(4, "e.tramo() === 'campo'"))) throw new Error('no border crossing');
+      await s.play(0.3);
+    },
+  },
+
   // App Store candidates: 440x956 @3 = 1320x2868.
   {
     id: 'store-contravia',
@@ -873,8 +973,13 @@ function bootScript(seed, lang) {
     }
   };
   try {
-    localStorage.clear(); // every scene starts as a first launch
+    localStorage.clear(); // every scene starts as a first launch...
     if (lang === 'en') localStorage.setItem('ecc.v1.lang', 'en');
+    // ...that already knows the moves, so no coach chip sits in the shot.
+    // A coach scene (coach: <learned bits>, as ?coach=n) names what is
+    // already known: 1 steer, 2 contra vía, 4 the trick, 8 the gas.
+    const coach = /[?&]coach=(\d+)/.exec(location.search);
+    localStorage.setItem('ecc.v1.learned', coach ? coach[1] : '15');
   } catch {
     // fine
   }
@@ -985,7 +1090,9 @@ async function main() {
         const t0 = Date.now();
         noise = [];
         try {
-          await page.goto(url, { waitUntil: 'load', timeout: LOAD_MS });
+          // Coach chips show on a first launch; scenes that are not about
+          // them start with every move learned (see bootScript).
+          await page.goto(sc.coach === undefined ? url : `${url}?coach=${sc.coach}`, { waitUntil: 'load', timeout: LOAD_MS });
           await page.waitForFunction(() => window.__ecc !== undefined, { timeout: LOAD_MS });
           await page.evaluate(() => document.fonts.ready.then(() => undefined));
           const gl = await glCheck(page);
@@ -1007,16 +1114,12 @@ async function main() {
           // real time left them, or jump to their end for 'finish'. Loops
           // (the pulsing prompt and pill, the vignette, the speed lines) are
           // posed at mid-cycle, their peak, so a frame never depends on the
-          // wall-clock phase a loop happened to be in.
-          // The mandao toasts are the exception: a scene that rides far in
-          // a fast tick finishes mandaos sim minutes before the capture while
-          // the wall clock has barely moved, so their queued toasts (2.2 s
-          // each on the wall clock) would still hang over the frame. They
-          // show only in the scene made for them (toast: true).
+          // wall-clock phase a loop happened to be in. The announcement lane
+          // runs on the HUD's clock, which __ecc.tick advances, so a long
+          // ride's mandao cards are long gone by the capture.
           if (sc.settle !== 'finish') await sleep(sc.settle);
           await page.evaluate(
-            (finish, keepToast) => {
-              if (!keepToast) document.getElementById('mandao-toast').style.display = 'none';
+            (finish) => {
               for (const a of document.getAnimations()) {
                 const t = a.effect?.getComputedTiming();
                 if (t?.endTime === Infinity) {
@@ -1027,7 +1130,6 @@ async function main() {
               }
             },
             sc.settle === 'finish',
-            sc.toast === true,
           );
           const probe = await page.evaluate(() => {
             const e = window.__ecc;
