@@ -83,7 +83,7 @@ const STRINGS = {
     goalTape: 'LA META',
     goalReached: '¡LLEGASTE A LA META!',
     recordNear: '¡Ya casi el récord!',
-    toGo: (n: number) => `FALTAN ${fmtN(n)}`,
+    toGo: (n: number) => `FALTAN ${n}`, // raw digits, like the score and RÉCORD n beside it
     // Los Mandaos
     mandaos: 'LOS MANDAOS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
@@ -193,7 +193,7 @@ const STRINGS = {
     goalTape: 'GOAL',
     goalReached: 'GOAL REACHED!',
     recordNear: 'Record in reach!',
-    toGo: (n: number) => `${fmtN(n)} TO GO`,
+    toGo: (n: number) => `${n} TO GO`,
     mandaos: 'MISSIONS',
     mandaoChip: (done: number, level: number, mult: string, name: string) =>
       level > 0 ? `MISSIONS ${done}/3 · LEVEL ${level} ${mult}` : `MISSIONS ${done}/3 · ${name.toUpperCase()}`,

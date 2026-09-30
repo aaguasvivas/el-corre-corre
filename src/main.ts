@@ -282,19 +282,7 @@ const ui = new UI(document.getElementById('ui')!, {
 ui.setMuted(audio.muted);
 
 const traffic = new Traffic(scene, {
-  onNearMiss: (x, z, clearance) => {
-    const r = score.nearMiss(clearance);
-    const s = w2s(x, 1.3, Math.max(z, 1.5));
-    ui.popupNearMiss(r.razor, r.pts, s.x, s.y, r.combo);
-    const hit = ui.ladderHitText(r.combo);
-    if (hit) ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
-    ui.setCombo(r.combo, ui.ladderTierText(r.combo));
-    audio.nearMiss(panOf(x));
-    if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
-    if (r.razor) razorPass();
-    else haptics.light();
-    missions.sample(score);
-  },
+  onNearMiss,
   onPlatano: (x, y, z) => {
     const pts = score.collectPlatano();
     ui.setPlatanos(score.platanos);
@@ -722,6 +710,22 @@ function runMoments(h: number): void {
   ui.setRecordLabel(rec, score.points);
 }
 
+// A near-miss: clearance is the gap (m) between the rider's circle and the
+// vehicle's hitbox at the pass; razorMissM or tighter is ¡Por un pelito!.
+function onNearMiss(x: number, z: number, clearance: number): void {
+  const r = score.nearMiss(clearance);
+  const s = w2s(x, 1.3, Math.max(z, 1.5));
+  ui.popupNearMiss(r.razor, r.pts, s.x, s.y, r.combo);
+  const hit = ui.ladderHitText(r.combo);
+  if (hit) ui.popup(hit, 50, 34, r.combo >= 7 ? 'pop-xl' : 'pop-lg');
+  ui.setCombo(r.combo, ui.ladderTierText(r.combo));
+  audio.nearMiss(panOf(x));
+  if (Math.random() < 0.25) audio.horn(panOf(x), 0.95 + Math.random() * 0.12);
+  if (r.razor) razorPass();
+  else haptics.light();
+  missions.sample(score);
+}
+
 // A razor pass (¡Por un pelito!). One call site for its feel, so a time-dip
 // or a bigger cue plugs in here.
 function razorPass(): void {
@@ -960,6 +964,18 @@ let testGod = false;
     recordNudged,
   }),
   liveMult: () => +score.liveMult.toFixed(3),
+  // A near-miss through the real handler, at a chosen clearance (m).
+  nearMiss: (clearance: number) => {
+    if (state === 'playing') onNearMiss(player.x + 1.8, 4, clearance);
+  },
+  runStats: () => ({
+    nearMisses: score.nearMisses,
+    razorMisses: score.razorMisses,
+    bestCombo: score.bestCombo,
+    cvMeters: Math.floor(score.cvMeters),
+    airs: score.airs,
+    points: score.points,
+  }),
   lastRun: () => lastRun,
   mandaos: () => missions.view(),
   pause: () => pauseGame(),

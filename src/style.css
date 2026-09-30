@@ -1250,14 +1250,33 @@ body {
   color: var(--gold);
 }
 
-/* the bank and the mandao chip share one row under the record */
+/* the bank and the mandao chip share one footer row, out of the title's
+   centred column (which already fills a short phone) */
 .title-chips {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  transform: translateX(-50%);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
   gap: 6px;
+  width: max-content;
   max-width: 94vw;
+}
+
+/* landscape: the bottom-right corner is the free one */
+@media (max-height: 560px) {
+  .title-chips {
+    left: auto;
+    right: calc(env(safe-area-inset-right, 0px) + 12px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    transform: none;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
 }
 
 .title-chips .title-bank {
@@ -1337,6 +1356,7 @@ body {
 .md-text {
   flex: 1;
   min-width: 0;
+  text-align: left;
 }
 
 .md-prog {
