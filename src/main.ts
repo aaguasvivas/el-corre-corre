@@ -868,7 +868,7 @@ function updateCamera(dt: number): void {
   lookTarget.set((camX + player.x) / 2, camLookY, CONFIG.camLookAhead);
   // Show what hit you: the aim eases part of the way toward it.
   if (killer && (state === 'crashing' || state === 'gameover')) {
-    killerLook = Math.min(1, killerLook + dt / 0.25);
+    killerLook = Math.min(1, killerLook + dt / CONFIG.crashCamEaseSec);
     const w = CONFIG.crashCamToKiller * (1 - (1 - killerLook) * (1 - killerLook));
     lookTarget.x += (killer.x - lookTarget.x) * w;
     lookTarget.y += (0.9 - lookTarget.y) * w;

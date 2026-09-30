@@ -5,6 +5,8 @@
 //   npx vite-node tools/traffic-lab/lab.ts                 # every section
 //   npx vite-node tools/traffic-lab/lab.ts -- parked bot   # a subset
 //   HEAT=0 npx vite-node tools/traffic-lab/lab.ts -- bot   # the brake before el freno caliente
+//   N=48 TH=cruise,tactical TDANGER=150 npx vite-node tools/traffic-lab/lab.ts -- bot
+//     # N runs per group, only some throttle bots, the tactical bot's brake threshold
 //
 // Sections: parked, bot, opening, platanos, convoy, rebase, walls, brake,
 // cafecito, policia, pacing.
@@ -20,10 +22,18 @@ const H = CONFIG.fixedDt;
 const HEAT = process.env.HEAT !== '0';
 const START_X = -3.4;
 // The pools draw build-time randoms (drift phases, paint): seed them too, so
-// two invocations of the same section print the same numbers.
-seed(1);
-const T = makeTraffic();
-const A = T as any;
+// two invocations of the same section print the same numbers. T.reset()
+// does not clear every bit of state a run leaves behind, so the bot section
+// builds a fresh Traffic per group: a group's numbers then never depend on
+// which groups ran before it (cruise reads the same with HEAT=0 or not).
+let T = makeTraffic();
+let A = T as any;
+function freshTraffic(): void {
+  seed(1);
+  T = makeTraffic();
+  A = T as any;
+}
+freshTraffic();
 const ctx = blankCtx() as any;
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
@@ -136,7 +146,7 @@ interface Policy { name: string; decideEvery: number; horizon: number; noise: nu
 // while the line it chose still has a car arriving within about a second,
 // the way a player uses the brake to buy a gap.
 type Throttle = 'cruise' | 'gas' | 'brake' | 'smart' | 'tactical';
-const TACTICAL_DANGER = 80; // danger() on the chosen line: one car about 1.2 s out
+const TACTICAL_DANGER = Number(process.env.TDANGER ?? 80); // danger() on the chosen line: 80 = one car about 1.2 s out
 
 interface BotResult {
   t: number;
@@ -359,6 +369,7 @@ if (want('bot')) {
     const only = process.env.TH ? process.env.TH.split(',') : null;
     for (const th of ['cruise', 'gas', 'brake', 'smart', 'tactical'] as const) {
       if (only && !only.includes(th)) continue;
+      freshTraffic();
       const rs: BotResult[] = [];
       for (let i = 0; i < N; i++) rs.push(runBot(p, th, 'motor', 31 * i + 7, CAP));
       const ts = rs.map((q) => q.t);

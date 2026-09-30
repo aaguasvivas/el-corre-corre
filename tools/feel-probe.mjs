@@ -9,7 +9,7 @@
 //   sh tools/heavy.sh node tools/feel-probe.mjs            # every probe
 //   sh tools/heavy.sh node tools/feel-probe.mjs crash dip  # a subset
 //
-// Probes: crash, judder, countdown, brake, dip, keys, shield, motion.
+// Probes: crash, judder, countdown, brake, dip, keys, trick, shield, motion, draws.
 // Exit code 1 when any check fails.
 
 import { createServer } from 'vite';
@@ -18,7 +18,9 @@ import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// ECC_ROOT runs the probes against another checkout (the draws probe only
+// uses hooks every build has, so it can measure main for comparison).
+const ROOT = process.env.ECC_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME =
   process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const VIEWPORT = { width: 375, height: 667, deviceScaleFactor: 1, isMobile: true, hasTouch: true };
@@ -378,6 +380,68 @@ const PROBES = {
       return { checks };
     }),
 
+  // The trick buffer: a flick during the cooldown is dropped after
+  // trickBufferSec (it never fires by itself later), a flick just before the
+  // cooldown ends fires when it ends.
+  trick: async (page) =>
+    page.evaluate(() => {
+      const e = window.__ecc;
+      const P = window.__p;
+      const checks = [];
+      e.start();
+      e.god(true);
+      e.tick(2);
+      const cx = window.innerWidth / 2;
+      let fy = window.innerHeight * 0.6;
+      const canvas = document.getElementById('game') ?? document.body;
+      P.fire(canvas, 'pointerdown', cx, fy, 5);
+      // one flick: a 1 px move (re-anchors the swipe if the wall clock ran
+      // past 200 ms), then 60 px up or down
+      const flick = (dir) => {
+        P.fire(window, 'pointermove', cx, fy + 1, 5);
+        fy += dir * 60;
+        P.fire(window, 'pointermove', cx, fy, 5);
+      };
+      const ride = (sec) => {
+        for (let t = 0; t < sec - 1e-9; t += 1 / 60) e.tick(1 / 60);
+      };
+      flick(-1);
+      e.tick(1 / 60);
+      checks.push(['a flick up starts the caballito', e.wheelie(), '']);
+      ride(0.5);
+      flick(1);
+      e.tick(1 / 60);
+      checks.push(['a flick down ends it', !e.wheelie(), '']);
+      // cooldown now about wheelieCooldownBase + 0.5 * perSec (1.43 s)
+      ride(0.1);
+      flick(-1);
+      let selfStart = false;
+      for (let t = 0; t < 3; t += 1 / 60) {
+        e.tick(1 / 60);
+        selfStart ||= e.wheelie();
+      }
+      checks.push(['a flick deep in the cooldown never fires by itself later', !selfStart, '']);
+      // a fresh caballito, then a flick 0.12 s before its cooldown ends
+      flick(1);
+      e.tick(1 / 60);
+      flick(-1);
+      e.tick(1 / 60);
+      const again = e.wheelie();
+      ride(0.5);
+      flick(1);
+      e.tick(1 / 60);
+      ride(1.1 + 0.65 * 0.5 - 0.12);
+      flick(-1);
+      let buffered = false;
+      for (let t = 0; t < 0.3; t += 1 / 60) {
+        e.tick(1 / 60);
+        buffered ||= e.wheelie();
+      }
+      checks.push(['a flick just before the cooldown ends fires when it ends', again && buffered, `second caballito ${again}, buffered ${buffered}`]);
+      P.fire(window, 'pointerup', cx, fy, 5);
+      return { checks };
+    }),
+
   // La Bendición in the game: the hit car is shoved aside with a spin, the
   // save pops, and the run goes on (src/__tests__/shove.test.ts covers the
   // second car on the line and the no-teleport slide).
@@ -406,6 +470,26 @@ const PROBES = {
       e.tick(2);
       checks.push(['the save never turns into a second crash', e.state() === 'playing', `${e.state()}, x ${e.x().toFixed(2)} (was ${x.toFixed(2)})`]);
       return { checks };
+    }),
+
+  // Draw calls riding, mid tumble and on the card (hooks every build has).
+  draws: async (page) =>
+    page.evaluate(() => {
+      const e = window.__ecc;
+      const at = {};
+      e.start();
+      e.god(true);
+      e.tick(3);
+      at.riding3s = e.info().calls;
+      e.tick(7);
+      at.riding10s = e.info().calls;
+      e.god(false);
+      e.crash();
+      e.tick(0.2);
+      at.tumble = e.info().calls;
+      e.tick(0.6);
+      at.card = e.info().calls;
+      return { checks: [['draw calls measured', true, JSON.stringify(at)]] };
     }),
 
   // prefers-reduced-motion scales shake, FOV kicks and roll.

@@ -118,7 +118,8 @@ const STRINGS = {
     pedalBrake: 'BRAKE',
     pedalBrakeHot: 'HOT!',
     countdownGo: 'GO!',
-    shieldSaved: 'THE BLESSING SAVED YOU!',
+    // DECISION: the power-up keeps its name in EN, as its pickup popup does
+    shieldSaved: 'LA BENDICIÓN SAVED YOU!',
     ariaGas: 'Gas',
     ariaBrake: 'Brake',
     trickBike: 'WHEELIE!',

@@ -528,7 +528,8 @@ export const CONFIG = {
   crashScrollTau: 0.08,
   killerFlash: 0.6, // FEEL: white rim on the vehicle that hit you...
   killerFlashSec: 0.25, // ...fading out over this long
-  crashCamToKiller: 0.15, // FEEL: how far the camera's aim eases toward what hit you
+  crashCamToKiller: 0.15, // FEEL: how far the camera's aim eases toward what hit you...
+  crashCamEaseSec: 0.25, // ...and how long that look takes (real seconds, easeOutQuad)
   // The tumble runs in real time while the world crawls: the rider flies
   // off the ride toward the lens, flips, bounces and lies there under the
   // stars, and the ride slides out from under.

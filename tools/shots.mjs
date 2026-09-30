@@ -289,7 +289,8 @@ function helpers(page, vp) {
 
 // Clip the rear corner of a slower car: a dead-center rear-end buries the
 // bike in the trunk, a corner hit leaves the tumble in the open.
-async function crashSetup(s) {
+async function crashSetup(s, ride = 'motor') {
+  if (ride !== 'motor') await s.ecc('selectVehicle', ride);
   await s.start(false);
   await s.tick(2);
   await s.ecc('clearTraffic');
@@ -527,6 +528,24 @@ const SCENES = [
     settle: 0,
     run: async (s) => {
       await crashSetup(s);
+      await s.play(0.22, 'false', 1 / 60);
+    },
+  },
+  {
+    id: 'crash-civic',
+    what: 'Crash in El Civic: el tiguere flies out of the sunroof, the car slews',
+    settle: 0,
+    run: async (s) => {
+      await crashSetup(s, 'civic');
+      await s.play(0.22, 'false', 1 / 60);
+    },
+  },
+  {
+    id: 'crash-pasola',
+    what: 'Crash on La Pasola, mid tumble',
+    settle: 0,
+    run: async (s) => {
+      await crashSetup(s, 'pasola');
       await s.play(0.22, 'false', 1 / 60);
     },
   },
