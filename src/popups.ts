@@ -33,6 +33,7 @@ const HOLD_MS = 520; // then it starts to rise
 const FADE_MS = 200;
 const PEAK_SCALE = 1.1;
 const EDGE_PX = 12; // the closest a popup's edge may come to the band's edge
+const DODGE: ReadonlyArray<readonly [number, number]> = [[0, 0], [0, 1], [0, -1], [0, 2], [0, -2], [1, 0], [-1, 0], [1, 1], [-1, 1]];
 
 function frames(lifeMs: number, reduced: boolean): Keyframe[] {
   const at = (ms: number): number => Math.min(1, ms / lifeMs);
@@ -185,27 +186,34 @@ export class Popups {
   }
 
   // Measure, clamp into the band (with room for the pop and the rise), and
-  // step aside from the popups still up. A new popup tries its own spot,
-  // then one row below, one above, two below, two above.
+  // step aside from the popups still up (see DODGE).
   private place(s: Slot, xPct: number, yPct: number, dodge: boolean): void {
     const b = this.band();
     const w = s.el.offsetWidth;
     const h = s.el.offsetHeight;
     const halfW = (w * PEAK_SCALE) / 2 + EDGE_PX;
     const halfH = (h * PEAK_SCALE) / 2;
-    const cx = (xPct / 100) * window.innerWidth;
-    const x = b.right - b.left <= 2 * halfW ? (b.left + b.right) / 2 : Math.min(b.right - halfW, Math.max(b.left + halfW, cx));
+    const xLo = b.left + halfW;
+    const xHi = b.right - halfW;
+    const clampX = (x: number): number => (xHi <= xLo ? (b.left + b.right) / 2 : Math.min(xHi, Math.max(xLo, x)));
+    const x0 = clampX((xPct / 100) * window.innerWidth);
     const yLo = b.top + halfH + CONFIG.popupRisePx;
     const yHi = Math.max(yLo, b.bottom - halfH);
     const clampY = (y: number): number => Math.min(yHi, Math.max(yLo, y));
     const y0 = clampY((yPct / 100) * window.innerHeight);
+    let x = x0;
     let y = y0;
     if (dodge) {
-      const d = h * 0.9 + 4;
-      for (const k of [0, 1, -1, 2, -2]) {
-        const cand = clampY(y0 + k * d);
-        if (!this.hits(s, x, cand, w, h)) {
-          y = cand;
+      // its own spot, a row below, above, two below, two above; then, on a
+      // short screen with no rows to spare, a step to either side
+      const d = h + 6;
+      const dx = w * PEAK_SCALE + 10;
+      for (const [kx, ky] of DODGE) {
+        const cx = clampX(x0 + kx * dx);
+        const cy = clampY(y0 + ky * d);
+        if (!this.hits(s, cx, cy, w, h)) {
+          x = cx;
+          y = cy;
           break;
         }
       }

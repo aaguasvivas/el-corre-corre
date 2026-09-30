@@ -368,6 +368,10 @@ function restart(el: HTMLElement, cls: string): void {
 
 const plusLabel = (n: number): string => `+${fmtN(n)}`;
 
+// The score is rewritten nearly every frame: one formatter, built once
+// (the same 12,345 grouping as fmtN).
+const SCORE_FMT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+
 // 12,000: the same grouping in both languages, like the tape label.
 function fmtN(n: number): string {
   return Math.floor(n).toLocaleString('en-US');
@@ -451,6 +455,7 @@ export class UI {
   private frozen = false;
   private bandDirty = true;
   private readonly bandBox: Band = { left: 0, right: 0, top: 0, bottom: 0 };
+  private readonly bandNow: Band = { left: 0, right: 0, top: 0, bottom: 0 };
 
   private hud: HTMLElement;
   private title: HTMLElement;
@@ -1286,7 +1291,7 @@ export class UI {
   private writeScore(n: number): void {
     if (n === this.scoreShown) return;
     this.scoreShown = n;
-    const s = fmtN(n);
+    const s = SCORE_FMT.format(n);
     this.scoreEl.textContent = s;
     if (s.length !== this.scoreLen) {
       this.scoreLen = s.length;
@@ -1605,6 +1610,20 @@ export class UI {
   // (and the coach chip), inside the safe area. Measured only when the
   // layout may have moved; on the title (no HUD) it is most of the screen.
   private popupBand(): Band {
+    const b = this.layoutBand();
+    // Clear of whatever the lane is showing right now (read per popup).
+    const now = this.bandNow;
+    now.left = b.left;
+    now.right = b.right;
+    now.bottom = b.bottom;
+    now.top = b.top;
+    const lane = this.laneShown ? this.anCard : this.tapeStep >= 0 ? this.tapeEl : null;
+    if (lane && !this.hud.classList.contains('hidden')) now.top = Math.max(b.top, lane.getBoundingClientRect().bottom + 4);
+    return now;
+  }
+
+  // The part of popupBand that only moves with the layout.
+  private layoutBand(): Band {
     const b = this.bandBox;
     if (!this.bandDirty) return b;
     const W = window.innerWidth;

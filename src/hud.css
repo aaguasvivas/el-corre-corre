@@ -1094,18 +1094,6 @@
   #hud-scrim {
     height: calc(var(--hud-top) + 120px);
   }
-
-  #coach {
-    bottom: auto;
-    top: calc(var(--hud-top) + 12px);
-    left: auto;
-    right: calc(var(--hud-right) + 110px);
-    max-width: 260px;
-  }
-
-  #coach[data-cue='gas']::after {
-    display: none;
-  }
 }
 
 /* ---------- reduced motion ---------- */
