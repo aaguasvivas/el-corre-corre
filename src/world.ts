@@ -3248,8 +3248,8 @@ export class World {
         patch(
           CONFIG.shoulderWidth + Math.random() * (ROAD.fullWidth - 2 * CONFIG.shoulderWidth),
           Math.random() * CHUNK_LEN,
-          1.2 + Math.random() * 2.4,
-          1.6 + Math.random() * 3.6,
+          1.0 + Math.random() * 1.6,
+          1.4 + Math.random() * 2.4,
           lighter ? 'rgba(217,199,167,0.1)' : 'rgba(0,0,0,0.13)',
           'rgba(0,0,0,0.22)',
         );
