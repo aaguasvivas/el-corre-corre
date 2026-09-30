@@ -226,7 +226,7 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
     // mirrors main.ts: gas is capped by the sacred gasMaxMps ceiling, and the
     // brake bites faster than the gas rises
     const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
-    const tgt = Math.min(thTarget, ceiling);
+    const tgt = cafT > 0 ? 1 : Math.min(thTarget, ceiling); // the cafecito overrides the pedal
     const rate = tgt < throttleMult ? CONFIG.brakeResponse : CONFIG.gasResponse;
     throttleMult += (tgt - throttleMult) * Math.min(1, rate * H);
     if (scrapeT > 0) scrapeT = Math.max(0, scrapeT - H);
@@ -246,7 +246,8 @@ function runBot(p: Policy, th: Throttle, ride: VehicleId, s: number, cap: number
       scrapeT > 0 ? CONFIG.scrapeSpeedLoss * (scrapeT / CONFIG.scrapeSlowSec) : 0,
       hoyoT > 0 ? CONFIG.potholeSpeedLoss * (hoyoT / CONFIG.hoyoRecoverSec) : 0,
     );
-    eff = speed * (1 - slow) * Math.max(Math.min(easeSec ? cafMult : cafT > 0 ? CONFIG.cafecitoBoost : 1, ceiling), throttleMult);
+    const cafCap = Math.min(easeSec ? cafMult : cafT > 0 ? CONFIG.cafecitoBoost : 1, ceiling);
+    eff = speed * (1 - slow) * (throttleMult + Math.max(0, cafCap - Math.max(throttleMult, 1)));
     res.dist += eff * H;
     fill(eff, el, x, r, res.dist);
     ctx.playerY = airY;

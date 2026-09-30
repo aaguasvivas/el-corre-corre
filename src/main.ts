@@ -521,8 +521,10 @@ function stepSim(h: number): void {
   // sacred ceiling (gasMaxMps, or the ride's own cruise if that is higher),
   // so the telegraph rule holds a fondo at the speed cap. The brake bites
   // faster than the gas rises. The cafecito overrides the pedal (they never
-  // stack) and obeys the same ceiling.
-  const th = state === 'playing' ? player.throttle : 0;
+  // stack) and obeys the same ceiling: while it burns the pedal reads as
+  // released, so throttleMult settles at 1 and the boost hands back to the
+  // pedal without a jump when it ends.
+  const th = state === 'playing' && cafecitoT <= 0 ? player.throttle : 0;
   const ceiling = Math.max(speed, CONFIG.gasMaxMps) / speed;
   const gasRatio = Math.min(CONFIG.gasSpeedMult, ceiling);
   const thTarget = th >= 0 ? 1 + th * (gasRatio - 1) : 1 - -th * (1 - CONFIG.brakeSpeedMult);
@@ -552,9 +554,12 @@ function stepSim(h: number): void {
     scrapeTimer > 0 ? CONFIG.scrapeSpeedLoss * (scrapeTimer / CONFIG.scrapeSlowSec) : 0,
     hoyoTimer > 0 ? CONFIG.potholeSpeedLoss * (hoyoTimer / CONFIG.hoyoRecoverSec) : 0,
   );
-  // The cafecito's eased boost (cafMult) and the pedal never stack: the
-  // larger one wins, and the cafecito obeys the same sacred ceiling.
-  const effSpeed = speed * (1 - slow) * Math.max(Math.min(cafMult, ceiling), throttleMult);
+  // The pedal sets the speed factor; the cafecito's eased boost (cafMult,
+  // capped by the same sacred ceiling) only adds what sits above it. So gas
+  // and the cafecito never stack, and the brake still bites whenever no
+  // cafecito boost is left (a plain max() with cafMult = 1 would swallow it).
+  const cafCap = Math.min(cafMult, ceiling);
+  const effSpeed = speed * (1 - slow) * (throttleMult + Math.max(0, cafCap - Math.max(throttleMult, 1)));
   currentEff = effSpeed;
   // Felt speed drives the FOV kick and the engine: a fondo pushes past 1.
   currentNorm = Math.max(0, Math.min(1.25, (effSpeed - CONFIG.baseSpeed) / (topSpeed - CONFIG.baseSpeed)));
