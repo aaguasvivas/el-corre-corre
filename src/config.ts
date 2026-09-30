@@ -586,6 +586,12 @@ export const CONFIG = {
   // DECISION: a ride with no distance record yet still gets a finish line,
   // LA META, so the very first run has a target to burst through.
   goalTapeM: 400, // FEEL: where LA META stands on a ride's first runs
+  // The game-over card's distance bar toward La Cinta (or LA META). The
+  // "¡Te quedaste a N m!" line shows only when the tape was really close:
+  // within this share of it, or within soCloseMinM, whichever is more.
+  soCloseShare: 0.3, // FEEL: higher = the "so close" line shows on more runs
+  soCloseMinM: 50, // FEEL: a short record still gets the line this near
+  countUpMs: 600, // FEEL: how long the card's points take to count up (OTRA VEZ is live throughout)
 
   // Los Mandaos: three small goals at a time; finish all three and you level
   // up. Positive goals only. Every "Run" kind must happen inside one run;

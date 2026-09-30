@@ -247,19 +247,17 @@ function selectVehicle(id: VehicleId): void {
   audio.click();
 }
 
-// The cycler previews paints live on the bike; equipping or buying is the
-// tap on the chip. previewIdx is transient: leaving the title or starting a
-// run snaps the bike back to what is actually equipped.
+// A tapped swatch previews live on the bike; tapping the previewed swatch
+// again equips or buys it. previewIdx is transient: leaving the title or
+// starting a run snaps the bike back to what is actually equipped.
 let previewIdx = 0;
 
 function refreshPinturaUI(): void {
   const v = selectedVehicle;
-  const p = PINTURAS[v][previewIdx];
-  ui.updatePinturaCycle({
-    hex: p.hex,
-    owned: ownedPinturas(v).has(previewIdx),
-    equipped: previewIdx === equippedPintura(v),
-    price: p.price,
+  ui.updatePinturas({
+    preview: previewIdx,
+    equipped: equippedPintura(v),
+    owned: ownedPinturas(v),
     bank: score.bank,
   });
 }
@@ -269,11 +267,15 @@ function refreshTitleMeta(): void {
   ui.setMandaos(missions.view());
 }
 
-function onPinturaCycle(dir: 1 | -1): void {
+function onPinturaPick(i: number): void {
   if (state !== 'title') return;
   const v = selectedVehicle;
-  const n = PINTURAS[v].length;
-  previewIdx = (previewIdx + dir + n) % n;
+  if (!Number.isInteger(i) || i < 0 || i >= PINTURAS[v].length) return;
+  if (i === previewIdx) {
+    onPinturaTap();
+    return;
+  }
+  previewIdx = i;
   player.setVehicle(v, PINTURAS[v][previewIdx].hex); // live preview on the bike
   refreshPinturaUI();
   audio.click();
@@ -329,7 +331,11 @@ function goToMenu(): void {
 
 function doShare(): void {
   audio.click();
-  if (lastRun) void ui.shareCard(lastRun);
+  if (!lastRun) return;
+  // The card's photo: a fresh frame of the crash, read back in this task.
+  renderer.render(scene, camera);
+  ui.captureScene(canvas);
+  void ui.shareCard(lastRun);
 }
 
 const ui = new UI(document.getElementById('ui')!, {
@@ -342,8 +348,7 @@ const ui = new UI(document.getElementById('ui')!, {
   onSelectVehicle: selectVehicle,
   onMenu: goToMenu,
   onShare: doShare,
-  onPinturaCycle,
-  onPinturaTap,
+  onPinturaPick,
 });
 ui.setMuted(audio.muted);
 

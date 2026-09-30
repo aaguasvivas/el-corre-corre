@@ -1,4 +1,5 @@
 :root {
+  /* The locked palette */
   --blue: #002d62;
   --red: #ce1126;
   --white: #ffffff;
@@ -7,7 +8,29 @@
   --sun: #fff3c4;
   --sky: #6ec6e6;
   --teal: #17a2b8;
+  --sea-deep: #0e7490;
   --gold: #f4c430;
+  /* Roles. Ink on the sun cards: blue 12.2:1, sea-deep 4.8:1, red 5.1:1,
+     green 4.6:1. Glass is the blue panel over the live scene: at 0.82 cream
+     text keeps 6.6:1 even over a white cloud. */
+  --ink: var(--blue);
+  --card: var(--sun);
+  --ok: #2e7d32;
+  --glass: rgba(0, 45, 98, 0.82);
+  --red-deep: #8c0d1e;
+  --sea-shadow: #0a5566;
+  --drop: 0 8px 0 rgba(0, 45, 98, 0.35);
+  --tap: 44px;
+  /* Motion: transform and opacity only, fast, eased */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ease-pop: cubic-bezier(0.2, 1.5, 0.4, 1);
+  --t-fast: 0.12s;
+  --t-mid: 0.22s;
+  /* Safe areas */
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
 }
 
 * {
@@ -44,15 +67,6 @@ body {
   height: 100%;
   display: block;
   touch-action: none;
-}
-
-/* A quiet vignette between the canvas and the UI: depth for free, zero GPU
-   cost, and it sits UNDER the DOM UI because #ui is a later sibling. */
-#vignette {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(120% 95% at 50% 42%, transparent 58%, rgba(24, 14, 38, 0.17) 100%);
 }
 
 #ui {
@@ -145,11 +159,31 @@ body {
   100% { opacity: 0; translate: 0 34vh; scale: 1 1.5; }
 }
 
-/* ---------- Title ---------- */
+/* ---------- Title ----------
+   Portrait, top to bottom: the logo band, the ride picker, an open band
+   where the rider shows (the chase camera puts the ride at about 53 to 77%
+   of the height), then the paints, the prompt and the footer chips. In
+   landscape the logo and the picker take the two sides and the rider keeps
+   the middle. Everything scales with the height, so the SE and the 6.9-inch
+   phone keep the same bands. */
 
 #title {
-  gap: 8px;
-  background: linear-gradient(to bottom, rgba(0, 45, 98, 0) 55%, rgba(0, 45, 98, 0.35));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: 'top' 'pick' '.' 'paints' 'cta' 'chips';
+  justify-items: center;
+  align-items: start;
+  row-gap: 6px;
+  padding: calc(var(--sat) + 8px) calc(var(--sar) + 12px) calc(var(--sab) + 8px) calc(var(--sal) + 12px);
+  background: linear-gradient(to bottom, rgba(0, 45, 98, 0) 62%, rgba(0, 45, 98, 0.42));
+}
+
+.t-top {
+  grid-area: top;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .logo {
@@ -160,184 +194,423 @@ body {
 }
 
 .logo-el {
-  font-size: clamp(18px, 3.4vh, 28px);
-  letter-spacing: 6px;
+  font-size: clamp(13px, 2.4vh, 26px);
+  letter-spacing: 5px;
   background: var(--blue);
   color: var(--white);
-  padding: 3px 16px;
-  border-radius: 10px;
-  margin-bottom: 4px;
+  padding: 2px 12px 2px 17px;
+  border-radius: 9px;
+  margin-bottom: 2px;
 }
 
 .logo-line {
-  font-size: clamp(56px, 12vh, 96px);
-  line-height: 0.95;
+  font-size: clamp(40px, 7.6vh, 92px);
+  line-height: 0.92;
   color: var(--white);
   -webkit-text-stroke: 3px var(--blue);
   paint-order: stroke fill;
-  text-shadow: 0 6px 0 rgba(0, 45, 98, 0.3);
+  text-shadow: 0 5px 0 rgba(0, 45, 98, 0.3);
 }
 
 .flagbar {
   display: flex;
   justify-content: center;
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
 .flag-svg {
-  width: clamp(52px, 9vh, 76px);
+  width: clamp(36px, 6.4vh, 72px);
   height: auto;
   border-radius: 4px;
   box-shadow: 0 3px 0 rgba(0, 45, 98, 0.35);
 }
 
+/* the subtitle crosses sky, peach and road: a blue outline keeps it legible
+   on all three */
 .subtitle {
-  margin-top: 6px;
-  font-size: clamp(16px, 2.6vh, 22px);
+  margin-top: 4px;
+  font-size: clamp(14px, 2.4vh, 22px);
   font-style: italic;
   color: var(--sun);
+  -webkit-text-stroke: 3.5px var(--blue);
+  paint-order: stroke fill;
   text-shadow: 0 2px 0 rgba(0, 45, 98, 0.4);
 }
 
-.prompt {
-  margin-top: 3vh;
-  font-size: clamp(20px, 3.4vh, 30px);
-  letter-spacing: 2px;
-  -webkit-text-stroke: 1.5px var(--blue);
-  paint-order: stroke fill;
-  animation: pulse 1.15s ease-in-out infinite;
+/* The ride picker: three tabs, one detail panel, one hint line. */
+.vpick {
+  grid-area: pick;
+  width: min(100%, 400px);
 }
 
-.controls {
+.vtabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+}
+
+.vtab {
+  min-height: var(--tap);
+  padding: 4px 6px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background: var(--glass);
+  color: var(--cream);
+  font-family: inherit;
+  font-size: clamp(12px, 3.5vw, 15px);
+  line-height: 1.05;
+  letter-spacing: 0.4px;
+  text-wrap: balance;
+  cursor: pointer;
+  transition: transform var(--t-fast) var(--ease-out), background-color var(--t-fast) ease-out;
+}
+
+.vtab.sel {
+  background: var(--sun);
+  color: var(--blue);
+  border: 3px solid var(--blue);
+  box-shadow: 0 4px 0 rgba(0, 45, 98, 0.45);
+  transform: translateY(-2px);
+}
+
+.vtab:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+.vdetail {
+  margin-top: 6px;
+  padding: 8px 12px 7px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 243, 196, 0.55);
+  background: var(--glass);
+  color: var(--cream);
+}
+
+.vd-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vd-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.vd-label {
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.vd-pips {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.vd-pips i {
+  height: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.vd-pips i.on {
+  background: var(--gold);
+}
+
+.vd-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.vd-tag {
+  min-width: 0;
+  font-style: italic;
+  color: var(--sun);
+}
+
+.vd-rec {
+  flex: none;
+  white-space: nowrap;
+}
+
+.hint {
+  width: fit-content;
+  max-width: 100%;
+  margin: 6px auto 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--cream);
+  font-size: clamp(12px, 3.3vw, 14px);
+  line-height: 1.25;
+  text-align: center;
+}
+
+/* Las Pinturas: five swatches, each a 44 x 48 target around a 34 px chip.
+   Locked ones carry a lock and their price. */
+.t-paints {
+  grid-area: paints;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  margin-top: 1vh;
-  font-size: clamp(11px, 1.6vh, 13px);
-  letter-spacing: 0.5px;
+}
+
+.paints {
+  display: flex;
+  gap: 6px;
+  padding: 5px 8px 3px;
+  border: 3px solid var(--blue);
+  border-radius: 16px;
+  background: var(--sun);
+  box-shadow: 0 4px 0 rgba(0, 45, 98, 0.4);
+}
+
+.paint {
+  position: relative;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 1px 0 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+}
+
+.paint-chip {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  border: 3px solid var(--blue);
+  box-shadow: 0 3px 0 rgba(0, 45, 98, 0.35);
+  transition: transform var(--t-fast) var(--ease-pop), box-shadow var(--t-fast) ease-out;
+}
+
+.paint.locked .paint-chip {
+  border-style: dashed;
+}
+
+/* the previewed swatch lifts inside a white-and-red ring */
+.paint.preview .paint-chip {
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 0 0 2px var(--white), 0 0 0 5px var(--red), 0 5px 0 rgba(0, 45, 98, 0.35);
+}
+
+.paint:active .paint-chip {
+  transform: scale(0.9);
+}
+
+.paint-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.paint-badge:empty {
+  display: none;
+}
+
+.paint.locked .paint-badge {
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 45, 98, 0.88);
+  color: var(--sun);
+}
+
+.paint.equipped .paint-badge {
+  top: -9px;
+  right: -9px;
+  width: 20px;
+  height: 20px;
+  background: var(--gold);
+  color: var(--blue);
+  border: 2px solid var(--blue);
+}
+
+.paint-price {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: var(--blue);
+  color: var(--sun);
+  font-size: 12px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.paint-price:empty {
+  display: none;
+}
+
+.paint-price svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* the previewed paint: its name and what a second tap does */
+.paint-state {
+  margin-top: 3px;
+  max-width: 100%;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--glass);
   color: var(--cream);
-  opacity: 0.85;
-  text-shadow: 0 2px 0 rgba(0, 45, 98, 0.45);
+  font-size: clamp(12px, 3.4vw, 15px);
+  line-height: 1.25;
   text-align: center;
-  padding: 0 14px;
-  line-height: 1.35;
 }
 
-.title-record {
-  margin-top: 1.4vh;
-  font-size: 16px;
-  letter-spacing: 1px;
-  color: var(--cream);
-  min-height: 20px;
+.paint-state:empty {
+  visibility: hidden;
 }
 
-/* Las Pinturas: the platano wallet on the title screen */
+.paint-state.act {
+  color: var(--gold);
+}
+
+.paint-state.deny,
+.title-bank.deny {
+  animation: deny 0.4s ease;
+}
+
+@keyframes deny {
+  25% { transform: translateX(-5px); }
+  60% { transform: translateX(5px); }
+}
+
+.t-cta {
+  grid-area: cta;
+}
+
+.prompt {
+  font-size: clamp(22px, 3.8vh, 34px);
+  letter-spacing: 2px;
+  color: var(--white);
+  -webkit-text-stroke: 4px var(--blue);
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 rgba(0, 45, 98, 0.45);
+  animation: pulse 1.15s ease-in-out infinite;
+}
+
+/* the wallet and the mandaos share the footer */
+.title-chips {
+  grid-area: chips;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
 .title-bank {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 4px;
-  padding: 4px 12px;
+  min-height: 40px;
+  padding: 4px 14px;
   border-radius: 999px;
-  background: rgba(0, 45, 98, 0.55);
-  color: var(--cream);
-  font-size: 14px;
+  background: var(--glass);
+  color: var(--sun);
+  font-size: 16px;
   letter-spacing: 0.5px;
 }
 
-.title-bank.deny {
-  animation: bank-deny 0.45s ease;
-}
-
-@keyframes bank-deny {
-  0%, 100% { background: rgba(0, 45, 98, 0.55); transform: translateX(0); }
-  25% { background: rgba(206, 17, 38, 0.75); transform: translateX(-4px); }
-  60% { background: rgba(206, 17, 38, 0.75); transform: translateX(4px); }
-}
-
-/* the pintura cycler: one paint at a time, big targets, the bike itself
-   is the preview. Hidden on unselected cards. */
-.vc-pcycle {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.vcard.show-paints .vc-pcycle {
-  display: flex;
-}
-
-.pc-arrow {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 0;
-  background: rgba(255, 255, 255, 0.14);
-  color: var(--cream);
-  font-size: 22px;
-  line-height: 1;
+.mandao-chip {
+  min-height: var(--tap);
+  padding: 6px 14px;
+  border: 2px solid var(--gold);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--sun);
   font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
   cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--t-fast) var(--ease-out);
 }
 
-.pc-arrow:active {
-  background: rgba(255, 255, 255, 0.3);
+.mandao-chip:active {
+  transform: scale(0.95);
 }
 
-.pc-swatch {
-  width: 38px;
-  height: 38px;
-  border-radius: 13px;
-  border: 3px solid rgba(255, 255, 255, 0.55);
-  padding: 0;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+/* Landscape: the logo and the prompt on the left, the picker and the
+   paints on the right, the rider in the open middle. The top 60 px stay
+   clear for the corner chips. */
+@media (orientation: landscape) {
+  #title {
+    grid-template-columns: minmax(0, 1fr) minmax(90px, 24vw) minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      'top   . pick'
+      'cta   . paints'
+      'chips . paints';
+    align-content: center;
+    align-items: center;
+    row-gap: 10px;
+    padding-top: calc(var(--sat) + 58px);
+  }
+  .vpick {
+    align-self: end;
+  }
+  .t-paints {
+    align-self: start;
+  }
+  .paints {
+    gap: 4px;
+  }
 }
 
-.pc-swatch.locked {
-  border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.45);
-}
-
-.pc-swatch.equip {
-  border-color: var(--gold);
-  box-shadow: 0 0 10px rgba(244, 196, 48, 0.55);
-}
-
-/* the state line under the cycler: PONER, the price, or nothing */
-.pc-state {
-  display: none;
-  justify-content: center;
-  align-items: center;
-  min-height: 20px;
-  margin-top: 3px;
-  padding-bottom: 2px;
-}
-
-.vcard.show-paints .pc-state {
-  display: flex;
-}
-
-.pc-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  letter-spacing: 0.8px;
-  color: var(--cream);
-}
-
-.pc-label svg {
-  width: 16px;
-  height: 16px;
-}
-
-.pc-label.poor {
-  opacity: 0.55;
+/* A short landscape phone (SE on its side): smaller logo, tighter rows. */
+@media (orientation: landscape) and (max-height: 500px) {
+  #title {
+    row-gap: 6px;
+  }
+  .logo-line {
+    font-size: clamp(34px, 9vh, 48px);
+  }
+  .logo-el {
+    font-size: 13px;
+  }
+  .flag-svg {
+    width: 34px;
+  }
+  .vtab {
+    font-size: 12px;
+  }
+  .vdetail {
+    padding: 6px 10px;
+  }
+  .hint {
+    font-size: 12px;
+  }
 }
 
 .chip {
@@ -371,6 +644,10 @@ body {
   min-height: 44px;
 }
 
+.chip:active {
+  transform: scale(0.94);
+}
+
 /* The pause screen keeps the HUD visible, and the HUD pause button already
    owns the top left, so this one sits on the free side. */
 #mute-pause {
@@ -393,120 +670,332 @@ body {
 @keyframes pulse {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 0.85;
     transform: scale(1);
   }
   50% {
     opacity: 1;
-    transform: scale(1.05);
+    transform: scale(1.06);
   }
 }
 
-/* ---------- Game over ---------- */
+/* ---------- Game over ----------
+   DECISION: the card sits at the TOP and OTRA VEZ docks at the BOTTOM. The
+   tumble lands at about 55 to 80% of the height, so a centred card or a
+   bottom sheet would cover the one moment that makes a crash funny. Split
+   this way the rider band stays open and OTRA VEZ stays under the thumb.
+   The whole layer still restarts on a tap, the rider band included. */
 
 #gameover {
-  background: rgba(0, 45, 98, 0.28);
+  justify-content: space-between;
+  padding: calc(var(--sat) + 14px) calc(var(--sar) + 12px) calc(var(--sab) + 12px) calc(var(--sal) + 12px);
+  background: linear-gradient(to bottom, rgba(0, 45, 98, 0.34), rgba(0, 45, 98, 0.06) 52%, rgba(0, 45, 98, 0.06) 70%, rgba(0, 45, 98, 0.34));
 }
 
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  width: min(86vw, 400px);
-  padding: 20px 24px;
-  margin-bottom: env(safe-area-inset-bottom, 0px);
+  width: min(100%, 400px);
   text-align: center;
-  background: var(--sun);
-  color: var(--blue);
+  background: var(--card);
+  color: var(--ink);
   border: 4px solid var(--blue);
-  border-radius: 22px;
-  box-shadow: 0 10px 0 rgba(0, 45, 98, 0.35);
-  animation: cardin 0.14s ease-out;
+  border-radius: 20px;
+  box-shadow: var(--drop);
 }
 
-@keyframes cardin {
+.go-card {
+  gap: 5px;
+  padding: 8px 14px 10px;
+  animation: card-drop var(--t-mid) var(--ease-out) both;
+}
+
+@keyframes card-drop {
   from {
-    transform: translateY(24px) scale(0.94);
+    transform: translateY(-18px) scale(0.96);
     opacity: 0;
-  }
-  to {
-    transform: none;
-    opacity: 1;
   }
 }
 
 .go-title {
-  font-size: clamp(24px, 4.5vh, 34px);
+  font-size: clamp(22px, 3.8vh, 32px);
+  line-height: 1.1;
   color: var(--red);
   transform: rotate(-2deg);
 }
 
-.badge {
+/* the record seal: a rubber stamp on the card's corner */
+.go-stamp {
+  position: absolute;
+  top: -14px;
+  right: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 78px;
+  height: 78px;
+  padding: 8px;
+  border-radius: 50%;
+  border: 3px solid var(--white);
   background: var(--red);
   color: var(--white);
-  border-radius: 10px;
-  padding: 4px 14px;
-  font-size: 16px;
-  letter-spacing: 1px;
-  transform: rotate(-3deg);
-  animation: pop 0.35s ease;
+  font-size: 13px;
+  line-height: 1.05;
+  letter-spacing: 0.3px;
+  text-align: center;
+  box-shadow: 0 0 0 3px var(--red), 0 5px 0 3px rgba(0, 45, 98, 0.35);
+  transform: rotate(12deg);
+  animation: seal-slam 0.34s var(--ease-pop) 0.12s both;
+}
+
+.go-stamp.far {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue), 0 5px 0 3px rgba(0, 45, 98, 0.35);
+}
+
+@keyframes seal-slam {
+  from {
+    transform: rotate(-8deg) scale(2.2);
+    opacity: 0;
+  }
+  60% {
+    opacity: 1;
+  }
+}
+
+.go-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.go-points {
+  font-size: clamp(40px, 7.2vh, 66px);
+  font-weight: normal;
+  line-height: 1;
+}
+
+.go-sub {
+  font-size: 13px;
+  line-height: 1.15;
+  color: var(--sea-deep);
+}
+
+.go-points-label {
+  letter-spacing: 2px;
+}
+
+.go-best:not(:empty)::before {
+  content: ' · ';
+  letter-spacing: 0;
+}
+
+/* the distance bar toward the tape this run chased */
+.go-dist {
+  width: 100%;
+}
+
+.gd-caption {
+  font-size: 15px;
+  line-height: 1.15;
+  color: var(--sea-deep);
+}
+
+.gd-caption:empty {
+  display: none;
+}
+
+.gd-caption.close {
+  color: var(--red);
+  animation: pop 0.3s var(--ease-pop) 0.6s both;
+}
+
+.gd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.gd-goal {
+  color: var(--sea-deep);
+}
+
+.gd-bar {
+  position: relative;
+  flex: 1;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(0, 45, 98, 0.14);
+  box-shadow: inset 0 0 0 2px rgba(0, 45, 98, 0.22);
+  overflow: hidden;
+}
+
+.gd-bar b {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--red), #ef5350);
+  transform-origin: 0 50%;
+  transition: transform 0.7s var(--ease-out) 0.15s;
+}
+
+.go-dist.reached .gd-bar b {
+  background: linear-gradient(90deg, var(--gold), #ffd54f);
+}
+
+/* 95% of the way there: the bar's end pulses twice */
+.go-dist.near .gd-bar {
+  animation: near 0.3s ease-in-out 0.9s 4 alternate;
+}
+
+@keyframes near {
+  to {
+    transform: scale(1.04, 1.25);
+  }
 }
 
 @keyframes pop {
   from {
-    transform: scale(0.5) rotate(-3deg);
-  }
-  to {
-    transform: scale(1) rotate(-3deg);
+    transform: scale(0.6);
+    opacity: 0;
   }
 }
 
-.go-points-label {
-  margin-top: 4px;
-  font-size: 14px;
-  letter-spacing: 3px;
-  opacity: 0.75;
-}
-
-.go-points {
-  font-size: clamp(44px, 9vh, 72px);
-  line-height: 1;
-}
-
-/* Three stats plus a six-digit récord overflow the card at phone width, so
-   let one item drop to a second row instead of every column wrapping. */
-.go-rows {
+/* what paid: best combo, cerquitas, meters en contra vía */
+.go-break {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 10px;
-  margin: 4px 0 10px;
+  column-gap: 12px;
   font-size: 13px;
-  opacity: 0.85;
+  line-height: 1.2;
 }
 
-.go-rows b {
-  margin-left: 6px;
+.go-break span {
+  white-space: nowrap;
+}
+
+.go-break b {
+  font-weight: normal;
+  color: var(--red);
+}
+
+/* plátanos: the swatch of the next pintura, what this run earned, the bar */
+.go-plat {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+}
+
+.go-plat.all {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gp-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 3px solid var(--blue);
+}
+
+.gp-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.15;
+}
+
+.gp-earned {
+  flex: none;
+  font-weight: normal;
+  font-size: 15px;
+  color: var(--ok);
+}
+
+.gp-text {
+  display: block;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.gp-bar {
+  display: block;
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(0, 45, 98, 0.14);
+  overflow: hidden;
+}
+
+.gp-bar b {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--gold), #ffd54f);
+  transform-origin: 0 50%;
+  transition: transform 0.6s var(--ease-out) 0.55s;
+}
+
+/* OTRA VEZ (64 pt), then MENÚ and COMPARTIR (48 pt), under the thumb */
+.go-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(86vw, 400px);
+  animation: actions-rise var(--t-mid) var(--ease-out) both;
+}
+
+@keyframes actions-rise {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
 }
 
 .btn-big {
   width: 100%;
-  padding: 14px 20px;
+  min-height: 64px;
+  padding: 10px 20px;
   background: var(--red);
   color: var(--white);
   border: none;
   border-radius: 16px;
   font-family: inherit;
-  font-size: clamp(26px, 4.6vh, 38px);
+  font-size: clamp(28px, 4.6vh, 38px);
   letter-spacing: 2px;
-  box-shadow: 0 6px 0 #8c0d1e;
+  box-shadow: 0 6px 0 var(--red-deep);
   cursor: pointer;
 }
 
 .btn-big:active {
   transform: translateY(4px);
-  box-shadow: 0 2px 0 #8c0d1e;
+  box-shadow: 0 2px 0 var(--red-deep);
+}
+
+/* Landscape: the card on the left, the buttons bottom right, the rider in
+   the middle. */
+@media (orientation: landscape) {
+  #gameover {
+    flex-direction: row;
+    align-items: flex-start;
+    padding-top: calc(var(--sat) + 12px);
+  }
+  .go-card {
+    width: min(44vw, 380px);
+    max-height: 100%;
+  }
+  .go-actions {
+    align-self: flex-end;
+    width: min(34vw, 320px);
+  }
 }
 
 /* ---------- Phase 2 HUD ---------- */
@@ -539,18 +1028,6 @@ body {
   transform-origin: 50% 50%;
   transform: scaleX(1);
   box-shadow: 0 0 6px rgba(244, 196, 48, 0.55);
-}
-
-/* game over: how far into the country the run got */
-.go-tour {
-  font-size: clamp(12px, 3.2vw, 14px);
-  letter-spacing: 0.6px;
-  color: var(--sea-deep, #0e7490);
-  margin: 2px 0 4px;
-  min-height: 16px;
-}
-.go-tour:empty {
-  display: none;
 }
 
 #hud-cv {
@@ -874,168 +1351,24 @@ body {
   color: var(--gold);
 }
 
-/* ---------- Vehicle cards ---------- */
-
-.vrow {
-  display: flex;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 0 10px;
-  max-width: 100%;
-}
-
-.vcard {
-  flex: 1;
-  width: 132px;
-  max-width: 150px;
-  background: rgba(0, 45, 98, 0.5);
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-radius: 14px;
-  padding: 9px 10px;
-  cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-}
-
-.vcard.sel {
-  background: rgba(0, 45, 98, 0.78);
-  border-color: var(--sun);
-  transform: translateY(-4px) scale(1.04);
-  box-shadow: 0 6px 0 rgba(0, 45, 98, 0.35);
-}
-
-.vc-name {
-  font-size: clamp(11px, 1.8vh, 14px);
-  letter-spacing: 0.3px;
-  margin-bottom: 6px;
-  color: var(--sun);
-  line-height: 1.05;
-  min-height: 2.1em;
-  display: flex;
-  align-items: center;
-}
-
-.vc-stat {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 3px 0;
-}
-
-.vc-stat span {
-  font-size: 9px;
-  letter-spacing: 1px;
-  width: 26px;
-  opacity: 0.8;
-}
-
-.vc-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.vc-bar b {
-  display: block;
-  height: 100%;
-  background: var(--sun);
-  border-radius: 3px;
-}
-
-.vcard.sel .vc-bar b {
-  background: linear-gradient(90deg, var(--red), var(--sun));
-}
-
-.vc-tag {
-  font-size: 10px;
-  font-style: italic;
-  opacity: 0.85;
-  margin-top: 6px;
-  min-height: 24px;
-  line-height: 1.15;
-}
-
-.vc-rec {
-  font-size: 10px;
-  letter-spacing: 0.5px;
-  color: var(--cream);
-  opacity: 0.9;
-  margin-top: 3px;
-  min-height: 12px;
-}
-
-/* Landscape phone: everything on the title has to fit without clipping the
-   logo or losing the record line off the bottom. */
-@media (max-height: 560px) {
-  #title {
-    gap: 2px;
-  }
-  .logo-el {
-    font-size: 13px;
-    letter-spacing: 4px;
-    padding: 2px 12px;
-    margin-bottom: 1px;
-  }
-  .logo-line {
-    font-size: 40px;
-  }
-  .flagbar {
-    margin-top: 5px;
-  }
-  .flag-svg {
-    width: 44px;
-  }
-  .subtitle {
-    margin-top: 9px;
-    font-size: 14px;
-  }
-  .vrow {
-    margin-top: 6px;
-  }
-  .vcard {
-    padding: 6px 9px;
-  }
-  .vc-name {
-    min-height: 0;
-    margin-bottom: 3px;
-  }
-  .vc-tag {
-    display: none;
-  }
-  .prompt {
-    margin-top: 6px;
-    font-size: 20px;
-  }
-  .controls {
-    margin-top: 3px;
-    font-size: 11px;
-  }
-  .title-record {
-    margin-top: 3px;
-    font-size: 13px;
-    min-height: 16px;
-  }
-}
-
 /* ---------- Secondary buttons ---------- */
 
 .btn-row {
   display: flex;
   gap: 10px;
   width: 100%;
-  margin-top: 8px;
 }
 
 .btn-mid {
   flex: 1;
-  padding: 10px 12px;
+  min-height: 48px;
+  padding: 8px 12px;
   background: var(--blue);
   color: var(--white);
   border: none;
   border-radius: 12px;
   font-family: inherit;
-  font-size: clamp(16px, 2.8vh, 22px);
+  font-size: clamp(17px, 2.8vh, 22px);
   letter-spacing: 1.5px;
   box-shadow: 0 4px 0 rgba(0, 24, 52, 0.85);
   cursor: pointer;
@@ -1046,32 +1379,33 @@ body {
   box-shadow: 0 1px 0 rgba(0, 24, 52, 0.85);
 }
 
+/* white on sea-deep is 5.4:1 (the lighter teal managed 3.0) */
 .btn-share {
-  background: var(--teal);
-  box-shadow: 0 4px 0 #0e6b7c;
+  background: var(--sea-deep);
+  box-shadow: 0 4px 0 var(--sea-shadow);
 }
 
 .btn-share:active {
-  box-shadow: 0 1px 0 #0e6b7c;
+  box-shadow: 0 1px 0 var(--sea-shadow);
 }
 
-.close-call {
-  color: var(--red);
-  font-size: clamp(15px, 2.6vh, 20px);
-  letter-spacing: 0.5px;
-  animation: pop 0.35s ease;
+/* a pintura is affordable: MENÚ, the way to the paints, glows gold */
+.btn-mid.glow {
+  box-shadow: 0 4px 0 rgba(0, 24, 52, 0.85), 0 0 0 3px var(--gold);
+  animation: glow 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes glow {
+  to {
+    box-shadow: 0 4px 0 rgba(0, 24, 52, 0.85), 0 0 0 3px var(--gold), 0 0 14px 4px rgba(244, 196, 48, 0.7);
+  }
 }
 
 .pause-btns {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(70vw, 280px);
-  margin-top: 3vh;
-}
-
-.pause-btns .btn-big {
-  width: 100%;
+  width: min(80vw, 320px);
 }
 
 #vignette {
@@ -1346,22 +1680,67 @@ body {
   }
 }
 
-/* ---------- Pause ---------- */
+/* ---------- Pause ----------
+   PAUSA, the mandaos in a compact card, then SEGUIR (64 pt) and MENÚ. The
+   HUD stays up behind the scrim; mute sits on the free top-right corner. */
 
 #pause {
-  background: rgba(0, 20, 45, 0.5);
+  gap: 14px;
+  padding: calc(var(--sat) + 64px) calc(var(--sar) + 12px) calc(var(--sab) + 16px) calc(var(--sal) + 12px);
+  background: rgba(0, 20, 45, 0.55);
 }
 
 .pause-title {
   font-size: clamp(40px, 8vh, 64px);
-  -webkit-text-stroke: 2px var(--blue);
+  line-height: 1;
+  -webkit-text-stroke: 4px var(--blue);
   paint-order: stroke fill;
+  text-shadow: 0 5px 0 rgba(0, 45, 98, 0.35);
 }
 
-.pause-sub {
-  margin-top: 8px;
-  font-size: 18px;
-  color: var(--cream);
+.pause-card {
+  width: min(100%, 360px);
+  padding: 10px 14px 12px;
+  background: var(--card);
+  color: var(--ink);
+  border: 4px solid var(--blue);
+  border-radius: 18px;
+  box-shadow: var(--drop);
+  animation: card-drop var(--t-mid) var(--ease-out) both;
+}
+
+.pause-level {
+  margin-bottom: 6px;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: var(--sea-deep);
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  #pause {
+    display: grid;
+    grid-template-columns: minmax(0, 360px) minmax(0, 280px);
+    grid-template-areas: 'title btns' 'card btns';
+    justify-content: center;
+    align-content: center;
+    column-gap: 24px;
+    row-gap: 8px;
+    padding-top: calc(var(--sat) + 12px);
+  }
+  .pause-title {
+    grid-area: title;
+    justify-self: center;
+    font-size: 40px;
+  }
+  .pause-card {
+    grid-area: card;
+  }
+  .pause-btns {
+    grid-area: btns;
+    align-self: end;
+    width: 100%;
+  }
 }
 
 /* ---------- Records and Los Mandaos (data-first; WP-E restyles) ---------- */
@@ -1371,205 +1750,322 @@ body {
   color: var(--gold);
 }
 
-/* the bank and the mandao chip share one footer row, out of the title's
-   centred column (which already fills a short phone) */
-.title-chips {
-  position: absolute;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
-  transform: translateX(-50%);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 6px;
-  width: max-content;
-  max-width: 94vw;
-}
-
-/* landscape: the bottom-right corner is the free one */
-@media (max-height: 560px) {
-  .title-chips {
-    left: auto;
-    right: calc(env(safe-area-inset-right, 0px) + 12px);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
-    transform: none;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-  }
-}
-
-.title-chips .title-bank {
-  margin-top: 0;
-}
-
-.mandao-chip {
-  padding: 5px 12px;
-  border: 2px solid var(--gold);
-  border-radius: 999px;
-  background: rgba(0, 45, 98, 0.72);
-  color: var(--sun);
-  font-family: inherit;
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
+/* The mandao sheet: the level and its multiplier as the header, the three
+   mandaos with bars and rewards, the daily with its streak, and a close
+   button. Any tap closes it. */
 .mandao-sheet {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 20, 45, 0.55);
+  padding: calc(var(--sat) + 12px) calc(var(--sar) + 14px) calc(var(--sab) + 12px) calc(var(--sal) + 14px);
+  background: rgba(0, 20, 45, 0.62);
   z-index: 5;
 }
 
 .md-card {
-  width: min(90vw, 380px);
-  max-height: 86vh;
+  position: relative;
+  width: min(100%, 380px);
+  max-height: 100%;
   overflow-y: auto;
-  padding: 14px 16px;
-  background: var(--sun);
-  color: var(--blue);
+  padding: 14px 16px 16px;
+  background: var(--card);
+  color: var(--ink);
   border: 4px solid var(--blue);
-  border-radius: 18px;
+  border-radius: 20px;
+  box-shadow: var(--drop);
   text-align: left;
+  animation: card-drop var(--t-mid) var(--ease-out) both;
 }
 
-.md-title {
-  font-size: 22px;
-  letter-spacing: 1px;
+.md-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: var(--tap);
+  height: var(--tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.md-x::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: rgba(0, 45, 98, 0.12);
+  transition: transform var(--t-fast) var(--ease-out);
+}
+
+.md-x:active::before {
+  transform: scale(0.88);
+}
+
+.md-x svg {
+  position: relative;
+}
+
+.md-kicker {
+  font-size: 13px;
+  letter-spacing: 3px;
   text-align: center;
+  color: var(--sea-deep);
 }
 
 .md-level {
-  margin: 2px 0 8px;
-  font-size: 13px;
+  margin-top: 2px;
+  padding: 0 34px;
+  font-size: 22px;
+  line-height: 1.1;
   text-align: center;
-  opacity: 0.8;
 }
 
-.md-close {
-  margin-top: 10px;
-  font-size: 12px;
-  text-align: center;
-  opacity: 0.7;
+.md-mult {
+  width: fit-content;
+  margin: 6px auto 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: var(--blue);
+  font-size: 14px;
+  box-shadow: 0 3px 0 rgba(0, 45, 98, 0.3);
 }
 
+/* Mandao rows everywhere: the goal and its count on one line, the bar under */
 .md-list {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
+  width: 100%;
 }
 
 .md-row {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 14px;
-  line-height: 1.2;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  font-size: 13px;
+  line-height: 1.15;
+  text-align: left;
 }
 
 .md-text {
   flex: 1;
   min-width: 0;
-  text-align: left;
 }
 
 .md-prog {
   flex: none;
+  display: inline-flex;
+  font-weight: normal;
   font-size: 13px;
 }
 
-.md-row.done .md-text {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-
 .md-row.done .md-prog {
-  color: #2e7d32;
+  color: var(--ok);
 }
 
 .md-tag {
   flex: none;
-  padding: 0 5px;
+  padding: 1px 5px;
   border-radius: 4px;
   background: var(--red);
   color: var(--white);
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.1;
   letter-spacing: 1px;
+}
+
+.md-track {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.md-bar {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 45, 98, 0.14);
+  overflow: hidden;
+}
+
+.md-bar b {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--sea-deep);
+  transform-origin: 0 50%;
+  transition: transform 0.6s var(--ease-out) 0.25s;
+}
+
+.md-row.done .md-bar b {
+  background: var(--ok);
+}
+
+.md-list > :nth-child(2) .md-bar b {
+  transition-delay: 0.33s;
+}
+
+.md-list > :nth-child(3) .md-bar b {
+  transition-delay: 0.41s;
+}
+
+.md-list > :nth-child(4) .md-bar b {
+  transition-delay: 0.49s;
+}
+
+.md-reward {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--ok);
+}
+
+.md-reward svg {
+  width: 14px;
+  height: 14px;
 }
 
 .md-head {
-  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
   font-size: 13px;
   letter-spacing: 1px;
+  color: var(--sea-deep);
 }
 
 .md-streak {
-  font-size: 12px;
-  opacity: 0.8;
+  letter-spacing: 0;
+  color: var(--red);
+}
+
+/* the sheet's rows breathe more */
+.md-sheet-rows {
+  gap: 9px;
+}
+
+.md-sheet-rows .md-row {
+  font-size: 15px;
+}
+
+.md-sheet-rows .md-bar {
+  height: 8px;
+  border-radius: 4px;
+}
+
+/* ¡HECHO!: a rubber stamp slammed onto a row this run finished, with a
+   ring of flag-blue dust; staggered row by row (--i). */
+.md-stamp {
+  position: absolute;
+  top: -3px;
+  right: 30px;
+  padding: 0 6px;
+  border: 2px solid var(--red);
+  border-radius: 6px;
+  background: rgba(255, 243, 196, 0.92);
+  color: var(--red);
+  font-size: 13px;
+  line-height: 1.3;
+  letter-spacing: 1px;
+  pointer-events: none;
+  transform: rotate(-9deg);
+  animation: stamp-slam 0.3s var(--ease-pop) both;
+  animation-delay: calc(0.5s + var(--i, 0) * 0.14s);
+}
+
+.md-stamp::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 9px;
+  border: 2px dashed var(--blue);
+  opacity: 0;
+  animation: stamp-dust 0.4s ease-out both;
+  animation-delay: calc(0.62s + var(--i, 0) * 0.14s);
+}
+
+@keyframes stamp-slam {
+  from {
+    transform: rotate(-9deg) scale(2.3);
+    opacity: 0;
+  }
+  55% {
+    opacity: 1;
+  }
+}
+
+@keyframes stamp-dust {
+  from {
+    transform: scale(0.7);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
 }
 
 .md-levelup {
   align-self: center;
-  margin-top: 2px;
+  margin-top: 1px;
   padding: 2px 10px;
   border-radius: 8px;
   background: var(--gold);
-  font-size: 13px;
-}
-
-/* game over: compact rows between the stats and OTRA VEZ */
-.md-compact {
-  width: 100%;
-  gap: 2px;
-  margin-bottom: 2px;
-}
-
-.md-compact .md-row {
-  font-size: 12px;
-}
-
-.md-compact .md-prog {
-  font-size: 12px;
-}
-
-.go-far {
   color: var(--blue);
-  font-size: 14px;
+  font-size: 13px;
+  animation: stamp-slam 0.3s var(--ease-pop) 1s both;
 }
 
-.go-earned {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 12px;
-  line-height: 1.25;
+/* The card and the pause keep their rows compact. */
+.md-card-rows .md-row {
+  font-size: 12.5px;
 }
 
-.go-earned b {
-  font-size: 14px;
-  color: #2e7d32;
+.md-card-rows .md-prog {
+  font-size: 12.5px;
 }
 
-/* pause: the same rows on the dark scrim */
-.md-pause {
-  width: min(86vw, 360px);
-  margin-top: 2vh;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(0, 45, 98, 0.6);
-  color: var(--cream);
-}
-
-.md-pause .md-row.done .md-prog {
-  color: var(--gold);
+/* Reduced motion: every count, bar and stamp lands in its final state. */
+@media (prefers-reduced-motion: reduce) {
+  .go-card,
+  .go-actions,
+  .pause-card,
+  .md-card,
+  .go-stamp,
+  .md-stamp,
+  .md-stamp::after,
+  .md-levelup,
+  .gd-caption.close,
+  .go-dist.near .gd-bar,
+  .btn-mid.glow,
+  .prompt {
+    animation: none !important;
+  }
+  .gd-bar b,
+  .gp-bar b,
+  .md-bar b,
+  .vtab,
+  .paint-chip,
+  .mandao-chip {
+    transition: none !important;
+  }
 }
 
 /* mid-run: a mandao got done. The tramo card's slot style, lower, gold. */
