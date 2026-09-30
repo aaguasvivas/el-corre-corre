@@ -2098,11 +2098,12 @@ function backdropCanvas(): HTMLCanvasElement {
 // the fastest parallax on screen as they sweep over the rider. A handful of
 // spans leapfrog ahead of the rider as one InstancedMesh; each instance picks
 // its variant (the others' vertices collapse to a point) and, for a
-// pasacalle, which banner it flies. Everything sits above 6 m, clear of the
-// tallest guagua cargo, and none of it is collidable.
+// pasacalle, which banner it flies. Banners and pennants hang above 7 m (so
+// they sweep out of the frame early), the lowest laundry above 4 m, all
+// clear of the tallest guagua cargo (about 3 m), and none of it collides.
 // ---------------------------------------------------------------------------
 
-const OVERHEAD_COUNT = 6;
+const OVERHEAD_COUNT = 5;
 const OV_PASACALLE = 0;
 const OV_BANDERITAS = 1;
 const OV_LAUNDRY = 2;
@@ -2153,19 +2154,19 @@ function overheadGeometry(rects: Record<string, AtlasRect>): THREE.BufferGeometr
     parts.push(g);
   };
   const pole = (x: number, variant: number): void => {
-    const p = new THREE.BoxGeometry(0.16, 7.5, 0.16);
-    p.translate(x, 3.75, 0);
+    const p = new THREE.BoxGeometry(0.16, 8.8, 0.16);
+    p.translate(x, 4.4, 0);
     add(p, variant, rects.wood, 'none');
   };
 
   // Pasacalle: two poles, ropes to the banner's corners, the banner itself
   pole(OV_FAR_X, OV_PASACALLE);
   pole(OV_SEA_X, OV_PASACALLE);
-  for (const s of sagLine(OV_FAR_X, 7.3, -4.45, 7.1, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
-  for (const s of sagLine(4.05, 7.1, OV_SEA_X, 7.3, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
+  for (const s of sagLine(OV_FAR_X, 8.6, -4.45, 8.35, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
+  for (const s of sagLine(4.05, 8.35, OV_SEA_X, 8.6, 0.35, 4, 0.04)) add(s, OV_PASACALLE, rects.wire, 'none');
   const banner = quadUV(8.5, 1.1, rects.pasacalle0);
   banner.rotateY(Math.PI); // face the rider; the canvas's left stays screen left
-  banner.translate(-0.2, 6.55, 0);
+  banner.translate(-0.2, 7.8, 0);
   add(banner, OV_PASACALLE, rects.pasacalle0, 'none', 1);
 
   // Banderitas: two sagging strings of pennants. Blue, white and red never
@@ -2174,8 +2175,8 @@ function overheadGeometry(rects: Record<string, AtlasRect>): THREE.BufferGeometr
   pole(OV_SEA_X, OV_BANDERITAS);
   const pennantColors = [rects.red, rects.yellow, rects.teal, rects.white, rects.lilac];
   const strings: Array<[number, number, number, number]> = [
-    [7.2, 7.0, 0.8, 0],
-    [6.7, 6.6, 0.65, 1.4],
+    [8.6, 8.4, 0.8, 0],
+    [8.1, 8.0, 0.65, 1.4],
   ];
   let ci = 0;
   for (const [y0, y1, sag, z] of strings) {
@@ -2197,8 +2198,8 @@ function overheadGeometry(rects: Record<string, AtlasRect>): THREE.BufferGeometr
   // Laundry across the Zona: tied to the balconies, no poles
   const clothes = [rects.white, rects.sky, rects.peach, rects.yellow, rects.lilac, rects.red, rects.teal, rects.white];
   for (const [y0, y1, sag, z] of [
-    [5.9, 5.7, 0.55, 0],
-    [6.5, 6.4, 0.45, 2.2],
+    [5.4, 5.3, 0.45, 0],
+    [6.0, 5.9, 0.4, 2.2],
   ] as Array<[number, number, number, number]>) {
     for (const s of sagLine(-12.3, y0, 12.3, y1, sag, 8, 0.045)) {
       s.translate(0, 0, z);
@@ -2283,7 +2284,7 @@ class Overhead {
     this.im.frustumCulled = false;
     scene.add(this.im);
     for (let i = 0; i < OVERHEAD_COUNT; i++) {
-      this.z[i] = 30 + i * 38;
+      this.z[i] = 45 + i * 62;
       this.dress(i, 'malecon');
     }
   }
@@ -2321,7 +2322,7 @@ class Overhead {
     for (let i = 0; i < OVERHEAD_COUNT; i++) {
       this.z[i] -= ds;
       if (this.z[i] < -25) {
-        far += 34 + Math.random() * 18;
+        far += 50 + Math.random() * 30;
         this.z[i] = far;
         this.dress(i, tramoFor(runDistance + far));
         this.hushed[i] = 0;
