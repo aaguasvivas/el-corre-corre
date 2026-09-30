@@ -379,6 +379,10 @@ describe('Economy: Las Pinturas against real income', () => {
     expect(runs).toBeGreaterThan(1);
   });
 
+  it('reachTramo targets sit exactly on the tramo borders the copy names', () => {
+    expect([...CONFIG.mandaoPool.reachTramo]).toEqual([1, 2, 3].map((k) => k * CONFIG.tramoLengthM));
+  });
+
   it('every pintura has a Spanish name, and Oro Fino is the top of every row', () => {
     for (const list of Object.values(PINTURAS)) {
       for (const p of list) expect(p.name.length).toBeGreaterThan(2);

@@ -14,6 +14,9 @@ const LANG_KEY = 'ecc.v1.lang';
 const PEDAL_SEEN_KEY = 'ecc.v1.pedalSeen'; // '1' once the gas pedal has been pressed, ever
 const POPUP_POOL = 12;
 
+// reachTramo targets are tramo borders: the copy names the place.
+const TRAMO_M = CONFIG.tramoLengthM;
+
 const STRINGS = {
   es: {
     subtitle: '¡Dale, que vamo’ tarde!',
@@ -116,7 +119,7 @@ const STRINGS = {
       airRun: (n: number) => (n === 1 ? 'Vuela un policía acostao' : `Vuela ${n} policías acostaos`),
       distRun: (n: number) => `Llega a ${fmtN(n)} m`,
       reachTramo: (n: number) =>
-        n === 1000 ? 'Llega a La Zona Colonial' : n === 2000 ? 'Llega a El Campo' : n === 3000 ? 'Dale la vuelta al país' : `Llega a ${fmtN(n)} m`,
+        n === TRAMO_M ? 'Llega a La Zona Colonial' : n === 2 * TRAMO_M ? 'Llega a El Campo' : n === 3 * TRAMO_M ? 'Dale la vuelta al país' : `Llega a ${fmtN(n)} m`,
       pointsRun: (n: number) => `Haz ${fmtN(n)} puntos`,
       cleanMeters: (n: number) => `Corre ${fmtN(n)} m seguidos sin caer en un hoyo`,
       pasolaMeters: (n: number) => `Corre ${fmtN(n)} m en LA PASOLA`,
@@ -225,7 +228,7 @@ const STRINGS = {
       airRun: (n: number) => (n === 1 ? 'Launch off a speed bump' : `Launch off ${n} speed bumps`),
       distRun: (n: number) => `Reach ${fmtN(n)} m`,
       reachTramo: (n: number) =>
-        n === 1000 ? 'Reach La Zona Colonial' : n === 2000 ? 'Reach El Campo' : n === 3000 ? 'Ride the whole country' : `Reach ${fmtN(n)} m`,
+        n === TRAMO_M ? 'Reach La Zona Colonial' : n === 2 * TRAMO_M ? 'Reach El Campo' : n === 3 * TRAMO_M ? 'Ride the whole country' : `Reach ${fmtN(n)} m`,
       pointsRun: (n: number) => `Score ${fmtN(n)} points`,
       cleanMeters: (n: number) => `Ride ${fmtN(n)} m straight without a pothole`,
       pasolaMeters: (n: number) => `Ride ${fmtN(n)} m on LA PASOLA`,
