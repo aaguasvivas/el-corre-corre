@@ -2104,6 +2104,9 @@ function backdropCanvas(): HTMLCanvasElement {
 // pasacalle, which banner it flies. Banners and pennants hang above 7 m (so
 // they sweep out of the frame early), the lowest laundry above 4 m, all
 // clear of the tallest guagua cargo (about 3 m), and none of it collides.
+// In the last stretch before a span passes over the lens it would fill the
+// top of the frame, right behind the score and the pause button, so each
+// span fades out as its top edge climbs toward the HUD (see Overhead).
 // ---------------------------------------------------------------------------
 
 const OVERHEAD_COUNT = 5;
@@ -2248,6 +2251,27 @@ attribute float aBan;
 attribute float aSway;
 attribute float iVar;
 attribute vec2 iBan;
+varying float vOvFade;
+`;
+
+// Each variant's top edge over the middle of the road: the banner's top, the
+// higher pennant string at its sag, the higher laundry line at its sag.
+const OV_TOP_Y = [8.35, 7.7, 5.55] as const;
+
+// The fade, per span and in screen space, so it holds for any camera height,
+// fov kick or aspect: where the span's top edge would land on screen, as a
+// fraction of the frame from the top (bent like the world, so it matches
+// what is drawn). A span level with or behind the lens is gone. The same
+// value for every vertex of a span, so a span fades whole, never in bands.
+const OVERHEAD_FADE = /* glsl */ `
+{
+  float ovTop = iVar < 0.5 ? ${OV_TOP_Y[OV_PASACALLE].toFixed(2)} : iVar < 1.5 ? ${OV_TOP_Y[OV_BANDERITAS].toFixed(2)} : ${OV_TOP_Y[OV_LAUNDRY].toFixed(2)};
+  vec4 ovW = modelMatrix * instanceMatrix * vec4( 0.0, ovTop, 0.0, 1.0 );
+  ovW.y -= ${CONFIG.worldDrop.toFixed(7)} * ovW.z * ovW.z * step( 0.0, ovW.z );
+  vec4 ovClip = projectionMatrix * viewMatrix * ovW;
+  float ovFrac = ovClip.w > 0.0 ? 0.5 - 0.5 * ovClip.y / ovClip.w : -1.0;
+  vOvFade = smoothstep( ${CONFIG.overheadFadeGone.toFixed(3)}, ${CONFIG.overheadFadeFrom.toFixed(3)}, ovFrac );
+}
 `;
 
 class Overhead {
@@ -2265,8 +2289,12 @@ class Overhead {
     this.iBan = new THREE.InstancedBufferAttribute(new Float32Array(OVERHEAD_COUNT * 2), 2);
     geo.setAttribute('iVar', this.iVar);
     geo.setAttribute('iBan', this.iBan);
+    // DECISION: transparent, so a span can fade instead of popping out. It
+    // stays one draw; alpha is 1 until the fade, so it looks as it did, and
+    // it still writes depth (whatever drew after it hides behind it as
+    // before). Fully faded fragments are discarded and write nothing.
     const mat = extendPatch(
-      worldMaterial(new THREE.MeshToonMaterial({ map: atlas.tex, gradientMap: getGradientMap() })),
+      worldMaterial(new THREE.MeshToonMaterial({ map: atlas.tex, gradientMap: getGradientMap(), transparent: true })),
       'overhead',
       (shader) => {
         shader.uniforms.uWorldTime = WORLD_TIME;
@@ -2279,7 +2307,16 @@ class Overhead {
               transformed.z += sin( uWorldTime * 2.6 + position.x * 0.8 ) * 0.1 * aSway;
               if ( abs( aVar - iVar ) > 0.5 ) transformed = vec3( 0.0 );`,
             )
-            .replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv += aBan * iBan;');
+            .replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv += aBan * iBan;')
+            .replace('#include <fog_vertex>', `#include <fog_vertex>\n${OVERHEAD_FADE}`);
+        shader.fragmentShader =
+          'varying float vOvFade;\n' +
+          shader.fragmentShader.replace(
+            '#include <alphamap_fragment>',
+            `#include <alphamap_fragment>
+            diffuseColor.a = vOvFade;
+            if ( diffuseColor.a < 0.004 ) discard;`,
+          );
       },
     );
     this.im = new THREE.InstancedMesh(geo, mat, OVERHEAD_COUNT);
@@ -2312,6 +2349,15 @@ class Overhead {
     for (let i = 0; i < OVERHEAD_COUNT; i++) {
       if (this.z[i] > zMin) this.dress(i, tramoFor(runDistance + this.z[i]));
     }
+  }
+
+  // Test hook: hang span 0 z metres ahead with the given variant, so a shot
+  // can catch one at an exact moment of its pass.
+  debugHang(z: number, variant: number): void {
+    this.z[0] = z;
+    this.hushed[0] = 0;
+    this.iVar.setX(0, variant);
+    this.iVar.needsUpdate = true;
   }
 
   // runDistance: where the run is, so a recycled span dresses for the tramo
@@ -3685,6 +3731,11 @@ export class World {
 
   debugViralata(): void {
     this.viralata.trigger();
+  }
+
+  // Test hook: an overhead span z metres ahead of the rider.
+  debugOverhead(z: number, kind: 'pasacalle' | 'banderitas' | 'laundry'): void {
+    this.overhead.debugHang(z, kind === 'pasacalle' ? OV_PASACALLE : kind === 'banderitas' ? OV_BANDERITAS : OV_LAUNDRY);
   }
 
   // One Obelisco per national lap, always the same distance into the Malecon

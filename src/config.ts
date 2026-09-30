@@ -684,6 +684,12 @@ export const CONFIG = {
   curveLen2: 111,
   worldDrop: 0.00013, // FEEL: how much the distant road curls below the horizon
   beltLen: 120, // scenery recycles in two alternating belts of this length
+  // Overhead spans (pasacalles, banderitas, laundry) fade out as they climb
+  // toward the HUD, so none sweeps over the score or the pause button.
+  // Measured where the span's top edge lands on screen, as a fraction of
+  // the frame from the top, so it holds at any camera height, fov or aspect.
+  overheadFadeFrom: 0.2, // FEEL: a span starts to fade here; higher = it fades farther away
+  overheadFadeGone: 0.09, // FEEL: and is gone here; keep it below the score and the pause button
   // The Obelisco stands once per national lap, this far into each Malecon
   // stretch. It is one monument, so it must not appear twice in a lap, and
   // being reachable early is what makes it a landmark instead of a rumor.

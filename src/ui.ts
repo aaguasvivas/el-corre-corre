@@ -8,6 +8,7 @@ import { barrioMultFor, mandaoPerRun, type Completion, type Mandao, type MandaoK
 import { nextBorderIn, nextTramoAfter } from './tour';
 import { drawDominicanFlag } from './flag';
 import type { SetPieceKind } from './traffic';
+import { shareImage, type ShareResult } from './share';
 
 type Lang = 'es' | 'en';
 const LANG_KEY = 'ecc.v1.lang';
@@ -1454,7 +1455,9 @@ export class UI {
 
   // ---------------- share card ----------------
 
-  async shareCard(r: RunResult): Promise<void> {
+  // Draws the card and hands it to share.ts (the native sheet in the app,
+  // Web Share or a download on the web).
+  async shareCard(r: RunResult): Promise<ShareResult> {
     const t = this.t();
     const veh = VEHICLES[this.selectedVehicle];
     // Awaited, not requested, here: the font was warmed at boot so this
@@ -1591,31 +1594,7 @@ export class UI {
     stroked('EL CORRE CORRE', 540, 1300, 34, 'rgba(255,255,255,0.85)', '#0e7490', 6);
 
     const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'));
-    if (!blob) return;
-    const name = shareFileName(r);
-    const file = new File([blob], name, { type: 'image/png' });
-    const text = `${t.shareText(r.points)} ${t.shareAsk}`;
-    let canFiles = false;
-    try {
-      canFiles = navigator.canShare?.({ files: [file] }) ?? false;
-    } catch {
-      canFiles = false; // a throwing canShare just means no file sharing here
-    }
-    if (canFiles) {
-      try {
-        await navigator.share({ files: [file], title: 'El Corre Corre', text });
-        return;
-      } catch (e) {
-        // Dismissing the sheet is a real choice, so respect it. Anything else
-        // (iOS refusing the call, no activation left) falls through to the
-        // download, because COMPARTIR must never be a dead button.
-        if ((e as { name?: string } | null)?.name === 'AbortError') return;
-      }
-    }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    if (!blob) return 'failed';
+    return shareImage(blob, shareFileName(r), `${t.shareText(r.points)} ${t.shareAsk}`);
   }
 }

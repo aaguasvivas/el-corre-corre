@@ -96,6 +96,33 @@ describe('traffic fairness', () => {
     expect(minArrival).toBeGreaterThanOrEqual(CONFIG.rebaseLeadSec[0] - 0.05);
   });
 
+  it('a line motoconcho queues behind a car that sways into its line, even at a standstill', () => {
+    // Wave 2 found a stopped lane-1 sedan and a stopped line motoconcho
+    // swaying into each other. The sedan leans toward the dashed line with a
+    // full sway; the moto had passed while that sway was at its far point,
+    // then stopped behind a lane-0 car leaning onto the line, right beside
+    // the sedan. Each start delay meets the sway at another point of its
+    // cycle, so some delays used to pass and some used to ghost.
+    const lineX = (ROAD.laneCenters[0] + ROAD.laneCenters[1]) / 2;
+    const frozen = { live: false, ds: 0 }; // the rider waits; only this jam moves
+    let worst = 0;
+    for (let k = 0; k < 12; k++) {
+      sim.start(4400 + k, false);
+      for (let i = 0; i < k / H; i++) sim.step(START_X, -50, frozen);
+      const t = sim.traffic;
+      expect(t.debugSpawnVehicle('sedan', 1, 60, 1, ROAD.laneCenters[1] - 0.4, 0, CONFIG.laneDriftM)).toBe(true);
+      expect(t.debugSpawnVehicle('sedan', 0, 66.3, 1, ROAD.laneCenters[0] + 0.65, 0)).toBe(true);
+      expect(t.debugSpawnVehicle('motoconcho', 0, 30, 1, lineX, 10)).toBe(true);
+      for (let i = 0; i < 14 / H; i++) {
+        sim.step(START_X, -50, frozen);
+        worst = Math.max(worst, t.overlapCount);
+      }
+      const moto = t.vehicleViews.find((v) => v.active && v.type === 'motoconcho');
+      expect(moto?.speed, `delay ${k}: the moto ends up queued`).toBe(0);
+    }
+    expect(worst, 'vehicles swaying into each other').toBe(0);
+  });
+
   it('a car behind a braking rider follows and honks instead of rear-ending', () => {
     let crashes = 0;
     let horns = 0;

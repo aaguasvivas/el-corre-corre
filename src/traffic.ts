@@ -903,6 +903,10 @@ const HIT = CONFIG.vehicleHitboxScale;
 // where the rider starts, and where lane-splitting motoconchos ride.
 const LINE_X = (ROAD.laneCenters[0] + ROAD.laneCenters[1]) / 2;
 const SWING_M = 1.55; // how far el rebase carries a car from its lane center toward the seam
+// Side by side, two bodies may come this close (a share of their summed half
+// widths) and still read as passing, never as one inside the other: a lane
+// car leans this near a parked guagua, and no two sways may meet deeper.
+const SIDE_CLEAR = 0.85;
 // Beyond this the fog hides everything in every tramo, so a set piece may
 // clear filler out of its way there without anything visibly vanishing.
 const FOGGED_Z = 150;
@@ -1353,7 +1357,7 @@ export class Traffic {
     let room = CONFIG.laneWidth / 2 - halfW - 0.05;
     if ((lane === 0 && !towardPlus) || (lane === 3 && towardPlus)) {
       const toShoulder = ROAD.shoulderCenters[1] - ROAD.laneCenters[3];
-      room = Math.min(room, toShoulder - (halfW + (this.typeHalfW.get('guaguaParada') ?? 1.15)) * 0.85);
+      room = Math.min(room, toShoulder - (halfW + (this.typeHalfW.get('guaguaParada') ?? 1.15)) * SIDE_CLEAR);
     }
     return Math.max(0, room);
   }
@@ -2410,12 +2414,17 @@ export class Traffic {
   // Do two vehicles' bodies overlap sideways? A car out on el rebase still
   // owns its home line: it comes back to it, so it keeps following whatever
   // is there (and whatever is behind that line keeps following it).
+  // Clear right now is not enough: both keep their slow lane sway, so a pass
+  // that starts clear can end with one in the other's side, and two that
+  // stop side by side keep swaying (wave 2: a stopped line motoconcho beside
+  // a stopped car leaning toward the line). Two whose sways can meet deeper
+  // than SIDE_CLEAR share the line too, so one queues behind the other.
   private sharesLine(a: Vehicle, b: Vehicle): boolean {
     const w = a.halfW + b.halfW + 0.05;
     if (Math.abs(a.x - b.x) < w) return true;
     if (a.overtakeT >= 0 && Math.abs(a.baseX - b.x) < w) return true;
     if (b.overtakeT >= 0 && Math.abs(a.x - b.baseX) < w) return true;
-    return false;
+    return Math.abs(a.baseX - b.baseX) - a.driftAmp - b.driftAmp < (a.halfW + b.halfW) * SIDE_CLEAR;
   }
 
   // Rebase candidates: a moving inner-lane car arriving inside
@@ -2545,8 +2554,21 @@ export class Traffic {
     return this.spawnObstacle(kind, x, z);
   }
 
-  debugSpawnVehicle(type: VehicleType, lane: number, z: number, dir: 1 | -1, exactX?: number, speed?: number): boolean {
-    return this.spawnVehicle(type, lane, z, dir, speed, exactX) !== null;
+  // drift: give the vehicle this lane sway after it is placed (an exactX
+  // spawn has none). The spawn checks ran without it, so tests that pass it
+  // own the geometry they build.
+  debugSpawnVehicle(
+    type: VehicleType,
+    lane: number,
+    z: number,
+    dir: 1 | -1,
+    exactX?: number,
+    speed?: number,
+    drift?: number,
+  ): boolean {
+    const v = this.spawnVehicle(type, lane, z, dir, speed, exactX);
+    if (v && drift !== undefined) v.driftAmp = drift;
+    return v !== null;
   }
 
   debugRunPattern(kind: PatternKind): void {
