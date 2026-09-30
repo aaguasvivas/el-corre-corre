@@ -24,6 +24,9 @@ import { drawDominicanFlag, FLAG_ASPECT } from './flag';
 const CHUNK_LEN = 30;
 const CHUNK_COUNT = 7;
 const ROAD_SLICES = 5; // 30 m chunk / 6 m lane-dash period
+// Scenery past fog far + this is not drawn at all: fully fogged and curled
+// under the horizon, it would cost draws and show nothing.
+const FOG_CULL_MARGIN = 30;
 const RECYCLE_Z = -35;
 const CONFETTI_COUNT = 150;
 const TAPE_POST_X = 8.7; // the arch stands on the curbs, clear of every lane
@@ -3781,6 +3784,8 @@ export class World {
             ? this.crosswalkMat
             : this.roadMats[tr][Math.floor(Math.random() * ROAD_SLICES)];
       }
+      // a chunk wholly past the fog is fog color on fog color: skip its draw
+      chunk.visible = chunk.position.z - CHUNK_LEN / 2 < this.fogRef.far + FOG_CULL_MARGIN;
     }
 
     for (const belt of this.belts) {
@@ -3790,10 +3795,14 @@ export class World {
         belt.fill(tramoFor(this.runDistance + belt.group.position.z + CONFIG.beltLen / 2));
       }
       // The belts keep frustumCulled off, because a manual bounding sphere
-      // would have to be inflated for the bend field. One cheap z test still
-      // drops the whole belt that is already behind the camera: the bend
-      // never displaces forward, only laterally, so this cannot pop.
-      belt.group.visible = belt.group.position.z + CONFIG.beltLen > -12;
+      // would have to be inflated for the bend field. Two cheap z tests
+      // still drop a whole belt: one already behind the camera (the bend
+      // never displaces forward, only laterally, so this cannot pop), and
+      // one that starts well beyond the fog's far end, where everything in it
+      // is fog color and has sunk under the curled horizon. The margin keeps
+      // tall fogged rooftops from popping against the cream band above it.
+      const bz = belt.group.position.z;
+      belt.group.visible = bz + CONFIG.beltLen > -12 && bz < this.fogRef.far + FOG_CULL_MARGIN;
     }
 
     // El Obelisco, every ~800 m, but it is a Malecon landmark: skip the
