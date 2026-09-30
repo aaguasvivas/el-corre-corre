@@ -560,10 +560,12 @@ export const CONFIG = {
   limiterRatio: 8,
   limiterAttackSec: 0.002,
   limiterReleaseSec: 0.12,
-  // DECISION: the compressor adds an automatic makeup gain (about +4 dB at
-  // these settings, measured offline); the trim takes it back out, so
-  // everything under the threshold plays exactly as loud as before.
-  masterTrim: 0.62,
+  // DECISION: the compressor adds an automatic makeup gain: +3.0 dB (x1.414)
+  // at these settings, measured offline (tools/audio-lab.mjs) and matching
+  // the WebKit/Chromium kernel, (1 / gain at 0 dBFS)^0.6 with the soft knee.
+  // The trim takes it back out, so everything under the threshold plays
+  // exactly as loud as before. Retune it with the lab if a limiter key moves.
+  masterTrim: 0.707,
   musicDuckLevel: 0.55, // FEEL: music level under a big stinger (record, mandao, tramo)
 
   // Music between runs and at the crash. FEEL: the colmado radio on the
@@ -589,6 +591,11 @@ export const CONFIG = {
   tramoColorVolume: 0.8, // FEEL: the tramo instruments (güira, requinto, accordion, tambora) against the dembow
 
   // Rewards you can hear
+  // FEEL: the big moments against everything else (ladder stabs, the
+  // multiplier arpeggio, the tramo fanfare, the Obelisco, the shield break,
+  // the record and farthest stingers, the mandao jingles). They ride inside
+  // sfxVolume; raise this if they get lost under the dembow.
+  stingerVolume: 1,
   nearMissPluckVolume: 0.12, // FEEL: the pentatonic pluck that climbs with the combo
   // DECISION: the razor band for the sound only (brighter whoosh and pluck).
   // Research put the tight graze at 0.5 m; if the score adopts a razor band

@@ -98,6 +98,7 @@ export class AudioEngine {
   private musicBus!: GainNode;
   private musicFilter!: BiquadFilterNode;
   private sfxBus!: GainNode;
+  private stingerBus!: GainNode; // the big moments (ladder, multiplier, tramo, records, mandaos), inside sfxBus
   private noiseBuf!: AudioBuffer;
 
   private layerKick!: GainNode;
@@ -116,6 +117,7 @@ export class AudioEngine {
   private idleAt = 0; // ctx time the idle groove may play from (after the crash gap)
   private tapeT0 = 0; // ctx time the crash tape-stop started
   private pm = 1; // pitch and tape speed of the music voices (the tape-stop drags it down)
+  private glide = false; // true while scheduleStep voices a tape-stop step: every voice bends down with the tape
   private step = 0;
   private nextStepAt = 0;
   private wheeliePrev = false;
@@ -244,6 +246,9 @@ export class AudioEngine {
     this.sfxBus = ctx.createGain();
     this.sfxBus.gain.value = CONFIG.sfxVolume;
     this.sfxBus.connect(this.master);
+    this.stingerBus = ctx.createGain();
+    this.stingerBus.gain.value = CONFIG.stingerVolume;
+    this.stingerBus.connect(this.sfxBus);
 
     const len = Math.floor(ctx.sampleRate * 1.2);
     this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -479,12 +484,10 @@ export class AudioEngine {
       if (this.nextStepAt < now - 0.35) this.nextStepAt = now + 0.05; // resync after a stall
       while (this.nextStepAt < now + 0.15) {
         const t = this.nextStepAt;
-        this.pm = 1;
-        if (this.mode === 'tapestop') {
-          const p = Math.max(0, Math.min(1, (t - this.tapeT0) / CONFIG.crashSlowmoSec));
-          this.pm = Math.pow(2, -CONFIG.tapeStopOctaves * p);
-        }
+        this.pm = this.tapeRate(t);
+        this.glide = this.mode === 'tapestop';
         this.scheduleStep(this.step, t);
+        this.glide = false;
         this.step = (this.step + 1) % 16;
         this.nextStepAt += stepDur / this.pm; // a dragging tape is a slower tape
       }
@@ -525,6 +528,22 @@ export class AudioEngine {
     return (60 / CONFIG.audioBpm) * 4;
   }
 
+  // The tape's speed at audio time t (1 = normal). During the crash
+  // tape-stop it falls tapeStopOctaves over the slow-mo, dragging pitch and
+  // tempo down together.
+  private tapeRate(t: number): number {
+    if (this.mode !== 'tapestop') return 1;
+    const p = Math.max(0, Math.min(1, (t - this.tapeT0) / CONFIG.crashSlowmoSec));
+    return Math.pow(2, -CONFIG.tapeStopOctaves * p);
+  }
+
+  // How far a tape-stop voice bends over its own length: a note that starts
+  // as the tape slows keeps sliding down while it rings, so the stop is a
+  // glide and not a staircase of lower notes. 1 outside a tape-stop step.
+  private bend(t: number, len: number): number {
+    return this.glide ? this.tapeRate(t + len) / this.tapeRate(t) : 1;
+  }
+
   private chordNow(): number[] {
     return CHORDS[Math.floor(this.bar / 2) % CHORDS.length];
   }
@@ -563,6 +582,11 @@ export class AudioEngine {
         else if (was[i] > 0) this.tramoLiveUntil[i] = t + this.barDur * 1.5; // play on through the fade
       }
     }
+    // DECISION: the La Cinta roll starts on the next beat, not the next bar.
+    // tapeRiserM (60 m) lasts 1.2 s at the gas ceiling and 1.4 s at cruise
+    // top speed, less than one bar (2 s at 120 BPM), so waiting for a
+    // downbeat could miss the tape entirely.
+    // The roll still swells over one bar and doubles into 32nds halfway.
     if (this.riserOn && this.riserStartAt < 0) this.riserStartAt = t;
   }
 
@@ -671,6 +695,11 @@ export class AudioEngine {
     src.loopStart = Math.random() * 0.8;
     src.loopEnd = src.loopStart + 0.35;
     src.playbackRate.value = rate;
+    const b = this.bend(t, attack + decay);
+    if (b < 1) {
+      src.playbackRate.setValueAtTime(rate, t);
+      src.playbackRate.exponentialRampToValueAtTime(rate * b, t + attack + decay);
+    }
     const f = ctx.createBiquadFilter();
     f.type = filterType;
     f.frequency.value = freq;
@@ -696,7 +725,8 @@ export class AudioEngine {
     const o = ctx.createOscillator();
     o.type = type;
     o.frequency.setValueAtTime(f0, t);
-    if (f1 !== null) o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + decay);
+    const b = this.bend(t, decay);
+    if (f1 !== null || b < 1) o.frequency.exponentialRampToValueAtTime(Math.max((f1 ?? f0) * b, 1), t + decay);
     const g = ctx.createGain();
     this.env(g, t, peak, decay, attack);
     o.connect(g).connect(dest);
@@ -734,6 +764,11 @@ export class AudioEngine {
     const o = ctx.createOscillator();
     o.type = 'triangle';
     o.frequency.value = f * this.pm;
+    const b = this.bend(t, 0.25);
+    if (b < 1) {
+      o.frequency.setValueAtTime(f * this.pm, t);
+      o.frequency.exponentialRampToValueAtTime(f * this.pm * b, t + 0.25);
+    }
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 240;
@@ -781,6 +816,11 @@ export class AudioEngine {
     const o = this.ctx!.createOscillator();
     o.type = 'square';
     o.frequency.value = f;
+    const b = this.bend(t, len);
+    if (b < 1) {
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * b, t + len);
+    }
     o.detune.value = cents;
     o.connect(dest);
     o.start(t);
@@ -817,8 +857,8 @@ export class AudioEngine {
   // A marimba bar: the fundamental plus the fourth-harmonic ping that
   // dies first.
   private marimba(t: number, f: number, peak: number, decay: number): void {
-    this.tone(t, this.sfxBus, 'sine', f, null, peak, decay, 0.003);
-    this.tone(t, this.sfxBus, 'sine', f * 4, null, peak * 0.22, decay * 0.25, 0.002);
+    this.tone(t, this.stingerBus, 'sine', f, null, peak, decay, 0.003);
+    this.tone(t, this.stingerBus, 'sine', f * 4, null, peak * 0.22, decay * 0.25, 0.002);
   }
 
   // A brassy note: a low-passed sawtooth with the square an octave down.
@@ -828,13 +868,13 @@ export class AudioEngine {
     lp.type = 'lowpass';
     lp.frequency.setValueAtTime(1200, t);
     lp.frequency.exponentialRampToValueAtTime(2800, t + 0.04);
-    lp.connect(this.sfxBus);
+    lp.connect(this.stingerBus);
     this.tone(t, lp, 'sawtooth', f, null, peak, len, 0.012);
     this.tone(t, lp, 'square', f / 2, null, peak * 0.35, len, 0.012);
   }
 
   private cymbal(t: number, peak: number, decay: number): void {
-    this.noiseHit(t, this.sfxBus, peak, decay, 'highpass', 5200, 0.8, 0.003);
+    this.noiseHit(t, this.stingerBus, peak, decay, 'highpass', 5200, 0.8, 0.003);
   }
 
   // Plátano: the 3-note run. Pickups less than platanoStreakSec apart are a
@@ -875,7 +915,7 @@ export class AudioEngine {
   // The bendición bell chord.
   bell(): void {
     if (!this.ready()) return;
-    this.bellAt(this.ctx!.currentTime, 1, 1);
+    this.bellAt(this.ctx!.currentTime, 1, 1, this.sfxBus);
   }
 
   // El Obelisco: the same bell, a fourth lower and longer, like a big
@@ -885,10 +925,10 @@ export class AudioEngine {
     this.bellAt(this.ctx!.currentTime, 0.75, 1.1);
   }
 
-  private bellAt(t: number, pitch: number, gain: number): void {
-    this.tone(t, this.sfxBus, 'sine', 659.25 * pitch, null, 0.35 * gain, 1.1, 0.006);
-    this.tone(t, this.sfxBus, 'sine', 987.77 * pitch, null, 0.22 * gain, 1.1, 0.006);
-    this.tone(t, this.sfxBus, 'sine', 1567.98 * pitch, null, 0.1 * gain, 1.1, 0.006);
+  private bellAt(t: number, pitch: number, gain: number, dest: AudioNode = this.stingerBus): void {
+    this.tone(t, dest, 'sine', 659.25 * pitch, null, 0.35 * gain, 1.1, 0.006);
+    this.tone(t, dest, 'sine', 987.77 * pitch, null, 0.22 * gain, 1.1, 0.006);
+    this.tone(t, dest, 'sine', 1567.98 * pitch, null, 0.1 * gain, 1.1, 0.006);
   }
 
   // Near-miss: the whoosh rises a semitone per combo step (k = combo - 1,
@@ -935,10 +975,10 @@ export class AudioEngine {
     const c = this.chordNow();
     const pv = CONFIG.nearMissPluckVolume * 0.85;
     for (let i = 0; i < 3; i++) {
-      this.tone(t + i * 0.045, this.sfxBus, 'triangle', c[i] * 2, null, pv, 0.4, 0.004);
-      this.tone(t + i * 0.045, this.sfxBus, 'sine', c[i] * 4, null, pv * 0.4, 0.3, 0.004);
+      this.tone(t + i * 0.045, this.stingerBus, 'triangle', c[i] * 2, null, pv, 0.4, 0.004);
+      this.tone(t + i * 0.045, this.stingerBus, 'sine', c[i] * 4, null, pv * 0.4, 0.3, 0.004);
     }
-    if (combo >= 7) this.tone(t + 0.135, this.sfxBus, 'triangle', c[0] * 8, null, pv * 0.8, 0.45, 0.004);
+    if (combo >= 7) this.tone(t + 0.135, this.stingerBus, 'triangle', c[0] * 8, null, pv * 0.8, 0.45, 0.004);
     if (combo >= 10) {
       this.brass(t + 0.135, c[0] * 2, 0.07, 0.35);
       this.cymbal(t + 0.135, 0.1, 0.5);
@@ -966,8 +1006,8 @@ export class AudioEngine {
     const notes0 = c[0] * oct;
     for (let i = 0; i < 4; i++) {
       const f = i === 3 ? notes0 * 2 : c[i] * oct;
-      this.tone(t + i * 0.065, this.sfxBus, 'triangle', f, null, 0.2, 0.2, 0.004);
-      this.tone(t + i * 0.065, this.sfxBus, 'sine', f * 2, null, 0.06, 0.12, 0.004);
+      this.tone(t + i * 0.065, this.stingerBus, 'triangle', f, null, 0.2, 0.2, 0.004);
+      this.tone(t + i * 0.065, this.stingerBus, 'sine', f * 2, null, 0.06, 0.12, 0.004);
     }
     this.cymbal(t + 0.2, 0.07, 0.35);
   }
@@ -980,7 +1020,7 @@ export class AudioEngine {
     this.brass(t, 523.25, 0.12, 0.1);
     this.brass(t + 0.12, 659.25, 0.12, 0.1);
     this.brass(t + 0.24, 783.99, 0.13, 0.45);
-    this.noiseHit(t + 0.24, this.sfxBus, 0.12, 0.3, 'bandpass', 6200, 1.4, 0.06);
+    this.noiseHit(t + 0.24, this.stingerBus, 0.12, 0.3, 'bandpass', 6200, 1.4, 0.06);
     this.musicDuck(700);
   }
 
@@ -988,10 +1028,10 @@ export class AudioEngine {
   shieldBreak(): void {
     if (!this.ready()) return;
     const t = this.ctx!.currentTime;
-    this.noiseHit(t, this.sfxBus, 0.3, 0.12, 'highpass', 5000, 1.5, 0.002);
-    this.tone(t, this.sfxBus, 'sine', 2637, 2400, 0.07, 0.22, 0.002);
-    this.tone(t, this.sfxBus, 'sine', 3765, 3500, 0.05, 0.18, 0.002);
-    this.tone(t, this.sfxBus, 'sine', 4061, null, 0.04, 0.14, 0.002);
+    this.noiseHit(t, this.stingerBus, 0.3, 0.12, 'highpass', 5000, 1.5, 0.002);
+    this.tone(t, this.stingerBus, 'sine', 2637, 2400, 0.07, 0.22, 0.002);
+    this.tone(t, this.stingerBus, 'sine', 3765, 3500, 0.05, 0.18, 0.002);
+    this.tone(t, this.stingerBus, 'sine', 4061, null, 0.04, 0.14, 0.002);
     this.bellAt(t + 0.09, 1, 0.9);
   }
 
@@ -1056,12 +1096,12 @@ export class AudioEngine {
     this.tapeRiser(false);
     if (!this.ready()) return;
     const t = this.ctx!.currentTime;
-    this.noiseHit(t, this.sfxBus, 0.4, 0.06, 'bandpass', 1800, 0.9, 0.002);
+    this.noiseHit(t, this.stingerBus, 0.4, 0.06, 'bandpass', 1800, 0.9, 0.002);
     const c = this.chordNow();
     for (let i = 0; i < 4; i++) {
       const f = (i === 3 ? c[0] * 2 : c[i]) * 4;
-      this.tone(t + 0.05 + i * 0.045, this.sfxBus, 'triangle', f, null, 0.22, 0.3, 0.004);
-      this.tone(t + 0.05 + i * 0.045, this.sfxBus, 'sine', f * 2, null, 0.06, 0.2, 0.004);
+      this.tone(t + 0.05 + i * 0.045, this.stingerBus, 'triangle', f, null, 0.22, 0.3, 0.004);
+      this.tone(t + 0.05 + i * 0.045, this.stingerBus, 'sine', f * 2, null, 0.06, 0.2, 0.004);
     }
     this.bellAt(t + 0.1, 1, 1);
     this.musicDuck(900);

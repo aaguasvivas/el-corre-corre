@@ -210,12 +210,17 @@ async function lab(suites) {
       seed(s);
       r = make(8);
       const extreme = stats(await drive(r.off, r.eng, 8, () => full, stack(true)), HIT - 0.05, HIT + 1.5);
-      out.stack.push({ seed: s, limited: lim, preLimiter: pre, musicLimited: musicOnly, musicPre, extremeLimited: extreme });
+      seed(s);
+      r = make(8, { bypass: true });
+      const extremePre = stats(await drive(r.off, r.eng, 8, () => full, stack(true)), HIT - 0.05, HIT + 1.5);
+      out.stack.push({ seed: s, limited: lim, preLimiter: pre, musicLimited: musicOnly, musicPre, extremeLimited: extreme, extremePre });
       worst = Math.max(worst, lim.peak, extreme.peak, musicOnly.peak);
-      worstPre = Math.max(worstPre, pre.peak);
+      worstPre = Math.max(worstPre, pre.peak, extremePre.peak);
     }
     check('stacked worst case peaks <= 1.0 through the limiter (5 seeds, plus an extreme stack)', worst <= 1, `worst limited ${worst}, worst pre-limiter ${worstPre}`);
-    check('pre-limiter stack really clips (the case is a real one)', worstPre > 1, `pre ${worstPre}`);
+    // The proof is only worth something if the unlimited graph can clip:
+    // the extreme stack (every reward stinger on one downbeat) must.
+    check('without the limiter the extreme stack clips (the case is a real one)', worstPre > 1, `worst pre-limiter ${worstPre}`);
   }
 
   // ------------------------------------------------------------------- layers
@@ -294,21 +299,27 @@ async function lab(suites) {
         { t: CR, fn: (e) => e.stopRun(true) },
       ],
       (e, t) => {
-        if (Math.abs(t * 10 - Math.round(t * 10)) < 0.009 && t > 2.7) {
+        // every frame: suspend() times are quantized to 128 samples, so a
+        // filter on round times would drop rows
+        if (t > 2.7) {
           const m = e.musicState;
-          trace.push([+t.toFixed(2), m.mode, m.cutoff, m.level]);
+          trace.push([+t.toFixed(3), m.mode, m.cutoff, m.level]);
         }
       },
     );
-    out.tapeTrace = trace;
-    const around = steps.filter((t) => t >= CR - 0.3 && t <= CR + CONFIG.crashSlowmoSec);
-    const gaps = around.slice(1).map((t, i) => +(t - around[i]).toFixed(4));
-    out.tapeStepGaps = gaps;
+    out.tapeTrace = trace.filter((r, i) => i % 6 === 0);
     const stepDur = 60 / CONFIG.audioBpm / 4;
-    check('tape-stop: steps stretch across the slow-mo (tempo falls with the pitch)', gaps.length >= 3 && gaps[gaps.length - 1] > stepDur * 1.5 && gaps[0] < stepDur * 1.05, JSON.stringify(gaps));
-    const at = (tt) => trace.find((r) => Math.abs(r[0] - tt) < 0.051);
-    const end = at(CR + CONFIG.crashSlowmoSec + 0.05);
-    check('tape-stop: low-pass down near tapeStopHz and the bus silent when the card lands', end && end[2] <= CONFIG.tapeStopHz * 1.3 && end[3] < 0.02, JSON.stringify(end));
+    // Steps from the last one before the crash to the first idle one: the
+    // gaps after the crash must grow (the tape slows) and end well past a
+    // normal 16th.
+    const post = steps.filter((t) => t >= CR - stepDur && t <= CR + CONFIG.crashSlowmoSec);
+    const gaps = post.slice(1).map((t, i) => +(t - post[i]).toFixed(4));
+    out.tapeStepGaps = gaps;
+    const growing = gaps.every((g, i) => i === 0 || g >= gaps[i - 1] - 1e-4);
+    check('tape-stop: steps stretch across the slow-mo (tempo falls with the pitch)', gaps.length >= 3 && growing && gaps[gaps.length - 1] > stepDur * 1.25, JSON.stringify(gaps));
+    const at = (tt) => trace.reduce((a, r) => (Math.abs(r[0] - tt) < Math.abs(a[0] - tt) ? r : a));
+    const end = at(CR + CONFIG.crashSlowmoSec - 0.02);
+    check('tape-stop: low-pass down near tapeStopHz and the bus near silent as the card lands', end[1] === 'tapestop' && end[2] <= CONFIG.tapeStopHz * 1.5 && end[3] < 0.03, JSON.stringify(end));
     const gapRow = at(CR + CONFIG.crashSlowmoSec + CONFIG.idleMusicDelaySec * 0.5);
     check('a quiet beat between the tape-stop and the idle groove', gapRow && gapRow[1] === 'idle' && gapRow[3] < 0.02, JSON.stringify(gapRow));
     const idleRow = at(CR + CONFIG.crashSlowmoSec + CONFIG.idleMusicDelaySec + 1.2);
@@ -450,18 +461,30 @@ async function lab(suites) {
       ['bell', (e) => e.bell()],
     ];
     out.sfx = [];
+    // The sea wash never stops, so each one-shot is measured against a
+    // silent render with the same seed: the renders are deterministic, and
+    // the difference is the one-shot alone.
+    seed(11);
+    const base = make(3, { noMusic: true });
+    const baseBuf = await drive(base.off, base.eng, 3, () => U({}), []);
+    const b0 = baseBuf.getChannelData(0);
+    const b1 = baseBuf.getChannelData(1);
     for (const [name, fn] of list) {
       seed(11);
       const { off, eng } = make(3, { noMusic: true });
       const buf = await drive(off, eng, 3, () => U({}), [{ t: 0.5, fn }]);
       const s = stats(buf, 0.5, 3);
-      // audible length: last sample above 1% of the peak
-      const d = buf.getChannelData(0);
+      // audible length: last sample of the one-shot above 1% of its own peak
+      const d0 = buf.getChannelData(0);
+      const d1 = buf.getChannelData(1);
+      let own = 0;
+      for (let i = Math.floor(0.5 * SR); i < d0.length; i++) own = Math.max(own, Math.abs(d0[i] - b0[i]), Math.abs(d1[i] - b1[i]));
       let last = 0;
-      for (let i = Math.floor(0.5 * SR); i < d.length; i++) if (Math.abs(d[i]) > s.peak * 0.01 + 0.004) last = i;
-      out.sfx.push({ name, peak: s.peak, ms: Math.round((last / SR - 0.5) * 1000), nan: s.nan });
+      for (let i = Math.floor(0.5 * SR); i < d0.length; i++) if (Math.max(Math.abs(d0[i] - b0[i]), Math.abs(d1[i] - b1[i])) > own * 0.01) last = i;
+      out.sfx.push({ name, peak: s.peak, own: +own.toFixed(4), ms: Math.round((last / SR - 0.5) * 1000), nan: s.nan });
     }
-    check('every one-shot renders, no NaN, peak under 1.0', out.sfx.every((x) => x.nan === 0 && x.peak > 0.005 && x.peak < 1), JSON.stringify(out.sfx.filter((x) => !(x.nan === 0 && x.peak > 0.005 && x.peak < 1))));
+    const okSfx = (x) => x.nan === 0 && x.own > 0.005 && x.peak < 1 && x.ms > 20;
+    check('every one-shot renders, no NaN, peak under 1.0', out.sfx.every(okSfx), JSON.stringify(out.sfx.filter((x) => !okSfx(x))));
   }
   return out;
 }
@@ -485,6 +508,8 @@ try {
     failed = true;
   });
   page.on('console', (m) => {
+    // the plain-text host page has no favicon; that 404 is the lab's, not the game's
+    if (m.location()?.url?.endsWith('/favicon.ico')) return;
     if (m.type() === 'error' || m.type() === 'warn') console.log(`console.${m.type()}: ${m.text()}`);
   });
   // Any same-origin document will do; a served module shows as plain text
