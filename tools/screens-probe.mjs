@@ -333,6 +333,11 @@ const PROBES = {
     const checks = [];
     await page.goto(url, { waitUntil: 'load' });
     await boot(page, url, { 'ecc.v1.platanosLifetime': '1240' });
+    const hint = await page.evaluate(() => ({
+      text: document.getElementById('paint-state').textContent,
+      gold: [...document.querySelectorAll('.paint.afford')].map((b) => b.dataset.i).join(','),
+    }));
+    check(checks, 'the wallet covering a paint says so and golds its price', hint.text.startsWith('¡Ya te alcanza') && hint.gold === '1,2,3', JSON.stringify(hint));
     await tapEl(page, '.paint[data-i="2"]');
     const act = await page.evaluate(() => document.getElementById('paint-state').className);
     check(checks, 'an affordable locked paint offers the buy', act.includes('act'), act);

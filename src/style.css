@@ -468,6 +468,12 @@ body {
   display: none;
 }
 
+/* the wallet already covers it: the price turns gold */
+.paint.afford .paint-price {
+  background: var(--gold);
+  color: var(--blue);
+}
+
 .paint-price svg {
   width: 11px;
   height: 11px;

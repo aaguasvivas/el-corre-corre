@@ -26,8 +26,6 @@ const STRINGS = {
     hintKey: (trick: string) => `A / D pa’ esquivar · W: ${trick} · Flechas: pedales`,
     record: 'Récord',
     points: 'Puntos',
-    distance: 'Distancia',
-    platanos: 'Plátanos',
     again: 'OTRA VEZ',
     menu: 'MENÚ',
     share: 'COMPARTIR',
@@ -47,6 +45,7 @@ const STRINGS = {
     paintNeed: (n: number) => (n === 1 ? 'Te falta 1 plátano' : `Te faltan ${fmtN(n)} plátanos`),
     paintLocked: (name: string, price: number) => `${name}, cuesta ${fmtN(price)} plátanos`,
     paintOwned: (name: string) => `${name}, ya es tuya`,
+    paintAfford: '¡Ya te alcanza pa’ una pintura nueva!',
     ariaClose: 'Cerrar',
     // The game-over card
     bestLine: (n: number) => `Récord ${fmtN(n)}`,
@@ -157,8 +156,6 @@ const STRINGS = {
     hintKey: (trick: string) => `A / D to weave · W: ${trick} · Arrows: pedals`,
     record: 'Best',
     points: 'Points',
-    distance: 'Distance',
-    platanos: 'Plantains',
     again: 'AGAIN',
     menu: 'MENU',
     share: 'SHARE',
@@ -177,6 +174,7 @@ const STRINGS = {
     paintNeed: (n: number) => (n === 1 ? '1 more plantain' : `${fmtN(n)} more plantains`),
     paintLocked: (name: string, price: number) => `${name}, costs ${fmtN(price)} plantains`,
     paintOwned: (name: string) => `${name}, owned`,
+    paintAfford: 'You can afford a new paint!',
     ariaClose: 'Close',
     bestLine: (n: number) => `Best ${fmtN(n)}`,
     overBest: (n: number) => `${fmtN(n)} over your old best!`,
@@ -1045,6 +1043,7 @@ export class UI {
       chip.style.background = hexCss(p.hex);
       b.querySelector<HTMLElement>('.paint-badge')!.innerHTML = !owned ? LOCK_SVG : i === st.equipped ? CHECK_SVG : '';
       b.classList.toggle('locked', !owned);
+      b.classList.toggle('afford', !owned && st.bank >= p.price);
       b.classList.toggle('equipped', i === st.equipped);
       b.classList.toggle('preview', i === st.preview);
       b.setAttribute('aria-pressed', String(i === st.preview));
@@ -1055,7 +1054,13 @@ export class UI {
     const owned = st.owned.has(st.preview);
     let text: string;
     let cls = '';
-    if (st.preview === st.equipped) {
+    // Wearing the equipped paint while the wallet already covers another:
+    // say so, since that is the reason to look at the row at all.
+    const afford = list.some((q, i) => !st.owned.has(i) && st.bank >= q.price);
+    if (st.preview === st.equipped && afford) {
+      text = t.paintAfford;
+      cls = 'act';
+    } else if (st.preview === st.equipped) {
       text = t.paintWearing(p.name);
     } else if (owned) {
       text = t.paintUse(p.name);

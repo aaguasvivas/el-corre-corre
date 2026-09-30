@@ -361,9 +361,13 @@ const SCENES = [
   },
   {
     id: 'title-mandaos',
-    what: 'Title with the Los Mandaos list open (a first launch: tutorial set 1 and the daily)',
+    what: 'Title with the Los Mandaos list open (tutorial set 1, the daily, a 3-day streak)',
     settle: 400,
     run: async (s) => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      await s.seed({ 'ecc.v1.streak': JSON.stringify({ last: today, n: 3 }) });
       await s.tap('#mandao-chip');
       await s.tick(0.3);
     },
