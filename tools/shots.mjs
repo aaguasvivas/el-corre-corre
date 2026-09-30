@@ -655,6 +655,38 @@ const SCENES = [
     },
   },
   {
+    id: 'gameover-levelup',
+    what: 'Game over on the run that finished the first mandao set: three stamps and the level-up line',
+    settle: 1800,
+    run: async (s) => {
+      await s.start();
+      await s.tick(1);
+      await s.ecc('clearTraffic');
+      const x = await s.ecc('x');
+      for (let i = 0; i < 10; i++) await s.ecc('spawnPickup', 'platano', x, 8 + i * 2.2);
+      await s.tick(3);
+      await s.ecc('nearMiss', 1.0);
+      await s.ecc('nearMiss', 1.0);
+      await s.rideTo(330);
+      await s.unghost();
+      await s.ecc('god', false);
+      await s.ecc('clearTraffic');
+      let crashed = false;
+      for (let i = 0; i < 4 && !crashed; i++) {
+        try {
+          await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+        } catch (err) {
+          if (i >= 3 || (await s.ecc('state')) !== 'playing') throw err;
+          continue;
+        }
+        crashed = await s.play(2.5, "e.state() === 'crashing'");
+      }
+      if (!crashed) throw new Error('no crash');
+      if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
+      if (!(await s.ecc('mandaos')).lastSet) throw new Error('the set did not finish');
+    },
+  },
+  {
     id: 'gameover-far',
     what: 'Game over for a returning player: La Cinta fell (farthest ever), the points record did not',
     settle: 1500,

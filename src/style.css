@@ -566,7 +566,7 @@ body {
    clear for the corner chips. */
 @media (orientation: landscape) {
   #title {
-    grid-template-columns: minmax(0, 1fr) minmax(90px, 24vw) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(80px, 20vw) minmax(0, 1fr);
     grid-template-rows: auto auto auto;
     grid-template-areas:
       'top   . pick'
@@ -584,7 +584,8 @@ body {
     align-self: start;
   }
   .paints {
-    gap: 4px;
+    gap: 3px;
+    padding: 5px 6px 3px;
   }
 }
 

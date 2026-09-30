@@ -1736,9 +1736,13 @@ export class UI {
     g.fillStyle = bg;
     g.fillRect(0, 0, 1080, 1350);
     // a low sun behind the logo, like the title screen at golden hour
-    g.fillStyle = 'rgba(255,243,196,0.6)';
+    g.fillStyle = 'rgba(255,243,196,0.45)';
     g.beginPath();
-    g.arc(880, 250, 170, 0, Math.PI * 2);
+    g.arc(880, 236, 150, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff3c4';
+    g.beginPath();
+    g.arc(880, 236, 96, 0, Math.PI * 2);
     g.fill();
 
     const stroked = (text: string, x: number, y: number, size: number, fill: string, stroke: string, strokeW: number, maxW = 1000): void => {
@@ -1830,31 +1834,33 @@ export class UI {
     if (r.isNewRecord) plate(t.newRecord, 770, fy + 8, 46, '#ce1126', '#ffffff', -0.07);
     else if (r.isNewDistRecord) plate(t.farRecord, 700, fy + 8, 42, '#002d62', '#ffffff', -0.07);
 
-    // The points, big, over the photo's lower edge.
+    // The points, big, over the photo's lower edge. Its baseline sits high
+    // enough that a comma's tail clears the PUNTOS label.
     const pts = fmtN(r.points);
-    let size = 200;
+    let size = 196;
     g.font = `${size}px ${FONT}`;
     while (g.measureText(pts).width > 900 && size > 90) {
       size -= 10;
       g.font = `${size}px ${FONT}`;
     }
+    const py = fy + fh - 12;
     g.save();
-    g.fillStyle = 'rgba(0,45,98,0.35)';
     g.translate(0, 10);
-    stroked(pts, 540, fy + fh, size, 'rgba(0,45,98,0.35)', 'rgba(0,45,98,0.35)', 26);
+    stroked(pts, 540, py, size, 'rgba(0,45,98,0.35)', 'rgba(0,45,98,0.35)', 26);
     g.restore();
-    stroked(pts, 540, fy + fh, size, '#ffffff', '#002d62', 26);
-    stroked(t.points.toUpperCase(), 540, 1098, 34, '#002d62', '#002d62', 0);
+    stroked(pts, 540, py, size, '#ffffff', '#002d62', 26);
+    stroked(t.points.toUpperCase(), 540, 1106, 32, '#002d62', '#002d62', 0);
 
-    // The run, the ride and the barrio level that multiplied it.
-    stroked(t.shareStats(r.distanceM, r.platanos), 540, 1150, 44, '#002d62', '#002d62', 0);
+    // The ride and where it got, the run, and the barrio level that
+    // multiplied it: honest numbers for the group chat.
     const where = r.tramo !== 'malecon' ? t.inVehicleReached(veh.name, t.tramoNames[r.tramo]) : t.inVehicle(veh.name);
-    stroked(where, 540, 1210, 46, '#ffffff', '#002d62', 10, 980);
+    stroked(where, 540, 1160, 46, '#002d62', '#002d62', 0, 980);
+    stroked(t.shareStats(r.distanceM, r.platanos), 540, 1212, 38, '#0e7490', '#0e7490', 0);
     const lv = this.shareLevel;
-    plate(t.shareLevel(t.levelNames[lv.idx], fmtBarrio(lv.mult)), 540, 1266, 30, '#f4c430', '#002d62', 0);
+    plate(t.shareLevel(t.levelNames[lv.idx], fmtBarrio(lv.mult)), 540, 1264, 28, '#f4c430', '#002d62', 0);
     // The ask stays small: the score does the talking.
-    const askY = SHARE_URL ? 1308 : 1316;
-    stroked(t.shareAsk, 540, askY, 32, '#0e7490', '#0e7490', 0);
+    const askY = SHARE_URL ? 1306 : 1314;
+    stroked(t.shareAsk, 540, askY, 30, '#0e7490', '#0e7490', 0);
     if (SHARE_URL) stroked(SHARE_URL, 540, 1338, 22, '#002d62', '#002d62', 0);
     return c;
   }
