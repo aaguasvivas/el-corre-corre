@@ -69,6 +69,11 @@ request and the decision taken.
 6. **Not in this pass** (roadmap): revive ring, pursuer (Doña Tatica or AMET),
    night mode, weather, word of the day, mystery box, borrowed rides, Modo
    Paseo, character unlocks, medal lines, rival tapes.
+8. **Ads in release 1.0 (decided 2026-10-17).** Rewarded "Dobla tus
+   plátanos" on the game-over card, a small banner on the pause screen and
+   the Los Mandaos sheet only, and a $1.99 Remove Ads purchase. Full
+   decisions and owner steps: docs/audit/ADS-PLAN.md. This replaces the
+   "no ads" line of the brief and of decision 6.
 7. Canon strings from CLAUDE.md stay. Fix grammar where the code composes
    strings (`LLEGASTE A EL CAMPO`). No em dashes in any user-facing text.
 
