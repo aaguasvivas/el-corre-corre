@@ -408,6 +408,12 @@ Store and privacy answers: [RELEASE.md](RELEASE.md).
   (`#btn-noads`, `#btn-privacy`, `#btn-adprivacy`), the Remove Ads sheet,
   and the `STRINGS` keys `reward*`, `noAds`, `adPrivacy`, `adTestTag`,
   `store*`.
+- `src/hud.css`: under PAUSA the HUD lane (`#announce`: La Cinta's
+  "Faltan n m" chip and the announcements) is hidden like `#hud-right`.
+  On the 6.9-inch phone the banner's reserved height lifts PAUSA into the
+  lane, and on the SE the pause card already sits over it; the screens
+  probe's `ads` suite pauses with the chip up and fails if any of the lane
+  shows.
 - `tools/ios-ads-plist.mjs` (`capacitor:copy:after`): writes the bundle's
   app id into `GADApplicationIdentifier`. The Xcode build phase "[ECC] No
   test ads in an archive" fails an archive that carries test ids.
@@ -567,7 +573,7 @@ Worktree rules learned in this pass:
 - **Build:** 874 kB JS (249 kB gzip) for `npm run build:adtest` on
   `ads-1.0` (843 kB, 239 kB gzip at `eb676ef`); the chunk-size warning is
   accepted. `npm run build` needs the real AdMob ids first.
-- **Probes on `ads-1.0`:** feel 50, screens 420 (212 plus 208 in `ads`),
+- **Probes on `ads-1.0`:** feel 50, screens 424 (212 plus 212 in `ads`),
   hud 111, audio 26/26.
 - **Draw calls**, god-mode ride from 0 to 3300 m at 440x956, seed 7,
   median / p90 / max (wave 2 merge, `a900ef6`): Malecón 106 / 123 / 131,

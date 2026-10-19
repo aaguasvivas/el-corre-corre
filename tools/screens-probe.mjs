@@ -485,16 +485,34 @@ const PROBES = {
         await sleep(100);
         check(checks, `${T} closing the sheet takes the banner away`, (await page.evaluate(() => window.__ecc.ads().banner.height)) === 0 && (await page.evaluate(() => document.getElementById('sim-banner').style.display)) === 'none');
 
-        // PAUSA with the banner.
+        // PAUSA with the banner, paused with La Cinta 130 m ahead, so the
+        // lane's "Faltan 130 m" chip is up behind it (the banner lifts the
+        // pause screen into the lane on the 6.9-inch phone).
         await page.evaluate(() => {
           window.__ecc.start();
           window.__ecc.tick(2);
+          window.__ecc.setRecordDist(window.__ecc.runDist() + 130);
+          window.__ecc.tick(0.2);
           window.__ecc.pause();
         });
         await page.waitForFunction(() => window.__ecc.ads().banner.height > 0, { timeout: 5000, polling: 50 }).catch(() => {});
         await sleep(300);
         const pauseGap = await gapCheck('#pause');
         check(checks, `${T} pause: a banner, and every control ${GAP}+ pt above it`, pauseGap.banner && pauseGap.gap >= GAP, JSON.stringify(pauseGap));
+        const lane = await page.evaluate(() => {
+          const shows = (el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+          };
+          const box = (el) => el.getBoundingClientRect();
+          const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+          const laneEls = [...document.querySelectorAll('#announce > *')].filter(shows);
+          const pauseEls = [...document.querySelectorAll('#pause-title, #pause .pause-card, #pause button')].filter(shows);
+          const hits = [];
+          for (const a of laneEls) for (const p of pauseEls) if (meet(box(a), box(p))) hits.push(`${a.id} over ${p.id || p.className}`);
+          return { chip: !document.getElementById('hud-tape').classList.contains('off'), lane: laneEls.map((e) => e.id), hits };
+        });
+        check(checks, `${T} pause: the HUD lane (La Cinta chip, announcements) never shows under the pause screen`, lane.chip && lane.lane.length === 0 && lane.hits.length === 0, JSON.stringify(lane));
         const priv = await page.evaluate(() => {
           const r = document.getElementById('btn-privacy').getBoundingClientRect();
           const b = document.getElementById('sim-banner').getBoundingClientRect().top;

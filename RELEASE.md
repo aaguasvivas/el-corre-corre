@@ -27,6 +27,16 @@ Run every command here from the main checkout,
 - Ads gate: `npm run build` fails until the real AdMob ids are in
   `src/adIds.ts` (owner step 2). For device tests before then, use the
   test-ads build ("Ads and Remove Ads" below).
+- Simulator check of the test-ads build (2026-10-19, Release build, iPhone
+  17 Pro Max and iPhone SE simulators): Google's consent message and the
+  tracking prompt on the title of a fresh install, both answers; a run to
+  the card; a Google test video that doubled the card's plátanos once
+  (+44 to +88, wallet 92 after the next run); the test banner on PAUSA and
+  the MANDAOS sheet only; the Remove Ads sheet without StoreKit (not
+  available, restore cancel). Not covered there: a StoreKit purchase (only
+  an Xcode run or the sandbox on the phone), an offline launch (the
+  simulator shares the Mac's network) and the phone itself ("Device checks
+  for build 11").
 
 ## Builds (version 1.0)
 
@@ -36,7 +46,7 @@ Run every command here from the main checkout,
 | 5 to 8 | `515411a` to `929ee3e` | 2026-08-08 to 2026-09-01 | Superseded |
 | 9 | `ad436cf` | 2026-09-01 | On TestFlight. Superseded: no pedals, no Los Mandaos, the old records, no native share, no save backup, no ads. Never select build 9 for App Store review. |
 | 10 | `b5b9019` (app code as of `8a85b45`) | 2026-09-30 | Superseded by build 11 (owner decision of 2026-10-17: ads ship in 1.0). Archived at `ios/App/build-archive/App10.xcarchive`, never uploaded. Never upload or submit it. |
-| 11 | branch `ads-1.0` (write the archive commit here) | not archived | The 1.0 build: ads, Remove Ads, Capacitor 8. Archive it after owner step 2 (the real AdMob ids), upload, run "Device checks for build 11", then submit this build. |
+| 11 | branch `ads-1.0` (write the archive commit here) | not archived | The 1.0 build: ads, Remove Ads, Capacitor 8. Archive it after owner step 2 (the real AdMob ids), upload, run "Device checks for build 11", then submit this build. No test-ads archive exists for TestFlight: the archive guard refuses one on purpose, so test ads run only from Xcode or the device commands in "Test-ads build on the iPhone". |
 
 Rule: any change to `src/`, `index.html`, `public/` or `ios/` after a build is
 uploaded makes that build stale. The commit that bumps
@@ -142,8 +152,31 @@ Details for each step are in the sections below.
   Check Product > Scheme > Edit Scheme > Run > Options > StoreKit
   Configuration shows Products.storekit (set it there if it does not).
   `xcrun simctl launch` does not use it: the sheet then says the store is
-  not available, which is the right offline behavior. On a device, use a
-  Sandbox Apple Account (Settings > Developer).
+  not available, which is the right offline behavior, and RESTAURAR
+  COMPRAS opens Apple's "Sign in to Apple Account" sheet (cancel it: the
+  sheet says "No se pudo restaurar. Intenta otra vez." and nothing
+  changes). On a device, use a Sandbox Apple Account (Settings >
+  Developer).
+- **Test-ads build on the iPhone (owner, phone unlocked and connected):**
+  ```bash
+  cd ~/Desktop/personal/el-corre-corre
+  export PATH=~/.nvm/versions/node/v22.23.1/bin:$PATH
+  npm run build:adtest && npx cap sync ios
+  cd ios/App
+  sh ../../tools/heavy.sh xcodebuild -workspace App.xcworkspace -scheme App \
+    -configuration Debug -destination 'id=00008150-000E6D0E14C0401C' \
+    -derivedDataPath /tmp/ecc-device-dd -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration build
+  xcrun devicectl device install app --device 00008150-000E6D0E14C0401C \
+    /tmp/ecc-device-dd/Build/Products/Debug-iphoneos/App.app
+  xcrun devicectl device process launch --console --terminate-existing \
+    --device 00008150-000E6D0E14C0401C dev.elcorrecorre.app
+  ```
+  Leave the console open for 20 seconds, then in a second terminal:
+  `xcrun devicectl device info processes --device 00008150-000E6D0E14C0401C | grep App.app`.
+  Pass: no crash text in the console, and the process is listed. Then run
+  "Device checks for build 11" 2 to 14 on this build (the purchase uses the
+  sandbox). Delete `/tmp/ecc-device-dd` after.
 - **Ad privacy link:** where Google's consent rules require it (the UMP
   privacy options status is REQUIRED, for example in the EEA), PAUSA shows
   "Privacidad de anuncios" / "Ad privacy" right after "Privacidad"; it
