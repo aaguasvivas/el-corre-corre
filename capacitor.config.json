@@ -5,5 +5,10 @@
   "backgroundColor": "#6EC6E6",
   "ios": {
     "backgroundColor": "#6EC6E6"
+  },
+  "plugins": {
+    "SystemBars": {
+      "hidden": true
+    }
   }
 }

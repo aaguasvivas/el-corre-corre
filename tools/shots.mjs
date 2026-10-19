@@ -198,6 +198,24 @@ function helpers(page, vp) {
       throw new Error(`spawnVehicle ${args.join(' ')} refused`);
     },
 
+    // Wait in real time (no ticks) until a condition on __ecc holds: for
+    // the ads stand-ins, whose loads and events run on real timers.
+    waitFor: async (src, maxMs = 5000) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < maxMs) {
+        if (await page.evaluate((x) => new Function('e', `return (${x});`)(window.__ecc), src)) return true;
+        await sleep(40);
+      }
+      return false;
+    },
+
+    // ?ads=sim scenes: the title stays up adsStartDelaySec, the stand-in
+    // consent flow runs, and the ads are ready.
+    adsReady: async () => {
+      await s.tick(1.3);
+      if (!(await s.waitFor('e.ads().ready'))) throw new Error('the ads never became ready');
+    },
+
     // Tick in small steps until a condition on __ecc holds (or give up).
     tickUntil: (predicateSrc, maxSec, step = 0.05) =>
       page.evaluate(
@@ -332,6 +350,34 @@ async function poseFlash(s, ms) {
       }
     }
   }, ms);
+}
+
+// A run that picked up plátanos ends on the card with "Dobla tus plátanos"
+// offered (a ?ads=sim scene).
+async function rewardCard(s) {
+  await s.adsReady();
+  await s.start();
+  await s.tick(1);
+  await s.ecc('clearTraffic');
+  const x = await s.ecc('x');
+  for (let i = 0; i < 8; i++) await s.ecc('spawnPickup', 'platano', x, 8 + i * 2.2);
+  await s.rideTo(160);
+  await s.unghost();
+  await s.ecc('god', false);
+  await s.ecc('clearTraffic');
+  let crashed = false;
+  for (let i = 0; i < 4 && !crashed; i++) {
+    try {
+      await s.spawn('sedan', 1, 7, 1, await s.ecc('x'));
+    } catch (err) {
+      if (i >= 3 || (await s.ecc('state')) !== 'playing') throw err;
+      continue;
+    }
+    crashed = await s.play(2.5, "e.state() === 'crashing'");
+  }
+  if (!crashed) throw new Error('no crash');
+  if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
+  if (!(await s.waitFor('e.ads().offer'))) throw new Error('no rewarded offer on the card');
 }
 
 const SCENES = [
@@ -748,6 +794,103 @@ const SCENES = [
       }
       if (!crashed) throw new Error('no crash');
       if (!(await s.play(2, "e.state() === 'gameover'"))) throw new Error('no game over');
+    },
+  },
+  {
+    id: 'gameover-reward',
+    what: 'Game over with "Dobla tus plátanos" offered (ads stand-in): the ×2 button armed in the plátanos row',
+    ads: true,
+    settle: 1600,
+    run: rewardCard,
+  },
+  {
+    id: 'gameover-reward-done',
+    what: 'The rewarded video paid: the plátanos counted up to double and the button turned into a ×2 check',
+    ads: true,
+    settle: 1200,
+    run: async (s) => {
+      await rewardCard(s);
+      if (!(await s.waitFor("document.getElementById('btn-reward').classList.contains('armed')", 3000))) throw new Error('never armed');
+      await s.tap('#btn-reward');
+      if (!(await s.waitFor('e.ads().paid && !e.ads().hold', 4000))) throw new Error('the reward never landed');
+    },
+  },
+  {
+    id: 'pause-banner',
+    what: 'Pause screen with the banner stand-in at the bottom: the space reserved, the links clear of it',
+    ads: true,
+    settle: 500,
+    run: async (s) => {
+      await s.adsReady();
+      await s.start();
+      await s.tick(3);
+      await s.tap('#hud-pause');
+      await s.tick(0);
+      if (!(await s.waitFor('e.ads().banner.height > 0'))) throw new Error('no banner');
+    },
+  },
+  {
+    id: 'pause-adprivacy',
+    what: 'Pause screen where Google asks for a way back to the consent choices: "Privacidad de anuncios" with the other links, the banner stand-in below',
+    ads: true,
+    query: 'adprivacy=1',
+    settle: 500,
+    run: async (s) => {
+      await s.adsReady();
+      await s.start();
+      await s.tick(3);
+      await s.tap('#hud-pause');
+      await s.tick(0);
+      if (!(await s.waitFor('e.ads().banner.height > 0'))) throw new Error('no banner');
+      if (!(await s.waitFor('getComputedStyle(document.getElementById("btn-adprivacy")).display !== "none"'))) throw new Error('no ad privacy link');
+    },
+  },
+  {
+    id: 'mandaos-banner',
+    what: 'The Los Mandaos sheet with the banner stand-in under it',
+    ads: true,
+    settle: 500,
+    run: async (s) => {
+      await s.adsReady();
+      await s.tap('#mandao-chip');
+      await s.tick(0.3);
+      if (!(await s.waitFor('e.ads().banner.height > 0'))) throw new Error('no banner');
+    },
+  },
+  {
+    id: 'title-noads',
+    what: 'Title with the Remove Ads chip under the mute chip (ads stand-in)',
+    ads: true,
+    settle: 900,
+    run: async (s) => {
+      await s.adsReady();
+      await s.tick(0.3);
+    },
+  },
+  {
+    id: 'store-sheet',
+    what: 'The Remove Ads sheet: the localized price, what goes and what stays, restore, privacy',
+    ads: true,
+    settle: 450,
+    run: async (s) => {
+      await s.adsReady();
+      await s.tap('#noads-chip');
+      if (!(await s.waitFor("e.store().priceState === 'ready'"))) throw new Error('no price');
+      await s.tick(0.1);
+    },
+  },
+  {
+    id: 'store-bought',
+    what: 'The Remove Ads sheet right after a purchase went through',
+    ads: true,
+    settle: 450,
+    run: async (s) => {
+      await s.adsReady();
+      await s.tap('#noads-chip');
+      if (!(await s.waitFor("e.store().priceState === 'ready'"))) throw new Error('no price');
+      await s.tap('#st-buy');
+      if (!(await s.waitFor('e.store().adFree'))) throw new Error('the purchase never landed');
+      await sleep(150);
     },
   },
   {
@@ -1310,7 +1453,10 @@ async function main() {
         try {
           // Coach chips show on a first launch; scenes that are not about
           // them start with every move learned (see bootScript).
-          await page.goto(sc.coach === undefined ? url : `${url}?coach=${sc.coach}`, { waitUntil: 'load', timeout: LOAD_MS });
+          // ?coach=n: a first launch; ?ads=sim: the ads and store stand-ins;
+          // sc.query: more stand-in knobs (adprivacy=1).
+          const query = [sc.coach === undefined ? '' : `coach=${sc.coach}`, sc.ads ? 'ads=sim' : '', sc.query ?? ''].filter(Boolean).join('&');
+          await page.goto(query ? `${url}?${query}` : url, { waitUntil: 'load', timeout: LOAD_MS });
           await page.waitForFunction(() => window.__ecc !== undefined, { timeout: LOAD_MS });
           await page.evaluate(() => document.fonts.ready.then(() => undefined));
           const gl = await glCheck(page);

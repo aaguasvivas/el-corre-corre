@@ -3,27 +3,34 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:adtest": "tsc --noEmit && vite build --mode adtest",
     "build:probe": "vite build --mode probe --outDir dist-probe",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "tsc --noEmit && vitest run"
+    "check": "tsc --noEmit && vitest run",
+    "capacitor:copy:after": "node tools/ios-ads-plist.mjs"
   },
   "dependencies": {
-    "@capacitor/core": "^6.2.1",
-    "@capacitor/filesystem": "^6.0.4",
-    "@capacitor/haptics": "^6.0.3",
-    "@capacitor/preferences": "^6.0.4",
-    "@capacitor/share": "^6.0.4",
+    "@capacitor-community/admob": "^8.2.1",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.3",
+    "@capgo/native-purchases": "^8.9.6",
     "@fontsource/lilita-one": "^5.3.0",
     "three": "^0.185.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.1",
-    "@capacitor/ios": "^6.2.1",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
     "@types/three": "^0.185.1",
     "puppeteer-core": "^24.43.1",
     "typescript": "^7.0.2",

@@ -57,8 +57,11 @@
 }
 
 /* Under PAUSA the top-right corner belongs to the pause screen's sound
-   button. */
-#ui:has(#pause:not(.hidden)) #hud-right {
+   button, and the lane (La Cinta's "Faltan n m" chip, an announcement) steps
+   out: the pause screen sits over it on a short phone, and a banner lifts
+   PAUSA into it on a tall one. The countdown after SEGUIR brings it back. */
+#ui:has(#pause:not(.hidden)) #hud-right,
+#ui:has(#pause:not(.hidden)) #announce {
   visibility: hidden;
 }
 

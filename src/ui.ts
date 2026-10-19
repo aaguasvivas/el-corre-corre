@@ -13,6 +13,8 @@ import { Coach, type CoachId } from './coach';
 import { Popups, type Band } from './popups';
 
 type Lang = 'es' | 'en';
+// What the Remove Ads sheet can say after a buy or a restore.
+export type StoreMsg = 'success' | 'owned' | 'cancelled' | 'pending' | 'failed' | 'unavailable' | 'restored' | 'nothing' | 'restoreFailed';
 type Tramo = 'malecon' | 'zona' | 'campo';
 const LANG_KEY = 'ecc.v1.lang';
 const PEDAL_SEEN_KEY = 'ecc.v1.pedalSeen'; // '1' once the gas pedal has been pressed, ever
@@ -169,6 +171,36 @@ export const STRINGS = {
     } satisfies Record<MandaoKind, (n: number, trick: string) => string>,
     trickNounBike: 'caballito',
     trickNounCar: 'derrape',
+    // Ads (docs/audit/ADS-PLAN.md): the opt-in video on the card, the
+    // Remove Ads sheet, the links on PAUSA.
+    rewardLine: '¡Dobla tus plátanos con un anuncio!',
+    rewardTag: 'anuncio',
+    rewardAria: 'Dobla tus plátanos: ver un anuncio',
+    rewardDone: '¡doblados!',
+    noAds: 'Quitar anuncios',
+    adPrivacy: 'Privacidad de anuncios', // Google's consent choices again (shown only where required)
+    adTestTag: 'ANUNCIOS\nDE PRUEBA', // build:adtest only, on the title under EN
+    storeKicker: 'SIN ANUNCIOS',
+    storeTitle: 'Quita los banners',
+    storeTitleOwned: 'Ya no tienes banners',
+    storeBanners: 'Se van los banners de la pausa y de Los Mandaos.',
+    storeVideos: 'Dobla tus plátanos sigue ahí: ese video sale solo cuando tú lo pides.',
+    storeBuy: (price: string) => `COMPRAR · ${price}`,
+    storeBuyBare: 'COMPRAR',
+    storeOwned: '¡Gracias por apoyar el juego!',
+    storeRestore: 'RESTAURAR COMPRAS',
+    storePriceWait: 'Buscando el precio…',
+    storeMsg: {
+      success: '¡Listo! Se fueron los banners.',
+      owned: 'Ya es tuyo: los banners se fueron.',
+      cancelled: 'Compra cancelada.',
+      pending: 'Tu compra está esperando aprobación.',
+      failed: 'No se pudo comprar. Intenta otra vez.',
+      unavailable: 'La tienda no está disponible ahora.',
+      restored: 'Compra restaurada: se fueron los banners.',
+      nothing: 'No hay compras que restaurar.',
+      restoreFailed: 'No se pudo restaurar. Intenta otra vez.',
+    } satisfies Record<StoreMsg, string>,
   },
   en: {
     subtitle: 'Let’s go, we’re late!',
@@ -312,6 +344,34 @@ export const STRINGS = {
     } satisfies Record<MandaoKind, (n: number, trick: string) => string>,
     trickNounBike: 'Wheelie',
     trickNounCar: 'Drift',
+    rewardLine: 'Double your plantains with an ad!',
+    rewardTag: 'ad',
+    rewardAria: 'Double your plantains: watch an ad',
+    rewardDone: 'doubled!',
+    noAds: 'Remove ads',
+    adPrivacy: 'Ad privacy',
+    adTestTag: 'TEST\nADS',
+    storeKicker: 'NO ADS',
+    storeTitle: 'Remove the banners',
+    storeTitleOwned: 'Your banners are gone',
+    storeBanners: 'No more banners on the pause screen or the missions list.',
+    storeVideos: 'Double your plantains stays: that video plays only when you ask for it.',
+    storeBuy: (price: string) => `BUY · ${price}`,
+    storeBuyBare: 'BUY',
+    storeOwned: 'Thanks for supporting the game!',
+    storeRestore: 'RESTORE PURCHASES',
+    storePriceWait: 'Getting the price…',
+    storeMsg: {
+      success: 'Done! The banners are gone.',
+      owned: 'You already own it: the banners are gone.',
+      cancelled: 'Purchase canceled.',
+      pending: 'Your purchase is waiting for approval.',
+      failed: 'The purchase didn’t go through. Try again.',
+      unavailable: 'The store isn’t available right now.',
+      restored: 'Purchase restored: the banners are gone.',
+      nothing: 'There’s nothing to restore.',
+      restoreFailed: 'Couldn’t restore. Try again.',
+    } satisfies Record<StoreMsg, string>,
   },
 } as const;
 const VEHICLE_IDS: VehicleId[] = ['pasola', 'motor', 'civic'];
@@ -381,6 +441,24 @@ export interface UICallbacks {
   riderRect(out: Band): void;
   // A ¡HECHO! stamp landed on the game-over card (i: its order on the card).
   onStamp(i: number): void;
+  // "Dobla tus plátanos" on the game-over card.
+  onReward(): void;
+  // Remove Ads: open its sheet, buy, restore; and the ad consent choices.
+  onNoAds(): void;
+  onBuy(): void;
+  onRestore(): void;
+  onAdPrivacy(): void;
+  // The mandao sheet or the Remove Ads sheet opened or closed (the banner
+  // follows them).
+  onOverlayChange(): void;
+}
+
+// What the Remove Ads sheet shows.
+export interface StoreView {
+  adFree: boolean;
+  price: string | null;
+  priceState: 'unknown' | 'loading' | 'ready' | 'unavailable';
+  busy: boolean; // a purchase or a restore is in flight
 }
 
 function readLang(): Lang {
@@ -500,6 +578,11 @@ const CHECK_SVG =
   '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.6l3.1 3.1L13 4.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const LOCK_SVG =
   '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5.2 7.2V5.4a2.8 2.8 0 0 1 5.6 0v1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><rect x="3.2" y="7" width="9.6" height="7.2" rx="1.8" fill="currentColor"/></svg>';
+// "Dobla tus plátanos": a video's play mark, and the check once it paid.
+const PLAY_SVG =
+  '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#002d62"/><path d="M8 6.2v7.6l6-3.8z" fill="#fff3c4"/></svg>';
+const CHECK_RW_SVG =
+  '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#2e7d32"/><path d="M5.8 10.4l2.8 2.8 5.6-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const CLOSE_SVG =
   '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>';
 
@@ -668,6 +751,25 @@ export class UI {
   private mandaoSheetEl: HTMLElement;
   private pauseMandaosEl: HTMLElement;
   private btnPrivacyEl: HTMLElement;
+  // Ads: the card's "Dobla tus plátanos", the Remove Ads entries and sheet.
+  private btnReward: HTMLElement;
+  private rewardTagEl: HTMLElement;
+  private rewardOn = false;
+  private rewardPaid = false;
+  private rewardArmTimer = 0;
+  private goShownAt = 0; // performance.now() when the card went up
+  private gpPinturaText = ''; // the card's pintura line, while the offer borrows its row
+  private earnedTimer = 0;
+  private noAdsChip: HTMLElement;
+  private btnNoAds: HTMLElement;
+  private btnAdPrivacy: HTMLElement;
+  private storeEl: HTMLElement;
+  private stBuyEl: HTMLElement;
+  private stRestoreEl: HTMLElement;
+  private stMsgEl: HTMLElement;
+  private storeView: StoreView = { adFree: false, price: null, priceState: 'unknown', busy: false };
+  private storeNote: StoreMsg | null = null;
+  private adTestTagEl: HTMLElement;
   // The share card's photo: the game frame at the crash, cropped around
   // the rider. Taken by captureScene; cleared when a new run starts.
   private snap: HTMLCanvasElement | null = null;
@@ -721,6 +823,8 @@ export class UI {
         <button id="mute" class="chip chip-mute" type="button" aria-label="Silenciar" aria-pressed="false">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
+        <button id="noads-chip" class="chip chip-noads hidden" type="button" aria-haspopup="dialog"><span class="noads-ad" aria-hidden="true">AD</span></button>
+        <div id="ad-test-tag" class="ad-test-tag hidden" aria-hidden="true"></div>
         <div class="t-top">
           <div class="logo">
             <span class="logo-el">EL</span>
@@ -787,6 +891,7 @@ export class UI {
               <div class="gp-top"><b id="gp-earned" class="gp-earned"></b><span class="gp-bar"><b id="gp-fill"></b></span></div>
               <span id="gp-text" class="gp-text"></span>
             </div>
+            <button id="btn-reward" class="btn-reward hidden" type="button"><span class="rw-top"><span class="rw-icon">${PLAY_SVG}</span>×2</span><span class="rw-tag"></span></button>
           </div>
         </div>
         <div class="go-actions">
@@ -810,7 +915,26 @@ export class UI {
           <button id="btn-resume" class="btn-big" type="button"></button>
           <button id="btn-pause-menu" class="btn-mid" type="button"></button>
         </div>
-        <button id="btn-privacy" class="link-privacy" type="button"></button>
+        <div class="pause-links">
+          <button id="btn-noads" class="link-privacy hidden" type="button" aria-haspopup="dialog"></button>
+          <button id="btn-privacy" class="link-privacy" type="button"></button>
+          <button id="btn-adprivacy" class="link-privacy hidden" type="button"></button>
+        </div>
+      </div>
+      <div id="store-sheet" class="store-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="st-title">
+        <div class="st-card">
+          <button id="st-close" class="md-x" type="button">${CLOSE_SVG}</button>
+          <div id="st-kicker" class="md-kicker"></div>
+          <div id="st-title" class="st-title"></div>
+          <ul class="st-points">
+            <li><span class="st-mark st-mark-x" aria-hidden="true"><span class="noads-ad">AD</span></span><span id="st-banners"></span></li>
+            <li><span class="st-mark" aria-hidden="true">${PLAY_SVG}</span><span id="st-videos"></span></li>
+          </ul>
+          <button id="st-buy" class="btn-big st-buy" type="button"></button>
+          <button id="st-restore" class="btn-mid st-restore" type="button"></button>
+          <div id="st-msg" class="st-msg" role="status" aria-live="polite"></div>
+          <button id="st-privacy" class="st-link" type="button"></button>
+        </div>
       </div>`;
 
     const q = (sel: string): HTMLElement => root.querySelector(sel)!;
@@ -880,6 +1004,17 @@ export class UI {
     this.btnResume = q('#btn-resume');
     this.btnPauseMenu = q('#btn-pause-menu');
     this.btnPrivacyEl = q('#btn-privacy');
+    this.btnReward = q('#btn-reward');
+    this.rewardTagEl = q('#btn-reward .rw-tag');
+    this.noAdsChip = q('#noads-chip');
+    this.btnNoAds = q('#btn-noads');
+    this.btnAdPrivacy = q('#btn-adprivacy');
+    this.storeEl = q('#store-sheet');
+    this.stBuyEl = q('#st-buy');
+    this.stRestoreEl = q('#st-restore');
+    this.stMsgEl = q('#st-msg');
+    this.adTestTagEl = q('#ad-test-tag');
+    root.style.setProperty('--ad-gap', `${CONFIG.bannerGapPx}px`);
     this.mandaoChipEl = q('#mandao-chip');
     this.mandaoSheetEl = q('#mandao-sheet');
     this.pauseMandaosEl = q('#pause-mandaos');
@@ -952,11 +1087,47 @@ export class UI {
     });
     this.press(q('#hud-pause'), () => this.cb.onPause());
     // Los Mandaos on the title: the chip opens the list, any tap closes it,
-    // and neither starts a run.
+    // and neither starts a run. With a banner under the sheet, a tap in the
+    // clear band above the banner closes nothing, so a thumb aiming to
+    // close the sheet is never steered toward the ad.
     this.press(this.mandaoChipEl, () => this.openMandaos());
-    this.press(this.mandaoSheetEl, () => this.mandaoSheetEl.classList.add('hidden'));
+    this.press(this.mandaoSheetEl, (e) => {
+      if (!this.inAdBand(this.mandaoSheetEl, e)) this.closeMandaos();
+    });
+    // Escape closes the top sheet and ends there (registered before main's
+    // listener, so it never also resumes a paused run).
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape') this.mandaoSheetEl.classList.add('hidden');
+      if (e.code !== 'Escape') return;
+      if (this.storeOpen) {
+        this.closeStore();
+        e.stopImmediatePropagation();
+      } else if (this.mandaoSheetOpen) {
+        this.closeMandaos();
+        e.stopImmediatePropagation();
+      }
+    });
+    // "Dobla tus plátanos": its own tap only once armed (CSS lets the card
+    // take every tap before that), and never twice.
+    this.press(this.btnReward, () => {
+      if (this.btnReward.classList.contains('armed') && !this.rewardPaid && !this.btnReward.classList.contains('busy')) this.cb.onReward();
+    });
+    // Remove Ads: the title chip and the PAUSA link open the sheet; the
+    // sheet closes on its X, a tap on the scrim, or Escape.
+    this.press(this.noAdsChip, () => this.cb.onNoAds());
+    this.press(this.btnNoAds, () => this.cb.onNoAds());
+    this.press(this.btnAdPrivacy, () => this.cb.onAdPrivacy());
+    this.press(this.storeEl, (e) => {
+      if (e.target === this.storeEl) this.closeStore();
+    });
+    this.press(q('#st-close'), () => this.closeStore());
+    this.press(this.stBuyEl, () => {
+      if (!this.storeView.busy && !this.storeView.adFree) this.cb.onBuy();
+    });
+    this.press(this.stRestoreEl, () => {
+      if (!this.storeView.busy) this.cb.onRestore();
+    });
+    this.press(q('#st-privacy'), () => {
+      window.open(PRIVACY_URL, '_blank', 'noopener');
     });
     this.bindPedals();
 
@@ -1196,6 +1367,19 @@ export class UI {
     this.btnResume.textContent = t.resumeBtn;
     this.btnPauseMenu.textContent = t.menu;
     this.btnPrivacyEl.textContent = t.privacy;
+    this.btnNoAds.textContent = t.noAds;
+    this.btnAdPrivacy.textContent = t.adPrivacy;
+    this.noAdsChip.setAttribute('aria-label', t.noAds);
+    this.btnReward.setAttribute('aria-label', t.rewardAria);
+    this.rewardTagEl.textContent = this.rewardPaid ? t.rewardDone : t.rewardTag;
+    if (this.rewardOn && !this.rewardPaid) this.gpTextEl.textContent = t.rewardLine;
+    this.adTestTagEl.textContent = t.adTestTag;
+    this.storeEl.querySelector('#st-close')!.setAttribute('aria-label', t.ariaClose);
+    this.storeEl.querySelector('#st-kicker')!.textContent = t.storeKicker;
+    this.storeEl.querySelector('#st-banners')!.textContent = t.storeBanners;
+    this.storeEl.querySelector('#st-videos')!.textContent = t.storeVideos;
+    this.storeEl.querySelector('#st-privacy')!.textContent = t.privacy;
+    this.renderStore();
     if (this.lastResult) {
       this.goTitleEl.textContent = t.gameOverTitles[this.goTitleIdx];
     }
@@ -1342,7 +1526,9 @@ export class UI {
   showTitle(record: number): void {
     this.lastRecord = record;
     this.stopCountUp();
-    this.mandaoSheetEl.classList.add('hidden');
+    this.closeMandaos();
+    this.closeStore();
+    this.clearReward();
     this.hideCountdown();
     this.applyLang();
     this.title.classList.remove('hidden');
@@ -1360,6 +1546,8 @@ export class UI {
   showPlaying(record: number): void {
     this.lastRecord = record;
     this.stopCountUp();
+    this.closeStore();
+    this.clearReward();
     this.snapReady = false; // the share photo belongs to the run that just ended
     this.hideCountdown();
     this.applyLang();
@@ -1467,22 +1655,11 @@ export class UI {
 
     // Plátanos: what this run put in the bank, and how far that is toward
     // the next pintura for this ride.
+    window.clearTimeout(this.earnedTimer);
     this.gpEarnedEl.textContent = t.earned(r.platanosEarned);
-    this.gpSwatchEl.parentElement!.classList.toggle('all', !pintura);
-    this.gpSwatchEl.classList.toggle('hidden', !pintura);
-    if (pintura) {
-      // need is what the bank still lacks, so the bank is price - need
-      // (or the full price and more once it is 0: the bar is full then).
-      const bank = pintura.price - pintura.need;
-      this.gpSwatchEl.style.background = hexCss(PINTURAS[this.selectedVehicle][pintura.index].hex);
-      this.gpTextEl.textContent = pintura.need > 0 ? t.pinturaNeed(pintura.need, pintura.name) : t.pinturaReady(pintura.name);
-      this.animateBar(this.gpFillEl, (bank - r.platanosEarned) / pintura.price, bank / pintura.price);
-    } else {
-      this.gpTextEl.textContent = t.pinturaAll;
-      this.animateBar(this.gpFillEl, 1, 1);
-    }
-    // A paint is waiting on the title: MENÚ glows.
-    this.btnMenu.classList.toggle('glow', pintura !== null && pintura.need === 0);
+    this.clearReward();
+    this.goShownAt = performance.now();
+    this.renderPinturaGoal(pintura, r.platanosEarned);
 
     this.gameover.classList.remove('hidden');
     this.fitUnderSeal(r.points);
@@ -1582,6 +1759,206 @@ export class UI {
     for (const b of list.querySelectorAll<HTMLElement>('.md-bar b')) {
       this.animateBar(b, Number(b.dataset.from), Number(b.dataset.to));
     }
+  }
+
+  // The card's plátanos row: the next pintura's swatch, its line, and the
+  // bar from where the bank was before `gained` landed to where it is now.
+  private renderPinturaGoal(pintura: PinturaGoal | null, gained: number): void {
+    const t = this.t();
+    if (pintura) {
+      // need is what the bank still lacks, so the bank is price - need
+      // (or the full price and more once it is 0: the bar is full then).
+      const bank = pintura.price - pintura.need;
+      this.gpSwatchEl.style.background = hexCss(PINTURAS[this.selectedVehicle][pintura.index].hex);
+      this.gpPinturaText = pintura.need > 0 ? t.pinturaNeed(pintura.need, pintura.name) : t.pinturaReady(pintura.name);
+      this.animateBar(this.gpFillEl, (bank - gained) / pintura.price, bank / pintura.price);
+    } else {
+      this.gpPinturaText = t.pinturaAll;
+      this.animateBar(this.gpFillEl, 1, 1);
+    }
+    this.gpSwatchEl.parentElement!.classList.toggle('all', !pintura);
+    this.gpSwatchEl.classList.toggle('hidden', !pintura);
+    this.gpTextEl.textContent = this.rewardOn && !this.rewardPaid ? t.rewardLine : this.gpPinturaText;
+    // A paint is waiting on the title: MENÚ glows.
+    this.btnMenu.classList.toggle('glow', pintura !== null && pintura.need === 0);
+  }
+
+  // ---------------- ads ----------------
+
+  // "Dobla tus plátanos" on the card: shown only while a video is loaded and
+  // this run can still be paid (main decides). It sits in the plátanos row,
+  // up in the card and far from OTRA VEZ, and it only takes taps once the
+  // card has been up CONFIG.rewardArmSec (until then a tap there is a tap
+  // on the card: OTRA VEZ).
+  setRewardOffer(on: boolean): void {
+    if (this.rewardPaid) return; // the paid badge stays for the card's life
+    if (on === this.rewardOn) return;
+    this.rewardOn = on;
+    const row = this.gpSwatchEl.parentElement!;
+    row.classList.toggle('offer', on);
+    this.btnReward.classList.toggle('hidden', !on);
+    this.btnReward.classList.remove('busy', 'done');
+    this.btnReward.removeAttribute('aria-disabled');
+    this.rewardTagEl.textContent = this.t().rewardTag;
+    this.gpTextEl.textContent = on ? this.t().rewardLine : this.gpPinturaText;
+    window.clearTimeout(this.rewardArmTimer);
+    this.btnReward.classList.remove('armed');
+    if (!on) return;
+    const wait = CONFIG.rewardArmSec * 1000 - (performance.now() - this.goShownAt);
+    if (wait <= 0) this.btnReward.classList.add('armed');
+    else this.rewardArmTimer = window.setTimeout(() => this.btnReward.classList.add('armed'), wait);
+  }
+
+  // The video is up: the button holds still and takes no more taps.
+  setRewardBusy(on: boolean): void {
+    this.btnReward.classList.toggle('busy', on);
+  }
+
+  // The video paid: the button becomes a quiet ×2 check, the earned line
+  // counts up to the doubled total, and the pintura bar fills the rest.
+  rewardDone(added: number, earned: number, pintura: PinturaGoal | null): void {
+    const t = this.t();
+    this.rewardPaid = true;
+    this.rewardOn = true;
+    this.gpSwatchEl.parentElement!.classList.add('offer');
+    const b = this.btnReward;
+    b.classList.remove('hidden', 'busy');
+    b.classList.add('done', 'armed');
+    b.setAttribute('aria-disabled', 'true');
+    b.querySelector('.rw-icon')!.innerHTML = CHECK_RW_SVG;
+    this.rewardTagEl.textContent = t.rewardDone;
+    this.renderPinturaGoal(pintura, added);
+    this.countEarned(earned - added, earned);
+  }
+
+  private countEarned(from: number, to: number): void {
+    window.clearTimeout(this.earnedTimer);
+    const el = this.gpEarnedEl;
+    if (reducedMotion()) {
+      el.textContent = this.t().earned(to);
+      return;
+    }
+    const t0 = performance.now();
+    const step = (): void => {
+      const k = Math.min(1, (performance.now() - t0) / CONFIG.rewardCountUpMs);
+      el.textContent = this.t().earned(Math.round(from + (to - from) * easeOutCubic(k)));
+      this.earnedTimer = k < 1 ? window.setTimeout(step, 16) : 0;
+    };
+    step();
+  }
+
+  // A new card or a new run: no offer, no badge.
+  private clearReward(): void {
+    window.clearTimeout(this.rewardArmTimer);
+    window.clearTimeout(this.earnedTimer);
+    this.rewardOn = false;
+    this.rewardPaid = false;
+    this.gpSwatchEl.parentElement!.classList.remove('offer');
+    const b = this.btnReward;
+    b.classList.add('hidden');
+    b.classList.remove('armed', 'busy', 'done');
+    b.removeAttribute('aria-disabled');
+    b.querySelector('.rw-icon')!.innerHTML = PLAY_SVG;
+  }
+
+  // Which ad entries exist: the store (iOS, or the dev simulation), whether
+  // Remove Ads is owned, and whether the consent rules ask for a way back to
+  // the ad choices.
+  setAdsUi(store: boolean, adFree: boolean, adPrivacy: boolean): void {
+    const offer = store && !adFree;
+    this.noAdsChip.classList.toggle('hidden', !offer);
+    this.btnNoAds.classList.toggle('hidden', !offer);
+    this.btnAdPrivacy.classList.toggle('hidden', !adPrivacy);
+    this.storeView.adFree = adFree;
+    this.renderStore();
+  }
+
+  // The AD TEST tag of a build:adtest bundle.
+  setAdTestTag(on: boolean): void {
+    this.adTestTagEl.classList.toggle('hidden', !on);
+  }
+
+  // The banner's height on screen (0: none). The pause screen and the
+  // mandao sheet keep it plus CONFIG.bannerGapPx clear at the bottom, only
+  // while a banner is really there.
+  setAdSpace(h: number): void {
+    const root = this.hud.parentElement!;
+    root.style.setProperty('--ad-h', `${Math.max(0, Math.round(h))}px`);
+    root.classList.toggle('ad-on', h > 0);
+  }
+
+  // A tap inside the clear band a sheet keeps above the banner.
+  private inAdBand(el: HTMLElement, e: Event): boolean {
+    if (!this.hud.parentElement!.classList.contains('ad-on')) return false;
+    const y = (e as PointerEvent).clientY;
+    if (typeof y !== 'number') return false;
+    const band = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+    return y > el.getBoundingClientRect().bottom - band;
+  }
+
+  get mandaoSheetOpen(): boolean {
+    return !this.mandaoSheetEl.classList.contains('hidden');
+  }
+
+  private closeMandaos(): void {
+    if (this.mandaoSheetEl.classList.contains('hidden')) return;
+    this.mandaoSheetEl.classList.add('hidden');
+    this.cb.onOverlayChange();
+  }
+
+  get storeOpen(): boolean {
+    return !this.storeEl.classList.contains('hidden');
+  }
+
+  openStore(view: StoreView): void {
+    this.storeNote = null;
+    this.renderStore(view);
+    if (!this.storeOpen) {
+      this.storeEl.classList.remove('hidden');
+      this.cb.onOverlayChange();
+    }
+  }
+
+  closeStore(): void {
+    if (!this.storeOpen) return;
+    this.storeEl.classList.add('hidden');
+    this.cb.onOverlayChange();
+  }
+
+  // The sheet from the current view: the price on the buy button, or the
+  // thanks once owned; buttons rest while a purchase is in flight.
+  renderStore(view: StoreView = this.storeView): void {
+    this.storeView = view;
+    const t = this.t();
+    const v = view;
+    this.storeEl.querySelector('#st-title')!.textContent = v.adFree ? t.storeTitleOwned : t.storeTitle;
+    this.storeEl.classList.toggle('owned', v.adFree);
+    const b = this.stBuyEl;
+    b.classList.toggle('hidden', v.adFree);
+    b.textContent = v.priceState === 'ready' && v.price ? t.storeBuy(v.price) : t.storeBuyBare;
+    const off = v.busy || v.priceState === 'loading' || v.priceState === 'unavailable';
+    b.toggleAttribute('disabled', off);
+    this.stRestoreEl.textContent = t.storeRestore;
+    this.stRestoreEl.toggleAttribute('disabled', v.busy);
+    this.storeEl.classList.toggle('busy', v.busy);
+    // The line under the buttons: what the last buy or restore did, else
+    // the sheet's own state.
+    this.stMsgEl.textContent = this.storeNote
+      ? t.storeMsg[this.storeNote]
+      : v.adFree
+        ? t.storeOwned
+        : v.priceState === 'loading'
+          ? t.storePriceWait
+          : v.priceState === 'unavailable'
+            ? t.storeMsg.unavailable
+            : '';
+  }
+
+  // What a buy or a restore came to, in a word.
+  storeMessage(kind: StoreMsg): void {
+    this.storeNote = kind;
+    this.renderStore();
+    restart(this.stMsgEl, 'say');
   }
 
   showPause(mandaos: MandaosView): void {
@@ -2131,7 +2508,10 @@ export class UI {
     html += `<li class="md-head"><span>${t.dailyTitle}</span>${streak}</li>`;
     html += this.mandaoRowHtml(v.daily, t.dailyTag, 'sheet', 0);
     q('#md-list').innerHTML = html;
-    this.mandaoSheetEl.classList.remove('hidden');
+    if (this.mandaoSheetEl.classList.contains('hidden')) {
+      this.mandaoSheetEl.classList.remove('hidden');
+      this.cb.onOverlayChange();
+    }
   }
 
   // Mid-run: a mandao got done. It goes through the announcement lane, so a

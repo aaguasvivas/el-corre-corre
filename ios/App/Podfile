@@ -11,10 +11,12 @@ install! 'cocoapods', :disable_input_output_paths => true
 def capacitor_pods
   pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCommunityAdmob', :path => '../../node_modules/@capacitor-community/admob'
   pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
   pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
   pod 'CapacitorPreferences', :path => '../../node_modules/@capacitor/preferences'
   pod 'CapacitorShare', :path => '../../node_modules/@capacitor/share'
+  pod 'CapgoNativePurchases', :path => '../../node_modules/@capgo/native-purchases'
 end
 
 target 'App' do
@@ -23,13 +25,6 @@ target 'App' do
 end
 
 post_install do |installer|
+  # Capacitor 8's helper raises any pod below 15.0 to 15.0, the app's floor.
   assertDeploymentTarget(installer)
-  # Every pod builds for the app's own floor. Pods declare their own minimum
-  # (13.0 for the Capacitor 6 plugins), and Xcode 27 rejects anything below
-  # 15.0.
-  installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-    end
-  end
 end

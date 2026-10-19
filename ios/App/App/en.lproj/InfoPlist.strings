@@ -1,2 +1,4 @@
 /* The share sheet's "Save Image" asks for this before it adds the run card to Photos. */
 "NSPhotoLibraryAddUsageDescription" = "The game saves your run card to Photos only when you ask.";
+/* The tracking prompt, asked once on the title after the consent step; it is for the ads alone. */
+"NSUserTrackingUsageDescription" = "The game uses this only for ads, so they match your interests. Your scores and records stay on this device.";

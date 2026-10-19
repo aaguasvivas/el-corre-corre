@@ -30,6 +30,12 @@ import { haptics } from './haptics';
 import { BrakeHeat } from './brakeHeat';
 import { submitScore } from './leaderboard';
 import { backupSaves, restoreSaves } from './storage';
+import { Capacitor } from '@capacitor/core';
+import { Ads, type FlowEnv } from './ads';
+import { admobPort } from './admobPort';
+import { Entitlements } from './purchases';
+import { nativeStorePort } from './storePort';
+import { simPortsFromUrl } from './simAds';
 
 // A save the OS wiped from the web view comes back from the native mirror
 // before anything below reads localStorage. The web has no mirror and does
@@ -255,6 +261,7 @@ function panOf(x: number): number {
 function toggleMute(): void {
   audio.setMuted(!audio.muted);
   ui.setMuted(audio.muted);
+  ads.setMuted(audio.muted);
   audio.click();
 }
 
@@ -354,6 +361,7 @@ function onPinturaTap(): void {
 
 function goToMenu(): void {
   if (state !== 'gameover' && state !== 'paused') return;
+  if (adHold) return;
   // Quitting from PAUSE abandons a live run, so bank it before wiping it.
   if (state === 'paused') missions.finishRun(score);
   score.persist();
@@ -366,6 +374,7 @@ function goToMenu(): void {
   player.setVehicle(selectedVehicle, equippedHex(selectedVehicle));
   refreshPinturaUI();
   refreshTitleMeta();
+  syncBanner();
   audio.click();
 }
 
@@ -375,7 +384,7 @@ let sharing = false;
 
 function doShare(): void {
   audio.click();
-  if (!lastRun || sharing) return;
+  if (!lastRun || sharing || adHold) return;
   sharing = true;
   // The card's photo: a fresh frame of the crash, read back in this task.
   renderer.render(scene, camera);
@@ -403,8 +412,158 @@ const ui = new UI(document.getElementById('ui')!, {
   onPinturaPick,
   riderRect,
   onStamp,
+  onReward: watchReward,
+  onNoAds: openStore,
+  onBuy: buyNoAds,
+  onRestore: restoreNoAds,
+  onAdPrivacy: () => {
+    audio.click();
+    void ads.showPrivacyOptions();
+  },
+  onOverlayChange: syncBanner,
 });
 ui.setMuted(audio.muted);
+
+// ---------------- ads and Remove Ads (docs/audit/ADS-PLAN.md) ----------------
+
+// iOS gets the AdMob and StoreKit plugins. The web build has neither: ads
+// and the store are no-ops there, except in a dev or probe page opened with
+// ?ads=sim, which gets stand-ins for screenshots and probes (the release
+// bundle folds that branch away).
+const native = Capacitor.isNativePlatform();
+const sim = import.meta.env.DEV || import.meta.env.MODE === 'probe' ? simPortsFromUrl(__ECC_ADS__.productId) : null;
+const adsPort = native ? admobPort(__ECC_ADS__) : (sim?.ads ?? null);
+const storePort = native ? nativeStorePort() : (sim?.store ?? null);
+
+// A rewarded video is on screen: the game holds still and silent, and no
+// tap or key reaches it until the video is gone.
+let adHold = false;
+// The consent and tracking prompts open on the title only. calmWaiters are
+// flow steps waiting for that (advance() releases them).
+const calmWaiters: Array<() => void> = [];
+let titleDwell = 0; // real seconds the title has been up this visit
+let adsTriedThisVisit = false;
+const flowEnv: FlowEnv = {
+  isForeground: () => document.visibilityState === 'visible',
+  onForeground: (cb) => {
+    const h = (): void => {
+      if (document.visibilityState === 'visible') cb();
+    };
+    document.addEventListener('visibilitychange', h);
+    return () => document.removeEventListener('visibilitychange', h);
+  },
+  whenCalm: () =>
+    state === 'title' && !document.hidden ? Promise.resolve() : new Promise<void>((resolve) => calmWaiters.push(resolve)),
+};
+
+const ads = new Ads(adsPort, flowEnv, (h) => ui.setAdSpace(h));
+ads.onRewardedChange = refreshRewardOffer;
+ads.onReady = () => {
+  ads.setMuted(audio.muted);
+  syncAdsUi();
+  syncBanner();
+  refreshRewardOffer();
+};
+
+const store = new Entitlements(storePort, __ECC_ADS__.productId);
+let storeBusy = false;
+store.onChange = () => {
+  ads.setAdFree(store.adFree); // owning it takes the banner down at once
+  syncAdsUi();
+  backupSaves();
+  if (!ui.storeOpen) return;
+  if (store.adFree && !storeBusy) ui.storeMessage('success'); // an Ask to Buy approved while the sheet is up
+  else ui.renderStore(storeView());
+};
+ads.setAdFree(store.adFree);
+ui.setAdTestTag(__ECC_ADS__.tag);
+syncAdsUi();
+void store.init();
+
+function syncAdsUi(): void {
+  ui.setAdsUi(store.available, store.adFree, ads.privacyOptions);
+}
+
+// The banner belongs to the calm screens: the pause screen and the mandao
+// sheet, and not while the Remove Ads sheet sits over them.
+function syncBanner(): void {
+  const calm = state === 'paused' || (state === 'title' && ui.mandaoSheetOpen);
+  ads.setBannerWanted(calm && !ui.storeOpen && !adHold);
+}
+
+// "Dobla tus plátanos" on the card: only with a video loaded and a run that
+// earned at least one plátano and has not been paid.
+function refreshRewardOffer(): void {
+  ui.setRewardOffer(state === 'gameover' && lastRun !== null && !adHold && ads.canOffer(lastRun.platanosEarned));
+}
+
+function watchReward(): void {
+  if (state !== 'gameover' || !lastRun || adHold) return;
+  const run = lastRun;
+  if (!ads.canOffer(run.platanosEarned)) return;
+  adHold = true;
+  audio.setHold(true);
+  ui.setRewardBusy(true);
+  let added = 0;
+  void ads
+    .showRewarded(run.platanosEarned, (n) => {
+      // DECISION: the reward is the run's whole plátano take again (picked
+      // up plus mandao rewards: the "+N plátanos" the card shows), banked
+      // the moment the SDK grants it, so a killed app keeps it.
+      score.addToBank(n);
+      added = n;
+      backupSaves();
+    })
+    .then(() => {
+      adHold = false;
+      audio.setHold(false);
+      ui.setRewardBusy(false);
+      if (added > 0 && state === 'gameover' && lastRun === run) {
+        ui.rewardDone(added, run.platanosEarned + added, nextPintura(selectedVehicle, ownedPinturas(selectedVehicle), score.bank));
+        audio.platano();
+        haptics.medium();
+      } else {
+        refreshRewardOffer(); // dismissed early, failed or offline: say nothing
+      }
+    });
+}
+
+function storeView(): { adFree: boolean; price: string | null; priceState: Entitlements['priceState']; busy: boolean } {
+  return { adFree: store.adFree, price: store.price, priceState: store.priceState, busy: storeBusy };
+}
+
+function openStore(): void {
+  if (!store.available || (state !== 'title' && state !== 'paused')) return;
+  audio.click();
+  const priced = store.loadPrice(); // no-op once the price is in
+  ui.openStore(storeView());
+  void priced.then(() => ui.renderStore(storeView()));
+}
+
+function buyNoAds(): void {
+  if (storeBusy || store.adFree) return;
+  storeBusy = true;
+  ui.renderStore(storeView());
+  audio.click();
+  void store.buy().then((o) => {
+    storeBusy = false;
+    ui.renderStore(storeView());
+    ui.storeMessage(o);
+    if (o === 'success' || o === 'owned') haptics.success();
+  });
+}
+
+function restoreNoAds(): void {
+  if (storeBusy) return;
+  storeBusy = true;
+  ui.renderStore(storeView());
+  audio.click();
+  void store.restore().then((o) => {
+    storeBusy = false;
+    ui.renderStore(storeView());
+    ui.storeMessage(o === 'failed' ? 'restoreFailed' : o);
+  });
+}
 
 const traffic = new Traffic(scene, {
   onNearMiss,
@@ -579,12 +738,14 @@ function startRun(): void {
   traffic.startRun(); // the opening: slow cars to pass and a plátano weave
   state = 'playing';
   ui.showPlaying(score.record);
+  ads.runStarted(); // a video loads now, for this run's card
+  syncBanner();
   audio.startRun();
   audio.click();
 }
 
 function tryRestart(): void {
-  if (state !== 'gameover') return;
+  if (state !== 'gameover' || adHold) return;
   if (performance.now() - gameOverAt < CONFIG.restartDebounceSec * 1000) return;
   startRun();
 }
@@ -598,6 +759,7 @@ function resume(): void {
   countdownT = CONFIG.resumeCountdownSec;
   countdownBeat = 0;
   ui.hidePause();
+  syncBanner();
   audio.click();
   stepCountdown(0);
 }
@@ -630,6 +792,7 @@ function pauseGame(): void {
   missions.persist(score); // a pause may be the last thing a killed app does
   backupSaves();
   ui.showPause(missions.view());
+  syncBanner();
   if (wasRunning) audio.stopRun(false);
   audio.click();
 }
@@ -661,13 +824,14 @@ function doCrash(hit: VehicleHit | null): void {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (adHold) return; // a video is on screen
   if (e.code === 'KeyM') {
     if (!e.repeat) toggleMute();
     return;
   }
   // Escape and P pause and resume, for a desktop player without a mouse.
   if (e.code === 'Escape' || e.code === 'KeyP') {
-    if (e.repeat) return;
+    if (e.repeat || ui.storeOpen) return;
     if (state === 'playing' || state === 'countdown') pauseGame();
     else if (state === 'paused') resume();
     return;
@@ -676,6 +840,7 @@ window.addEventListener('keydown', (e) => {
   // crash must not auto-repeat through the card into the next run, and a
   // held arrow must not spin through the rides.
   if (e.repeat) return;
+  if (ui.storeOpen) return; // the Remove Ads sheet keeps the keys (Escape closes it)
   if (state === 'title' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
     const dir = e.code === 'ArrowRight' ? 1 : -1;
     const idx = VEHICLE_ORDER.indexOf(selectedVehicle);
@@ -1139,6 +1304,7 @@ let fpsAvg = 60;
 // fixed-step beat against the display, no judder.
 function advance(dt: number, now: number): void {
   realClock += dt;
+  stepAdsGate(dt);
   let simDt = 0;
   if (state === 'playing') {
     simDt = dt * dipScaleNow(dt);
@@ -1168,10 +1334,30 @@ function advance(dt: number, now: number): void {
     backupSaves();
     submitScore(lastRun.points, selectedVehicle);
     ui.showGameOver(lastRun, missions.view(), nextPintura(selectedVehicle, ownedPinturas(selectedVehicle), score.bank));
+    refreshRewardOffer();
   } else if (state === 'gameover') {
     player.updateTumble(dt); // finish the flop in real time
   }
   player.updateFx(dt);
+}
+
+// The consent and tracking prompts: once the title has been up
+// adsStartDelaySec this visit, the flow starts (once per visit, so a flow
+// whose SDK start failed tries again only on a later visit), and flow steps
+// waiting for a calm moment go on. Nothing allocates unless one is waiting.
+function stepAdsGate(dt: number): void {
+  if (state !== 'title') {
+    titleDwell = 0;
+    adsTriedThisVisit = false;
+    return;
+  }
+  titleDwell += dt;
+  if (titleDwell < CONFIG.adsStartDelaySec || document.hidden) return;
+  if (calmWaiters.length > 0) for (const go of calmWaiters.splice(0)) go();
+  if (!adsTriedThisVisit && ads.pending) {
+    adsTriedThisVisit = true;
+    void ads.start();
+  }
 }
 
 // Reused every frame: the audio update allocates nothing.
@@ -1194,6 +1380,7 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
   last = now;
+  if (adHold) return; // a rewarded video covers the game: nothing runs under it
   if (raw > 0) fpsAvg += (1 / Math.max(raw, 1e-4) - fpsAvg) * 0.05;
   const dt = Math.min(raw, CONFIG.maxFrameDt);
 
@@ -1401,5 +1588,19 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'probe') (window as unknown 
   // HUD probes: the announcement lane, the coach chip and what is learned;
   // and any announcement, to measure the lane with the longest copy.
   hud: () => ui.hudState(),
+  // Ads and Remove Ads (a page opened with ?ads=sim has the stand-ins).
+  ads: () => ({
+    enabled: ads.enabled,
+    ready: ads.ready,
+    outcome: ads.outcome,
+    npa: ads.npa,
+    rewarded: ads.rewarded.phase,
+    paid: ads.rewarded.paidThisRun,
+    offer: state === 'gameover' && lastRun !== null && ads.canOffer(lastRun.platanosEarned),
+    banner: ads.banner ? ads.banner.view : null,
+    hold: adHold,
+  }),
+  store: () => ({ available: store.available, adFree: store.adFree, price: store.price, priceState: store.priceState, open: ui.storeOpen }),
+  reward: () => watchReward(),
   announce: (kind: Parameters<UI['announce']>[0], text: string, kicker?: string) => ui.announce(kind, text, kicker),
 };

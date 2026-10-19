@@ -6,9 +6,10 @@ camiones de plátanos and motoconchos, ride en contra vía for double points,
 and chase your own récord across the country: El Malecón, La Zona Colonial,
 El Campo, and around again.
 
-Vite + TypeScript (strict) + three.js, wrapped for iOS with Capacitor 6. No
-other runtime framework, no physics engine, no network: everything ships in
-the bundle and the app runs offline.
+Vite + TypeScript (strict) + three.js, wrapped for iOS with Capacitor 8. No
+other runtime framework, no physics engine, no server: everything ships in
+the bundle and the game plays fully offline.
+Release 1.0 adds Google AdMob ads (a banner on calm screens, an opt-in video) and a $1.99 Remove Ads purchase: [docs/audit/ADS-PLAN.md](docs/audit/ADS-PLAN.md).
 
 ## What is in the game
 
@@ -103,8 +104,9 @@ tracked). The `iphone69` viewport renders at 1320x2868, the App Store
 
 ## Ship it
 
-- `RELEASE.md`: the build ledger, the build-10 prerequisites, and the
-  TestFlight and App Store runbook (Capacitor, xcodebuild, Organizer).
+- `RELEASE.md`: the build ledger, the owner steps for 1.0, the App Privacy
+  answers, and the TestFlight and App Store runbook (Capacitor, xcodebuild,
+  Organizer).
 - `STORE.md`: the listing kit in both locales, and the screenshot plan.
 - `site/`: the public landing and privacy pages (GitHub Pages).
 

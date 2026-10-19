@@ -124,6 +124,7 @@ export class AudioEngine {
   private revBlipUntil = 0; // a short over-rev on the gas engage, then the engine settles
   private nextHornAt = 0;
   private resumeCooldown = 0;
+  private held = false; // a rewarded video owns the sound (setHold)
 
   // Quantized layers: what the run asks for, what is sounding, and when a
   // layer that is on its way out may leave (a bar index, -1 = not leaving).
@@ -156,8 +157,23 @@ export class AudioEngine {
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
       if (document.hidden) void this.ctx.suspend();
-      else void this.ctx.resume();
+      else if (!this.held) void this.ctx.resume();
     });
+  }
+
+  // A rewarded video is on screen: the whole graph goes quiet, and nothing
+  // (a gesture, a visibility change, the self-healing nudge in update) may
+  // wake it until the video is gone.
+  setHold(on: boolean): void {
+    if (on === this.held) return;
+    this.held = on;
+    if (!this.ctx) return;
+    if (on) void this.ctx.suspend();
+    else if (!document.hidden) void this.ctx.resume();
+  }
+
+  get isHeld(): boolean {
+    return this.held;
   }
 
   get muted(): boolean {
@@ -213,6 +229,7 @@ export class AudioEngine {
     // the interrupted case and the music never came back. Any non-running
     // state gets the resume nudge, and a user gesture is the most reliable
     // place to do it.
+    if (this.held) return;
     if ((this.ctx.state as string) !== 'running') void this.ctx.resume();
   }
 
@@ -419,6 +436,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx) return;
     if (!this.ready()) {
+      if (this.held) return; // a rewarded video is playing; setHold(false) resumes
       // an interruption that ended without a gesture or visibility change:
       // keep nudging (throttled) so the music heals on its own
       this.resumeCooldown -= dt;
