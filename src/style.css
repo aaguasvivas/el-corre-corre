@@ -1654,20 +1654,29 @@ body {
   text-underline-offset: 3px;
 }
 
-/* build:adtest only: the bundle carries Google's test ids */
+/* build:adtest only: the bundle carries Google's test ids. On the title,
+   under the EN chip, clear of the logo. */
 .ad-test-tag {
   position: absolute;
-  top: calc(var(--sat) + 2px);
-  left: 50%;
-  z-index: 20;
-  padding: 2px 8px;
-  border-radius: 999px;
+  top: calc(var(--sat) + 64px);
+  right: calc(var(--sar) + 12px);
+  padding: 3px 6px;
+  border-radius: 8px;
   background: var(--red);
   color: var(--white);
-  font-size: 11px;
-  letter-spacing: 1px;
-  transform: translateX(-50%);
+  font-size: 10px;
+  line-height: 1.15;
+  letter-spacing: 0.5px;
+  text-align: center;
+  white-space: pre-line;
   pointer-events: none;
+}
+
+@media (orientation: landscape) {
+  .ad-test-tag {
+    top: calc(var(--sat) + 12px);
+    right: calc(var(--sar) + 64px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

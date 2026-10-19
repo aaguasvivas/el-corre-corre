@@ -179,7 +179,7 @@ export const STRINGS = {
     rewardDone: '¡doblados!',
     noAds: 'Quitar anuncios',
     adChoices: 'Opciones de anuncios',
-    adTestTag: 'ANUNCIOS DE PRUEBA',
+    adTestTag: 'ANUNCIOS\nDE PRUEBA', // build:adtest only, on the title under EN
     storeKicker: 'SIN ANUNCIOS',
     storeTitle: 'Quita los banners',
     storeTitleOwned: 'Ya no tienes banners',
@@ -350,7 +350,7 @@ export const STRINGS = {
     rewardDone: 'doubled!',
     noAds: 'Remove ads',
     adChoices: 'Ad choices',
-    adTestTag: 'TEST ADS',
+    adTestTag: 'TEST\nADS',
     storeKicker: 'NO ADS',
     storeTitle: 'Remove the banners',
     storeTitleOwned: 'Your banners are gone',
@@ -824,6 +824,7 @@ export class UI {
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path class="snd-wave" d="M16.5 8.5c2 2 2 5 0 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><line class="snd-slash" x1="4" y1="20" x2="20" y2="4" stroke="#ce1126" stroke-width="2.6" stroke-linecap="round"/></svg>
         </button>
         <button id="noads-chip" class="chip chip-noads hidden" type="button" aria-haspopup="dialog"><span class="noads-ad" aria-hidden="true">AD</span></button>
+        <div id="ad-test-tag" class="ad-test-tag hidden" aria-hidden="true"></div>
         <div class="t-top">
           <div class="logo">
             <span class="logo-el">EL</span>
@@ -934,8 +935,7 @@ export class UI {
           <div id="st-msg" class="st-msg" role="status" aria-live="polite"></div>
           <button id="st-privacy" class="st-link" type="button"></button>
         </div>
-      </div>
-      <div id="ad-test-tag" class="ad-test-tag hidden" aria-hidden="true"></div>`;
+      </div>`;
 
     const q = (sel: string): HTMLElement => root.querySelector(sel)!;
     this.hud = q('#hud');

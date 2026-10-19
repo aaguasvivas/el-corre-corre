@@ -20,8 +20,12 @@ Run every command here from the main checkout,
 - TestFlight: internal group (Adelson) and external group Familia
   (Erickson).
 - Build 10 is archived at `ios/App/build-archive/App10.xcarchive` and not
-  uploaded. Next: upload it, run "Device checks for build 10", then App
-  Store review for version 1.0 with build 10.
+  uploaded. It is superseded: release 1.0 ships with ads, Remove Ads and
+  Capacitor 8 as build 11 or later (docs/audit/ADS-PLAN.md, branch
+  `ads-1.0`). Never submit build 10.
+- Ads gate: `npm run build` fails until the real AdMob ids are in
+  `src/adIds.ts` (ADS-PLAN.md owner step 1). For device testing before
+  then, use the test-ads build below.
 
 ## Builds (version 1.0)
 
@@ -68,15 +72,43 @@ are done in wave 4; 5 and 6 are still open.
 7. **Icon alpha.** Done: `tools/make-icons.mjs` writes RGB and stops on any
    non-opaque pixel; `sips -g hasAlpha` prints no for the icons and splash.
 
+## Ads and Remove Ads (release 1.0)
+
+- **Ids:** `src/adIds.ts` is the one place. `npm run build` (the App Store
+  bundle) carries `RELEASE_ADS` and refuses to run while they are empty,
+  malformed or Google's test ids. `dist/ads-ids.json` says which set a
+  bundle carries.
+- **Info.plist app id:** every `npx cap copy ios` or `npx cap sync ios`
+  runs `tools/ios-ads-plist.mjs`, which writes the bundle's app id into
+  `GADApplicationIdentifier` and prints which set it is. Commit that
+  Info.plist change with the real id.
+- **Test-ads build for a device (never the App Store):**
+  ```bash
+  npm run build:adtest && npx cap sync ios
+  ```
+  Then run from Xcode on the iPhone. The title shows a red "ANUNCIOS DE
+  PRUEBA" / "TEST ADS" tag and Google's ads say "Test mode". An archive of
+  this bundle fails on purpose in the "[ECC] No test ads in an archive"
+  build phase. Before archiving, run `npm run build` and sync again.
+- **Purchases in the simulator:** run the App scheme from Xcode; its Run
+  action uses `ios/App/App/Products.storekit` (Remove Ads at 1.99 USD).
+  Check Product > Scheme > Edit Scheme > Run > Options > StoreKit
+  Configuration shows Products.storekit (set it there if it does not).
+  `xcrun simctl launch` does not use it: the sheet then says the store is
+  not available, which is the right offline behavior. On a device, use a
+  Sandbox Apple Account (Settings > Developer).
+
 ## Assets and values (copy from here)
 
 - Privacy policy URL: https://aaguasvivas.github.io/el-corre-corre-site/privacy.html
 - Support and marketing URL: https://aaguasvivas.github.io/el-corre-corre-site/
 - Listing copy (ES and EN), subtitle, keywords, promo text, screenshot plan:
   [STORE.md](STORE.md)
-- Privacy answer: **Data Not Collected**. Checked on the `eb676ef` build:
-  the app, Capacitor and Cordova privacy manifests list no collected data and
-  no tracking, and the web bundle calls no server.
+- Privacy answer: no longer "Data Not Collected" once ads ship. The game's
+  own code still collects nothing, but the Google Mobile Ads SDK does
+  (device id and advertising data for third-party advertising, plus what
+  Google's iOS data disclosure guide lists). Answer App Privacy from that
+  guide (ADS-PLAN.md owner step 4).
 - Encryption: `ITSAppUsesNonExemptEncryption` is false in Info.plist, so
   there is no export question per build.
 - Category: Games > Racing, secondary Games > Arcade. Device: iPhone only
@@ -89,9 +121,13 @@ are done in wave 4; 5 and 6 are still open.
 1. Bump `CURRENT_PROJECT_VERSION` in both blocks of
    `ios/App/App.xcodeproj/project.pbxproj` and add a row to the Builds
    table. Commit.
-2. `npm run check && sh tools/heavy.sh npm run build`
-3. `npx cap sync ios` (main checkout only). It must end with "Sync
-   finished". In a worktree with a symlinked `node_modules`, cap sync writes
+2. `npm run check && sh tools/heavy.sh npm run build` (fails until the
+   real AdMob ids are in `src/adIds.ts`). Then
+   `grep -c 3940256099942544 dist/assets/index-*.js` prints 0 and
+   `dist/ads-ids.json` says `"test": false`.
+3. `npx cap sync ios` (main checkout only). It must print the
+   `[ads] Info.plist GADApplicationIdentifier ... (release ids)` line and
+   end with "Sync finished". In a worktree with a symlinked `node_modules`, cap sync writes
    a machine path into `Podfile` and `Podfile.lock`; never commit those. If
    pod install says it cannot find a pod version (the Filesystem plugin pulls
    `IONFilesystemLib` from the CocoaPods CDN), run
@@ -187,15 +223,17 @@ current, the screenshots made.
 1. App Information, es-MX then en-US: Name, Subtitle, Privacy Policy URL.
    Category Games > Racing, secondary Games > Arcade. Content Rights: no
    third-party content. Save.
-2. Age Rating > Edit: Cartoon or Fantasy Violence = Infrequent/Mild; every
-   other answer None or No (no web access, no user content, no chat, no ads,
-   no gambling, no contests, no loot boxes). The "BANCA DE LOTERÍA" sign is
+2. Age Rating > Edit: Cartoon or Fantasy Violence = Infrequent/Mild;
+   Advertising = Yes (from 1.0); In-App Purchases = Yes; every other answer
+   None or No (no web access, no user content, no chat, no gambling, no
+   contests, no loot boxes). The "BANCA DE LOTERÍA" sign is
    scenery with no betting, so Gambling and Simulated Gambling stay No. Save.
    The old estimate was 9+; write the rating the questionnaire gives into
    this file.
 3. Pricing and Availability: Free, all countries and regions. Save.
-4. App Privacy: Get Started > "No, we do not collect data from this app" >
-   Save, then Publish. The answer stays a draft until Publish.
+4. App Privacy: answer for the ad SDK's data (see "Assets and values"),
+   then Publish. The answer stays a draft until Publish. Attach the Remove
+   Ads in-app purchase to the version (In-App Purchases section).
 5. Business > Digital Services Act: declare trader or non-trader status.
    Without it the app is not offered in EU storefronts. A trader's address,
    phone and email show on the EU product page.
@@ -214,9 +252,11 @@ current, the screenshots made.
 ### App Review note (paste in English)
 
 ```
-El Corre Corre is an offline arcade game. There is no account, no login, no server, no ads and no purchases. Tap the road on the title screen (it reads TOCA PA’ EMPEZAR in Spanish) to start a run.
+El Corre Corre is an arcade game that plays fully offline. There is no account, no login and no server of our own. Tap the road on the title screen (it reads TOCA PA’ EMPEZAR in Spanish) to start a run. About a second after the title appears, Google's consent message (where required) and the App Tracking Transparency prompt show once.
+Ads: a small banner appears only on the pause screen and on the missions list. After a run that collected plantains, the game-over card offers an optional rewarded video (the ×2 button marked "anuncio", meaning ad) that doubles the plantains of that run. It plays only when tapped.
+Remove Ads ($1.99, non-consumable) removes the banners. Open it from the "AD" button under the sound button on the title screen, or from "Quitar anuncios" on the pause screen. Restore Purchases is in the same sheet.
 Controls: drag anywhere to steer. The two pedals at the bottom left are GAS (faster, points x1.5) and BRAKE (slower, points x0.5; it overheats if held for about 2 seconds). Swipe up and hold for a wheelie. Riding in the oncoming lanes doubles points.
-Missions (Los Mandaos) are in-game goals in sets of three, plus one daily goal. Paint jobs are bought only with plantains collected in runs or earned from missions. There is no real money anywhere.
+Missions (Los Mandaos) are in-game goals in sets of three, plus one daily goal. Paint jobs are bought only with plantains collected in runs, earned from missions or doubled by the optional video. Plantains cannot be bought with money.
 SHARE on the game-over card opens the iOS share sheet with an image of the run. The game sends nothing by itself.
 Spanish is the default. Tap EN at the top right of the title screen for English.
 The privacy policy link is on the pause screen: start a run, tap the pause button at the top left, then Privacy.
