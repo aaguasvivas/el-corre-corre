@@ -1,6 +1,10 @@
 PODS:
   - Capacitor (8.5.3):
     - CapacitorCordova
+  - CapacitorCommunityAdmob (8.2.1):
+    - Capacitor
+    - Google-Mobile-Ads-SDK (= 13.11.0)
+    - GoogleUserMessagingPlatform (~> 3.1)
   - CapacitorCordova (8.5.3)
   - CapacitorFilesystem (8.1.5):
     - Capacitor
@@ -11,23 +15,34 @@ PODS:
     - Capacitor
   - CapacitorShare (8.0.3):
     - Capacitor
+  - CapgoNativePurchases (8.9.6):
+    - Capacitor
+  - Google-Mobile-Ads-SDK (13.11.0):
+    - GoogleUserMessagingPlatform (>= 1.1)
+  - GoogleUserMessagingPlatform (3.1.0)
   - IONFilesystemLib (2.0.1)
 
 DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
+  - "CapacitorCommunityAdmob (from `../../node_modules/@capacitor-community/admob`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorFilesystem (from `../../node_modules/@capacitor/filesystem`)"
   - "CapacitorHaptics (from `../../node_modules/@capacitor/haptics`)"
   - "CapacitorPreferences (from `../../node_modules/@capacitor/preferences`)"
   - "CapacitorShare (from `../../node_modules/@capacitor/share`)"
+  - "CapgoNativePurchases (from `../../node_modules/@capgo/native-purchases`)"
 
 SPEC REPOS:
   trunk:
+    - Google-Mobile-Ads-SDK
+    - GoogleUserMessagingPlatform
     - IONFilesystemLib
 
 EXTERNAL SOURCES:
   Capacitor:
     :path: "../../node_modules/@capacitor/ios"
+  CapacitorCommunityAdmob:
+    :path: "../../node_modules/@capacitor-community/admob"
   CapacitorCordova:
     :path: "../../node_modules/@capacitor/ios"
   CapacitorFilesystem:
@@ -38,16 +53,22 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/preferences"
   CapacitorShare:
     :path: "../../node_modules/@capacitor/share"
+  CapgoNativePurchases:
+    :path: "../../node_modules/@capgo/native-purchases"
 
 SPEC CHECKSUMS:
   Capacitor: 2f67eaeb8ed79909cd35b5e7439a5c2a9ca58e0f
+  CapacitorCommunityAdmob: 9171f46bded6d5106629941fbbfb722929047f20
   CapacitorCordova: 0b7326439c7a09fc5d20eced5e0dab986327a493
   CapacitorFilesystem: e3bc7123acb1554df1b7b099fa5847064b9e1bd4
   CapacitorHaptics: 296f771ecd89c7a1bd92a7b6826a7d268e2e70f5
   CapacitorPreferences: cca2021f386efb75947c850334447d9ff22b14f1
   CapacitorShare: 5b5e53347556bee89ae6163ed20b5b3c25fe75f1
+  CapgoNativePurchases: d7a08ed3e94ba4408bb64b70fbb00adeb2266386
+  Google-Mobile-Ads-SDK: 09d0868abe43b9f851b7b340a245679f0eafc96c
+  GoogleUserMessagingPlatform: befe603da6501006420c206222acd449bba45a9c
   IONFilesystemLib: 306469e4c563f61de82d7bca2bbfed9e64d1b2d2
 
-PODFILE CHECKSUM: ed0c8d25997845822cef21963aa064774f283b14
+PODFILE CHECKSUM: db41ad9a1bb043692e5cb8b23e3894a3ec3fd8cf
 
 COCOAPODS: 1.17.0

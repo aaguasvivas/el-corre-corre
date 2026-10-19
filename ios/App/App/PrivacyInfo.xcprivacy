@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- The app's privacy manifest. The game collects nothing and tracks nobody.
-     Two plugins use APIs Apple requires a reason for, and neither ships its
-     own manifest (Capacitor 6), so the app declares them:
+<!-- The app's privacy manifest, for the game's own code and the Capacitor
+     plugins without a manifest of their own. The game's code collects
+     nothing and tracks nobody. The ads (Google Mobile Ads and its consent
+     SDK, from release 1.0) ship their own privacy manifests, which declare
+     what they collect; App Store Connect's App Privacy answers must cover
+     them (docs/audit/ADS-PLAN.md, owner step 4). The purchase plugin
+     (StoreKit) and the AdMob plugin use no required-reason API. Two
+     plugins use APIs Apple requires a reason for, and the app declares them:
      - @capacitor/preferences keeps the save backup in UserDefaults, read
        and written only by this app (CA92.1).
      - @capacitor/filesystem can read file timestamps; the game only writes

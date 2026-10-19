@@ -1,0 +1,44 @@
+{
+  "identifier" : "4E1B7C2A",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "1.99",
+      "familyShareable" : false,
+      "internalID" : "6754130001",
+      "localizations" : [
+        {
+          "description" : "Quita los banners de la pausa y de Los Mandaos.",
+          "displayName" : "Quitar anuncios",
+          "locale" : "es_MX"
+        },
+        {
+          "description" : "Removes the banners on the pause screen and the missions list.",
+          "displayName" : "Remove Ads",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "elcorrecorre.remove_ads",
+      "referenceName" : "Remove Ads",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_developerTeamID" : "JQ39X3L553",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}
