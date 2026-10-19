@@ -1,8 +1,10 @@
 # El Corre Corre: release runbook
 
 The path from this repo to TestFlight and the App Store. The project is raw
-Capacitor 6 (no Expo or EAS): builds go through xcodebuild, uploads through
-the Xcode Organizer. Run every command here from the main checkout,
+Capacitor 8 (no Expo or EAS) on CocoaPods: builds go through xcodebuild,
+uploads through the Xcode Organizer. Capacitor 8 needs Node 22 (nvm; put
+`~/.nvm/versions/node/v22.23.1/bin` first on PATH) and Xcode 26 or later.
+Run every command here from the main checkout,
 `~/Desktop/personal/el-corre-corre`, never from a worktree.
 
 ## Status (2026-09-30)
@@ -90,7 +92,10 @@ are done in wave 4; 5 and 6 are still open.
 2. `npm run check && sh tools/heavy.sh npm run build`
 3. `npx cap sync ios` (main checkout only). It must end with "Sync
    finished". In a worktree with a symlinked `node_modules`, cap sync writes
-   a machine path into `Podfile` and `Podfile.lock`; never commit those.
+   a machine path into `Podfile` and `Podfile.lock`; never commit those. If
+   pod install says it cannot find a pod version (the Filesystem plugin pulls
+   `IONFilesystemLib` from the CocoaPods CDN), run
+   `pod install --repo-update` in `ios/App` once, then sync again.
 4. Archive:
    ```bash
    cd ~/Desktop/personal/el-corre-corre/ios/App
@@ -103,7 +108,7 @@ are done in wave 4; 5 and 6 are still open.
    A=build-archive/App10.xcarchive/Products/Applications/App.app
    /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' $A/Info.plist   # 10
    /usr/libexec/PlistBuddy -c 'Print :NSPhotoLibraryAddUsageDescription' $A/Info.plist
-   ls $A/PrivacyInfo.xcprivacy $A/Frameworks   # 6 frameworks, CapacitorShare among them
+   ls $A/PrivacyInfo.xcprivacy $A/Frameworks   # 7 frameworks since Capacitor 8: CapacitorShare and IONFilesystemLib among them
    diff -rq ../../dist $A/public   # only cordova.js and cordova_plugins.js differ
    ```
 6. Upload: `open build-archive/App10.xcarchive` > Distribute App > App Store

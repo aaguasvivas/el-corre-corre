@@ -115,11 +115,14 @@ site page in Safari). Still open: publishing the privacy page.
 ## 3. Architecture map
 
 Stack: Vite 6 + TypeScript strict (TS 7 npm package) + three.js r185. Runtime
-dependencies beyond three.js: the bundled Lilita One font and the Capacitor 6
-plugins (haptics, preferences, share, filesystem). Node 18 on this machine, so
-do not bump Vite to 7. `npm run dev` (port 5173), `npm run build`
-(tsc --noEmit + vite build), `npm run preview` (port 4173), `npm test`
-(vitest), `npm run check` (tsc + vitest).
+dependencies beyond three.js: the bundled Lilita One font and the Capacitor 8
+plugins (haptics, preferences, share, filesystem). Capacitor 8 needs Node 22
+(`.nvmrc` and `engines` say so): it is installed through nvm, so put
+`~/.nvm/versions/node/v22.23.1/bin` first on PATH for every node, npm and npx
+command. Capacitor 8 also needs Xcode 26 or later (Xcode 27.1 here), iOS 15.0
+stays the floor, and the pods stay on CocoaPods. `npm run dev` (port 5173),
+`npm run build` (tsc --noEmit + vite build), `npm run preview` (port 4173),
+`npm test` (vitest), `npm run check` (tsc + vitest).
 
 | File | Owns |
 |---|---|
@@ -141,7 +144,8 @@ do not bump Vite to 7. `npm run dev` (port 5173), `npm run build`
 | `src/tour.ts` | Los Tramos as pure math (run-relative) |
 | `src/flag.ts` | La bandera dominicana with el escudo, drawn once |
 | `src/leaderboard.ts` | The Game Center hook (`submitScore`), a no-op until the plugin lands |
-| `ios/App/App/GameViewController.swift` | Defers the bottom screen edge, auto-hides the home indicator |
+| `ios/App/App/GameViewController.swift` | Defers the bottom screen edge. The home indicator auto-hides through Capacitor 8's SystemBars plugin (`plugins.SystemBars.hidden` in `capacitor.config.json`), which owns `prefersHomeIndicatorAutoHidden` and also keeps the status bar hidden |
+| `ios/App/App/SceneDelegate.swift` | The UIScene life cycle that Xcode 27 builds require (Capacitor 8.5). The Info.plist scene manifest loads `Main.storyboard`, whose root is GameViewController; the delegate only forwards events to Capacitor's `SceneDelegateProxy`. The AppDelegate no longer gets foreground, background or open-URL events |
 | `ios/App/App/PrivacyInfo.xcprivacy` | Required-reason APIs: UserDefaults CA92.1, FileTimestamp C617.1; no data collected, no tracking |
 
 ### Invariants you MUST internalize before editing
@@ -501,10 +505,10 @@ ending in the standard co-author line.
 The perf pass, the soak, the runtime QA checklist, the Game Center hook
 (`src/leaderboard.ts`) and the app icon were done in Phase 6. The Capacitor
 wrap followed: bundle id `dev.elcorrecorre.app` (chosen by Adelson on
-2026-07-29; never change it without him), Capacitor 6, haptics through the
-plugin, portrait only, status bar hidden, builds 1 to 9 uploaded to App
-Store Connect. The release runbook, build ledger and console steps live in
-RELEASE.md. `node tools/make-icons.mjs` regenerates `public/icon-1024.png`
+2026-07-29; never change it without him), Capacitor 6 (8 since 2026-10-18),
+haptics through the plugin, portrait only, status bar hidden, builds 1 to 9
+uploaded to App Store Connect. The release runbook, build ledger and console
+steps live in RELEASE.md. `node tools/make-icons.mjs` regenerates `public/icon-1024.png`
 and `public/icon-180.png`; the icons are RGBA with every pixel opaque, which
 nine uploads have accepted.
 

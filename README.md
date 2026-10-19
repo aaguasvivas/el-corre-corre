@@ -6,7 +6,7 @@ camiones de plátanos and motoconchos, ride en contra vía for double points,
 and chase your own récord across the country: El Malecón, La Zona Colonial,
 El Campo, and around again.
 
-Vite + TypeScript (strict) + three.js, wrapped for iOS with Capacitor 6. No
+Vite + TypeScript (strict) + three.js, wrapped for iOS with Capacitor 8. No
 other runtime framework, no physics engine, no network: everything ships in
 the bundle and the app runs offline.
 
