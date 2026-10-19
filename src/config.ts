@@ -607,6 +607,37 @@ export const CONFIG = {
   stampLandSec: 0.12, // FEEL: from a stamp's slam to its impact (the dust ring, the thump, the tap)
   shareFailedMs: 2200, // FEEL: how long COMPARTIR reads ¡NO SE PUDO! after a share nothing could take
 
+  // Ads (docs/audit/ADS-PLAN.md). Every wait on the ad SDK or StoreKit is
+  // bounded except the player's own answer to a prompt or a purchase sheet,
+  // and the game never waits on any of it.
+  // DECISION: the consent and tracking prompts open on the title only,
+  // after the title has been up this long, on every launch (a fresh install
+  // and later launches alike). Never during a run, the countdown or a crash.
+  adsStartDelaySec: 1, // FEEL: title time before the consent and tracking prompts may open
+  adsForegroundWaitMs: 8000, // the most the flow waits for the app to be in front
+  adsConsentTimeoutMs: 15000, // Google's consent check (UMP); past it the flow fails open
+  // A consent form that never loads must not hold the tracking prompt
+  // forever; a real player answers well inside this.
+  adsConsentFormMaxMs: 300000,
+  adsStepTimeoutMs: 5000, // reading the tracking status
+  adsInitTimeoutMs: 15000, // starting the ad SDK
+  adsLoadTimeoutMs: 30000, // one ad load; past it the slot counts as failed
+  // AdMob drops a rewarded ad an hour after it loaded; one held this long is
+  // replaced at the next run start.
+  rewardedMaxAgeSec: 3300,
+  // FEEL: "Dobla tus plátanos" on the game-over card takes taps only after
+  // the card has been up this long. Before that a tap on it is a tap on the
+  // card, so OTRA VEZ, so a player hammering the screen to restart never
+  // opens a video by accident.
+  rewardArmSec: 0.9,
+  rewardShowGuardMs: 8000, // a video that never comes up releases the game after this
+  rewardCountUpMs: 700, // FEEL: the card's plátanos counting up to the doubled total
+  // The pause and Los Mandaos banner: failed loads retry after these waits
+  // (seconds), then the slot stays empty for the session.
+  bannerRetrySec: [30, 90, 240],
+  bannerGapPx: 24, // clear space between the banner and the nearest control
+  storeTimeoutMs: 10000, // a StoreKit read (price, what you own)
+
   // Los Mandaos: three small goals at a time; finish all three and you level
   // up. Positive goals only. Every "Run" kind must happen inside one run;
   // platanosTotal is the one that keeps counting across runs.
