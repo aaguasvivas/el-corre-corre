@@ -2,7 +2,8 @@
 // can be driven and photographed in a browser. Only a dev server or a probe
 // build opened with ?ads=sim builds it (main.ts); the release bundle has no
 // trace of it. The "banner" is a plain white box where the native one would
-// sit, and its size event is what the real plugin sends.
+// sit (on the safe area's bottom edge, like the real one), and its size
+// event is what the real plugin sends.
 //
 // window.__eccSim exposes the knobs (tools/shots.mjs, tools/screens-probe.mjs):
 //   rewarded: 'reward' | 'dismiss' | 'fail'   what the next video does
@@ -59,7 +60,7 @@ export function simPortsFromUrl(productId: string): { ads: AdsPort; store: Store
     const el = document.createElement('div');
     el.id = 'sim-banner';
     el.textContent = `Test Ad · ${w}×${h}`;
-    el.style.cssText = `position:fixed;left:50%;transform:translateX(-50%);bottom:env(safe-area-inset-bottom,0px);width:${w}px;height:${h}px;z-index:100;display:flex;align-items:center;justify-content:center;background:#fff;color:#5f6368;border-top:1px solid #dadce0;font:600 13px system-ui,sans-serif;pointer-events:auto`;
+    el.style.cssText = `position:fixed;left:50%;transform:translateX(-50%);bottom:var(--sab,0px);width:${w}px;height:${h}px;z-index:100;display:flex;align-items:center;justify-content:center;background:#fff;color:#5f6368;border-top:1px solid #dadce0;font:600 13px system-ui,sans-serif;pointer-events:auto`;
     document.body.appendChild(el);
     return el;
   };

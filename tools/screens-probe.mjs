@@ -9,7 +9,7 @@
 //   sh tools/heavy.sh node tools/screens-probe.mjs layout share # a subset
 //   SHARE_OUT=docs/shots/e1 sh tools/heavy.sh node tools/screens-probe.mjs share
 //
-// Probes: layout, flow, buy, card, motion, share. Exit code 1 on any failure.
+// Probes: layout, flow, buy, card, ads, motion, share. Exit code 1 on any failure.
 
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
@@ -379,6 +379,245 @@ const PROBES = {
     await tapEl(page, '#btn-again');
     check(checks, 'a real tap on OTRA VEZ restarts', (await page.evaluate(() => window.__ecc.state())) === 'playing');
     return { checks };
+  },
+
+  // Ads and Remove Ads, with the ?ads=sim stand-ins (src/simAds.ts): the
+  // rewarded offer on the card never moves OTRA VEZ or MENÚ and keeps the
+  // card above the tumble; a tap before it arms is a tap on the card; it
+  // pays once per run; the banner keeps CONFIG.bannerGapPx (24) clear of
+  // every control on PAUSA and the mandao sheet and leaves with the screen;
+  // Remove Ads takes it down at once.
+  ads: async (page, url) => {
+    const checks = [];
+    const info = [];
+    const simUrl = `${url}?ads=sim`;
+    const GAP = 24;
+    // Every visible button inside root ends at least GAP above the banner.
+    const gapCheck = (root) =>
+      page.evaluate((sel) => {
+        const b = document.getElementById('sim-banner');
+        if (!b || b.style.display === 'none') return { banner: false };
+        const top = b.getBoundingClientRect().top;
+        let worst = Infinity;
+        let who = '';
+        for (const el of document.querySelectorAll(`${sel} button`)) {
+          const r = el.getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          if (r.width === 0 || cs.visibility === 'hidden' || cs.display === 'none') continue;
+          if (top - r.bottom < worst) {
+            worst = top - r.bottom;
+            who = el.id || el.className;
+          }
+        }
+        return { banner: true, gap: Math.round(worst), who, top: Math.round(top) };
+      }, root);
+    const adsReady = async () => {
+      await page.evaluate(() => window.__ecc.tick(1.3));
+      await page.waitForFunction(() => window.__ecc.ads().ready, { timeout: 10000, polling: 50 });
+    };
+    const offerCard = async (load) => {
+      await page.evaluate((l) => {
+        window.__eccSim.rewardedLoad = l;
+      }, load);
+      await page.evaluate(async () => {
+        const e = window.__ecc;
+        e.start();
+        e.tick(1);
+        e.clearTraffic();
+        const x = e.x();
+        for (let i = 0; i < 8; i++) e.spawnPickup('platano', x, 8 + i * 2.2);
+        e.tick(3);
+      });
+      await sleep(120); // the stand-in video loads on a real timer
+      await toGameOver(page, 150);
+    };
+    const rects = () =>
+      page.evaluate(() => {
+        const r = (id) => {
+          const b = document.getElementById(id).getBoundingClientRect();
+          return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)].join(',');
+        };
+        const card = document.querySelector('.go-card').getBoundingClientRect();
+        const rw = document.getElementById('btn-reward').getBoundingClientRect();
+        return { again: r('btn-again'), menu: r('btn-menu'), share: r('btn-share'), cardBottom: card.bottom / innerHeight, rw: { w: rw.width, h: rw.height, bottom: rw.bottom }, againTop: document.getElementById('btn-again').getBoundingClientRect().top };
+      });
+
+    const sizes = [
+      ['se', SE, null],
+      ['6.9in', { width: 440, height: 956, deviceScaleFactor: 1, isMobile: true, hasTouch: true }, { sat: 62, sab: 34 }],
+    ];
+    for (const [tag, vp, insets] of sizes) {
+      await page.setViewport(vp);
+      for (const lang of ['es', 'en']) {
+        const T = `${tag} ${lang}`;
+        await page.goto(simUrl, { waitUntil: 'load' });
+        await boot(page, simUrl, { 'ecc.v1.lang': lang, 'ecc.v1.platanosLifetime': '1240', 'ecc.v1.record.motor': '1000000' });
+        if (insets) {
+          await page.evaluate((i) => {
+            for (const [k, v] of Object.entries(i)) document.documentElement.style.setProperty(`--${k}`, `${v}px`);
+          }, insets);
+        }
+        await adsReady();
+
+        // The title with its Remove Ads chip.
+        const title = await page.evaluate(() => window.__audit('#title', { allowOverlap: '.logo-line', bands: { paints: '#t-paints' } }));
+        auditChecks(checks, `${T} title with the Remove Ads chip`, title);
+        const chip = await page.evaluate(() => {
+          const r = document.getElementById('noads-chip').getBoundingClientRect();
+          return { w: r.width, h: r.height, shown: r.width > 0 };
+        });
+        check(checks, `${T} title: the Remove Ads chip shows, 44 pt`, chip.shown && chip.w >= 44 && chip.h >= 44, JSON.stringify(chip));
+
+        // The mandao sheet: the banner comes, the sheet keeps clear of it.
+        await tapEl(page, '#mandao-chip');
+        await page.waitForFunction(() => window.__ecc.ads().banner.height > 0, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(250);
+        const sheetGap = await gapCheck('#mandao-sheet');
+        check(checks, `${T} mandao sheet: a banner, and every control ${GAP}+ pt above it`, sheetGap.banner && sheetGap.gap >= GAP, JSON.stringify(sheetGap));
+        const cardGap = await page.evaluate(() => {
+          const b = document.getElementById('sim-banner').getBoundingClientRect().top;
+          return Math.round(b - document.querySelector('.md-card').getBoundingClientRect().bottom);
+        });
+        check(checks, `${T} mandao sheet: the card ends ${GAP}+ pt above the banner`, cardGap >= GAP, `${cardGap} pt`);
+        auditChecks(checks, `${T} mandao sheet with a banner`, await page.evaluate(() => window.__audit('#mandao-sheet')));
+        await tapEl(page, '#md-close');
+        await sleep(100);
+        check(checks, `${T} closing the sheet takes the banner away`, (await page.evaluate(() => window.__ecc.ads().banner.height)) === 0 && (await page.evaluate(() => document.getElementById('sim-banner').style.display)) === 'none');
+
+        // PAUSA with the banner.
+        await page.evaluate(() => {
+          window.__ecc.start();
+          window.__ecc.tick(2);
+          window.__ecc.pause();
+        });
+        await page.waitForFunction(() => window.__ecc.ads().banner.height > 0, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(300);
+        const pauseGap = await gapCheck('#pause');
+        check(checks, `${T} pause: a banner, and every control ${GAP}+ pt above it`, pauseGap.banner && pauseGap.gap >= GAP, JSON.stringify(pauseGap));
+        const priv = await page.evaluate(() => {
+          const r = document.getElementById('btn-privacy').getBoundingClientRect();
+          const b = document.getElementById('sim-banner').getBoundingClientRect().top;
+          return { h: r.height, bottom: Math.round(r.bottom), banner: Math.round(b) };
+        });
+        check(checks, `${T} pause: the privacy link stays visible above the banner`, priv.h >= 44 && priv.bottom <= priv.banner, JSON.stringify(priv));
+        auditChecks(checks, `${T} pause with a banner`, await page.evaluate(() => window.__audit('#pause', { min: { 'btn-resume': 64, 'btn-pause-menu': 48 } })));
+        // The Remove Ads sheet over PAUSA: the banner steps aside.
+        await tapEl(page, '#btn-noads');
+        await page.waitForFunction(() => window.__ecc.store().priceState === 'ready', { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(200);
+        const st = await page.evaluate(() => ({ open: window.__ecc.store().open, banner: window.__ecc.ads().banner.height, buy: document.getElementById('st-buy').textContent }));
+        check(checks, `${T} Remove Ads sheet over PAUSA: open, priced, the banner hidden`, st.open && st.banner === 0 && /1\.99/.test(st.buy), JSON.stringify(st));
+        auditChecks(checks, `${T} Remove Ads sheet`, await page.evaluate(() => window.__audit('#store-sheet')));
+        await tapEl(page, '#st-close');
+        await sleep(150);
+        await page.evaluate(() => window.__ecc.resume());
+        await page.evaluate(() => window.__ecc.tick(0.1));
+        const afterResume = await page.evaluate(() => ({ h: window.__ecc.ads().banner.height, d: document.getElementById('sim-banner').style.display, state: window.__ecc.state() }));
+        check(checks, `${T} SEGUIR: the banner leaves with the pause screen (countdown and play are clear)`, afterResume.h === 0 && afterResume.d === 'none', JSON.stringify(afterResume));
+        await page.evaluate(() => window.__ecc.tick(2));
+
+        // The card with the offer, then the same card with the button taken
+        // out: OTRA VEZ, MENÚ and COMPARTIR hold still. Measured after the
+        // card's drop and the buttons' rise have finished.
+        await page.evaluate(() => window.__ecc.menu());
+        await offerCard('ok');
+        await page.waitForFunction(() => window.__ecc.ads().offer, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(600);
+        const after = await rects();
+        await page.evaluate(() => {
+          document.getElementById('btn-reward').classList.add('hidden');
+          document.querySelector('.go-plat').classList.remove('offer');
+        });
+        const before = await rects();
+        await page.evaluate(() => {
+          document.getElementById('btn-reward').classList.remove('hidden');
+          document.querySelector('.go-plat').classList.add('offer');
+        });
+        check(checks, `${T} card: the offer moves neither OTRA VEZ nor MENÚ nor COMPARTIR`, before.again === after.again && before.menu === after.menu && before.share === after.share, `${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
+        check(checks, `${T} card: with the offer it still ends above the tumble (55%)`, after.cardBottom <= 0.55, `card bottom ${after.cardBottom.toFixed(3)}`);
+        check(checks, `${T} card: the offer button is 44 pt, far above OTRA VEZ`, after.rw.w >= 44 && after.rw.h >= 44 && after.againTop - after.rw.bottom >= 120, JSON.stringify(after.rw));
+        await sleep(1000); // armed: the audit sees the button
+        auditChecks(checks, `${T} card with the offer`, await page.evaluate(() => window.__audit('#gameover', { min: { 'btn-again': 64, 'btn-menu': 48, 'btn-share': 48 }, allowOverlap: '.md-stamp, .go-stamp' })));
+        // Before it arms, a tap on the button is a tap on the card: OTRA VEZ.
+        await offerCard('ok');
+        await page.waitForFunction(() => window.__ecc.ads().offer, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(150);
+        const early = await page.evaluate(() => {
+          const r = document.getElementById('btn-reward').getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2, armed: document.getElementById('btn-reward').classList.contains('armed') };
+        });
+        await page.touchscreen.tap(early.x, early.y);
+        const earlyTap = await page.evaluate(() => ({ state: window.__ecc.state(), hold: window.__ecc.ads().hold }));
+        check(checks, `${T} card: a tap on the offer before it arms restarts instead (no video)`, !early.armed && earlyTap.state === 'playing' && !earlyTap.hold, JSON.stringify({ early, earlyTap }));
+
+        // Armed: the video pays the run's plátanos once.
+        await offerCard('ok');
+        await page.waitForFunction(() => document.getElementById('btn-reward').classList.contains('armed'), { timeout: 5000, polling: 50 }).catch(() => {});
+        const bank0 = await page.evaluate(() => ({ bank: window.__ecc.bank(), earned: window.__ecc.lastRun().platanosEarned }));
+        await tapEl(page, '#btn-reward');
+        await page.waitForFunction(() => window.__ecc.ads().paid && !window.__ecc.ads().hold, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(900);
+        const paid = await page.evaluate(() => ({ bank: window.__ecc.bank(), offer: window.__ecc.ads().offer, text: document.getElementById('gp-earned').textContent, done: document.getElementById('btn-reward').classList.contains('done'), state: window.__ecc.state() }));
+        check(checks, `${T} the video doubles the run's plátanos into the bank`, paid.bank === bank0.bank + bank0.earned && bank0.earned >= 1, `${JSON.stringify(bank0)} -> ${paid.bank}`);
+        check(checks, `${T} the card counts up and the offer turns into the paid check`, paid.done && paid.text.includes(String(2 * bank0.earned)) && paid.state === 'gameover', JSON.stringify(paid));
+        await tapEl(page, '#btn-reward');
+        await sleep(400);
+        check(checks, `${T} once per run: a second tap pays nothing`, (await page.evaluate(() => window.__ecc.bank())) === paid.bank && !paid.offer);
+        // Closed early: nothing paid, the offer comes back with the next video.
+        await page.evaluate(() => {
+          window.__eccSim.rewarded = 'dismiss';
+        });
+        await offerCard('ok');
+        await page.waitForFunction(() => document.getElementById('btn-reward').classList.contains('armed'), { timeout: 5000, polling: 50 }).catch(() => {});
+        const bank1 = await page.evaluate(() => window.__ecc.bank());
+        await tapEl(page, '#btn-reward');
+        await page.waitForFunction(() => !window.__ecc.ads().hold, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(300);
+        const dismissed = await page.evaluate(() => ({ bank: window.__ecc.bank(), offer: window.__ecc.ads().offer, paid: window.__ecc.ads().paid }));
+        check(checks, `${T} a video closed early pays nothing and the offer comes back`, dismissed.bank === bank1 && !dismissed.paid && dismissed.offer, JSON.stringify(dismissed));
+        // Offline: the next video cannot load, so the card offers nothing.
+        await page.evaluate(() => {
+          window.__eccSim.rewardedLoad = 'fail';
+        });
+        await tapEl(page, '#btn-reward');
+        await page.waitForFunction(() => !window.__ecc.ads().hold, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(300);
+        const offline = await page.evaluate(() => ({ offer: window.__ecc.ads().offer, rewarded: window.__ecc.ads().rewarded, shown: getComputedStyle(document.getElementById('btn-reward')).display }));
+        check(checks, `${T} card: no offer without a loaded video (offline)`, !offline.offer && offline.rewarded === 'idle' && offline.shown === 'none', JSON.stringify(offline));
+        await page.evaluate(() => {
+          window.__eccSim.rewardedLoad = 'ok';
+        });
+        await page.evaluate(() => {
+          window.__eccSim.rewarded = 'reward';
+        });
+
+        // Remove Ads bought on PAUSA: the banner goes at once, the entries hide.
+        await page.evaluate(() => {
+          window.__ecc.start();
+          window.__ecc.tick(1);
+          window.__ecc.pause();
+        });
+        await page.waitForFunction(() => window.__ecc.ads().banner.height > 0, { timeout: 5000, polling: 50 }).catch(() => {});
+        await tapEl(page, '#btn-noads');
+        await page.waitForFunction(() => window.__ecc.store().priceState === 'ready', { timeout: 5000, polling: 50 }).catch(() => {});
+        await tapEl(page, '#st-buy');
+        await page.waitForFunction(() => window.__ecc.store().adFree, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(150);
+        await tapEl(page, '#st-close');
+        await sleep(150);
+        const free = await page.evaluate(() => ({
+          adFree: window.__ecc.store().adFree,
+          saved: localStorage.getItem('ecc.v1.adFree'),
+          banner: window.__ecc.ads().banner,
+          box: !!document.getElementById('sim-banner'),
+          link: getComputedStyle(document.getElementById('btn-noads')).display,
+        }));
+        check(checks, `${T} Remove Ads: bought, saved, the banner removed for good, the entries hidden`, free.adFree && free.saved === '1' && free.banner.height === 0 && free.banner.state === 'none' && !free.box && free.link === 'none', JSON.stringify(free));
+        info.push(`${T}: card with offer ${JSON.stringify(after)}; pause gap ${JSON.stringify(pauseGap)}; sheet gap ${JSON.stringify(sheetGap)}`);
+      }
+    }
+    await page.setViewport(SE);
+    return { checks, info };
   },
 
   // Reduced motion: the card shows its final state at once.

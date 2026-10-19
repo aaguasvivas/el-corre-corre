@@ -1413,3 +1413,268 @@ body {
   }
 }
 
+
+/* ---------- Ads and Remove Ads (docs/audit/ADS-PLAN.md) ---------- */
+
+/* "Dobla tus plátanos": a compact gold button at the end of the card's
+   plátanos row, up in the card and far from OTRA VEZ. It stays invisible
+   and lets every tap through to the card (OTRA VEZ) until it is armed
+   (CONFIG.rewardArmSec), then fades in. */
+.go-plat.offer {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+}
+
+.go-plat.all.offer {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.btn-reward {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  min-height: 44px;
+  padding: 3px 10px 4px;
+  border: 3px solid var(--blue);
+  border-radius: 12px;
+  background: var(--gold);
+  color: var(--blue);
+  font-family: inherit;
+  line-height: 1;
+  box-shadow: 0 3px 0 rgba(0, 45, 98, 0.55);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-mid) var(--ease-out), transform var(--t-fast) var(--ease-out);
+}
+
+.btn-reward.armed {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.btn-reward:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 45, 98, 0.55);
+}
+
+.btn-reward.busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* paid: a quiet green check that takes no taps */
+.btn-reward.done {
+  background: var(--card);
+  border-color: var(--ok);
+  color: var(--ok);
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.rw-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 19px;
+}
+
+.rw-icon {
+  display: inline-flex;
+}
+
+.rw-tag {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* The title's Remove Ads chip: under the mute chip, an "AD" struck through */
+.chip-noads {
+  right: auto;
+  left: calc(var(--sal) + 12px);
+  top: calc(var(--sat) + 64px);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 9px;
+}
+
+.noads-ad {
+  position: relative;
+  display: inline-block;
+  padding: 2px 3px 1px;
+  border: 2px solid currentColor;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.5px;
+}
+
+.noads-ad::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: 50%;
+  height: 2.6px;
+  margin-top: -1.3px;
+  border-radius: 2px;
+  background: var(--red);
+  transform: rotate(-32deg);
+}
+
+@media (orientation: landscape) {
+  .chip-noads {
+    top: calc(var(--sat) + 12px);
+    left: calc(var(--sal) + 64px);
+  }
+}
+
+/* PAUSA's links: Remove Ads, the ad choices (when the consent rules ask
+   for them) and the privacy policy */
+.pause-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 4px;
+}
+
+/* A banner on screen: the pause screen and the mandao sheet keep its
+   height plus --ad-gap clear at the bottom, only while it is there. */
+#ui.ad-on #pause,
+#ui.ad-on .mandao-sheet {
+  padding-bottom: calc(var(--sab) + var(--ad-h) + var(--ad-gap));
+}
+
+/* The Remove Ads sheet */
+.store-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--sat) + 12px) calc(var(--sar) + 14px) calc(var(--sab) + 12px) calc(var(--sal) + 14px);
+  background: rgba(0, 20, 45, 0.62);
+  pointer-events: auto;
+  z-index: 6;
+}
+
+.st-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: min(100%, 360px);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 14px 16px 6px;
+  background: var(--card);
+  color: var(--ink);
+  border: 4px solid var(--blue);
+  border-radius: 20px;
+  box-shadow: var(--drop);
+  text-align: center;
+  animation: card-drop var(--t-mid) var(--ease-out) both;
+}
+
+.st-title {
+  padding: 0 40px;
+  font-size: clamp(24px, 4vh, 30px);
+  line-height: 1.1;
+  color: var(--red);
+}
+
+.store-sheet.owned .st-title {
+  color: var(--ok);
+}
+
+.st-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  font-size: 15px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.st-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.st-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 20px;
+}
+
+.st-mark .noads-ad {
+  color: var(--blue);
+}
+
+.st-buy {
+  font-size: clamp(22px, 3.6vh, 28px);
+}
+
+.st-buy[disabled],
+.st-restore[disabled] {
+  opacity: 0.55;
+}
+
+.st-msg {
+  min-height: 1.25em;
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--sea-deep);
+}
+
+.st-msg.say {
+  animation: pop 0.25s var(--ease-pop) both;
+}
+
+.st-link {
+  align-self: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font-family: inherit;
+  font-size: 15px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* build:adtest only: the bundle carries Google's test ids */
+.ad-test-tag {
+  position: absolute;
+  top: calc(var(--sat) + 2px);
+  left: 50%;
+  z-index: 20;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--red);
+  color: var(--white);
+  font-size: 11px;
+  letter-spacing: 1px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-reward,
+  .st-card,
+  .st-msg.say {
+    transition: none !important;
+    animation: none !important;
+  }
+}
