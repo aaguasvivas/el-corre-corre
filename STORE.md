@@ -1,7 +1,7 @@
 # App Store listing kit
 
 Everything App Store Connect asks for, drafted and ready to paste, for
-version 1.0 with build 10. No em dashes anywhere. Character counts are
+version 1.0 with build 11 (ads and the Remove Ads purchase). No em dashes anywhere. Character counts are
 recomputed for this text, counted as Unicode characters. The console steps that use this file are in
 [RELEASE.md](RELEASE.md).
 
@@ -11,8 +11,11 @@ recomputed for this text, counted as Unicode characters. The console steps that 
 - **Bundle id**: `dev.elcorrecorre.app`
 - **SKU**: `elcorrecorre-ios-v1`
 - **Primary category**: Games > Racing. Secondary: Games > Arcade.
-- **Price**: Free. No in-app purchases: pinturas cost plátanos earned in the
-  game, never money.
+- **Price**: Free, with ads. One in-app purchase: Quitar anuncios / Remove
+  Ads, $1.99, non-consumable (it removes the banners). Pinturas cost
+  plátanos earned in the game, never money.
+- **In-app purchase setup** (names, descriptions, review screenshot and
+  notes): RELEASE.md, "In-app purchase: Remove Ads".
 
 ## Subtitle (30 max, per locale)
 
@@ -21,10 +24,12 @@ recomputed for this text, counted as Unicode characters. The console steps that 
 
 ## Promotional text (170 max, editable without review)
 
-- ES: `Dale al pedal, métete en contra vía y cumple los mandaos del barrio. ¿Hasta dónde llega tu récord por el Malecón?` (113)
-- EN: `Hold the gas, ride against traffic, and finish missions for the barrio. How far down the Malecón can your record go?` (116)
+- ES: `Métete en contra vía, cumple los mandaos y rompe tu récord por el Malecón. Gratis con anuncios, nunca mientras corres; una compra quita los banners.` (148)
+- EN: `Ride against traffic, finish missions for the barrio, and break your record down the Malecón. Free with ads, never while you ride; one purchase removes the banners.` (164)
 
-## Description, ES (4000 max; this one is 1463)
+No price in the promo text, subtitle or screenshots (Guideline 2.3.7).
+
+## Description, ES (4000 max; this one is 1870)
 
 ```
 Tú en un motor, el Malecón de Santo Domingo al atardecer, y el corre corre de siempre: guaguas, carros públicos, camiones de plátanos y motoconchos por todos lados.
@@ -47,10 +52,13 @@ La Pasola, chiquita pero cumplidora. El Motor, el clásico del barrio. El Civic 
 
 Dembow de fondo, y cafecito, bendición e imán en la calle. Cuando chocas, OTRA VEZ te pone a correr de nuevo al instante.
 
-Sin internet, sin cuentas, sin compras. Toca y dale.
+ANUNCIOS Y COMPRAS
+El juego es gratis y tiene anuncios: un banner pequeño en la pausa y en Los Mandaos, nunca mientras corres. Al final de una corrida puedes ver un video, si quieres, pa’ doblar los plátanos de esa corrida. Quitar anuncios es una compra única dentro de la app que quita los banners; el video opcional se queda. Las pinturas se compran solo con plátanos del juego, nunca con dinero.
+
+Sin cuentas, y sin internet se juega completo. Toca y dale.
 ```
 
-## Description, EN (4000 max; this one is 1444)
+## Description, EN (4000 max; this one is 1821)
 
 ```
 You, a motorbike, the Malecón of Santo Domingo at golden hour, and the daily rush: guaguas, carros públicos, plantain trucks, and motoconchos everywhere.
@@ -73,7 +81,10 @@ La Pasola, small but mighty. El Motor, the neighborhood classic. And the Civic t
 
 Dembow in your ears, and cafecito, bendición and imán power-ups on the road. When you crash, AGAIN puts you back on the road right away.
 
-No internet, no accounts, no purchases. Tap and go.
+ADS AND PURCHASES
+The game is free with ads: a small banner on the pause screen and the missions list, never while you ride. After a run you can watch a video, if you want, to double that run’s plantains. Remove Ads is a one-time in-app purchase that removes the banners; the optional video stays. Paint jobs are bought only with plantains from the game, never with money.
+
+No accounts, and it plays in full offline. Tap and go.
 ```
 
 Every claim above matches the code at `eb676ef`: gas x1.5 and brake x0.5 on
@@ -82,7 +93,12 @@ about 2 s (`brakeHeatMaxSec`), contra vía x2, three mandaos per set, seven
 level names from Novato to Leyenda del Malecón, the barrio multiplier capped
 at x3 (`barrioMultMax`), the daily streak bonus, per-ride points and distance
 records, three tramos of 1000 m (`tramoLengthM`), four paints to buy per ride,
-and OTRA VEZ live 0.5 s after the crash.
+and OTRA VEZ live 0.5 s after the crash. The ads paragraph matches `ads-1.0`
+(2026-10-19): the banner is wanted only on PAUSA and the mandao sheet
+(`syncBanner` in `src/main.ts`), the video plays only on a tap and pays the
+run's plátanos once (`RewardedOffer` in `src/ads.ts`), Remove Ads takes the
+banner down and leaves the video (`Entitlements` in `src/purchases.ts`,
+`BannerSlot.setAdFree`), and pinturas cost plátanos only.
 
 ## Keywords (100 max, no spaces after commas)
 
@@ -91,26 +107,32 @@ and OTRA VEZ live 0.5 s after the crash.
 
 ## TestFlight "What to Test"
 
-The build 10 text (ES and EN) is in RELEASE.md > TestFlight.
+The build 11 text (ES and EN) is in RELEASE.md > TestFlight.
 
 ## Age rating
 
-Apple's current questionnaire asks about in-app controls, capabilities (web
-access, user content, messaging, advertising), mature themes, medical or
-wellness topics, sexuality or nudity, violence, and chance-based activities.
-Answers: Cartoon or Fantasy Violence = Infrequent/Mild (comedic crash
-tumbles with stars; people and animals are never hit). Everything else None
-or No. The "BANCA DE LOTERÍA" storefront is scenery with no betting, so
-Gambling and Simulated Gambling are No. The old estimate was 9+; RELEASE.md
-records the rating the questionnaire gives.
+Apple's current questionnaire (read 2026-10-19) asks about in-app controls,
+capabilities (web access, user content, social media, messaging,
+advertising), mature themes, medical or wellness topics, sexuality or
+nudity, violence, and chance-based activities. Answers: Advertising = Yes
+(from build 11; it does not raise the rating). Cartoon or Fantasy Violence
+= Infrequent (comedic crash tumbles with stars; people and animals are never
+hit). Social Media = No. Contests is an owner call (RELEASE.md, submission
+step 2). Everything else None or No. The "BANCA DE LOTERÍA" storefront is
+scenery with no betting, so Gambling and Simulated Gambling are No. The
+expected rating is 9+; RELEASE.md records the rating the questionnaire
+gives. The ads are capped at PG to fit it (Guideline 2.5.18).
 
 ## Privacy
 
-The game makes zero network requests and collects nothing. Privacy label:
-**Data Not Collected**. The build carries three privacy manifests (the app,
-Capacitor and Cordova), and none lists collected data or tracking. The app
-manifest declares UserDefaults (CA92.1, the save backup) and file timestamps
-(C617.1, the share card file).
+The game's own code collects nothing and calls no server. From build 11 the
+Google Mobile Ads SDK and Google's consent SDK (UMP) collect device data for
+the ads, so the label is no longer "Data Not Collected": Data Used to Track
+You: Identifiers. Data Linked to You: Location, Identifiers, Usage Data. Data
+Not Linked to You: Diagnostics. The exact answers, the method and the five
+privacy manifests of the built app are in RELEASE.md, "App Privacy answers".
+The app's own manifest declares UserDefaults (CA92.1, the save backup) and
+file timestamps (C617.1, the share card file), and no data or tracking.
 
 Pages live in `site/` (bilingual, game palette) and are published at:
 
@@ -119,8 +141,10 @@ Pages live in `site/` (bilingual, game palette) and are published at:
 
 The pages are live (GitHub Pages repo `el-corre-corre-site`). Changes to
 `site/` go live only after a push to that repo, with Adelson's go. The
-privacy page update for build 10 (pinturas, mandaos, the streak, and
-sharing) is in `site/privacy.html` and must be pushed before review.
+privacy page update for release 1.0 (AdMob, tracking, consent and how to
+change it, non-personalized ads, reporting an ad, the purchase; dated
+October 19, 2026) is in `site/privacy.html` and must be pushed before the
+App Privacy answers and before review.
 
 ## Screenshots
 
@@ -158,9 +182,13 @@ for f in docs/store/screenshots/*/*.png; do sips -g pixelWidth -g pixelHeight -g
 Every file must print 1320, 2868 and `hasAlpha: no`. Look at every image
 before upload. Headless captures have zero safe-area insets, so the HUD sits
 a little higher than on a real 6.9-inch phone; without a device frame that
-is acceptable.
+is acceptable. The scenes run without the ad stand-ins, so the title shot has
+no AD chip and the card has no ×2 button; no shot shows an ad or a price
+(Guideline 2.3.7). The review screenshot of the purchase is separate:
+`docs/store/iap-review/` (RELEASE.md, "In-app purchase: Remove Ads").
 
 ## Open decisions (Adelson)
 
-1. The in-app privacy link (RELEASE.md, "Open decisions", options A and B).
-2. The Digital Services Act trader or non-trader status for EU storefronts.
+1. The Digital Services Act trader or non-trader status for EU storefronts.
+2. The Contests answer in the age rating, and Family Sharing for Remove Ads
+   (RELEASE.md, "Open decisions").

@@ -386,7 +386,8 @@ const PROBES = {
   // card above the tumble; a tap before it arms is a tap on the card; it
   // pays once per run; the banner keeps CONFIG.bannerGapPx (24) clear of
   // every control on PAUSA and the mandao sheet and leaves with the screen;
-  // Remove Ads takes it down at once.
+  // Remove Ads takes it down at once; the ad privacy link shows on PAUSA
+  // only where Google asks for it, and opens the privacy options form.
   ads: async (page, url) => {
     const checks = [];
     const info = [];
@@ -613,7 +614,44 @@ const PROBES = {
           link: getComputedStyle(document.getElementById('btn-noads')).display,
         }));
         check(checks, `${T} Remove Ads: bought, saved, the banner removed for good, the entries hidden`, free.adFree && free.saved === '1' && free.banner.height === 0 && free.banner.state === 'none' && !free.box && free.link === 'none', JSON.stringify(free));
-        info.push(`${T}: card with offer ${JSON.stringify(after)}; pause gap ${JSON.stringify(pauseGap)}; sheet gap ${JSON.stringify(sheetGap)}`);
+        check(checks, `${T} pause: no ad privacy link where Google does not ask for one`, (await page.evaluate(() => getComputedStyle(document.getElementById('btn-adprivacy')).display)) === 'none');
+
+        // Where Google asks for a way back to the consent choices (an EEA
+        // device that has chosen): "Privacidad de anuncios" / "Ad privacy"
+        // sits with the other PAUSA links, clear of the banner, and opens
+        // Google's privacy options form.
+        const eeaUrl = `${simUrl}&adprivacy=1`;
+        await page.goto(eeaUrl, { waitUntil: 'load' });
+        await boot(page, eeaUrl, { 'ecc.v1.lang': lang, 'ecc.v1.record.motor': '1000000' });
+        if (insets) {
+          await page.evaluate((i) => {
+            for (const [k, v] of Object.entries(i)) document.documentElement.style.setProperty(`--${k}`, `${v}px`);
+          }, insets);
+        }
+        await adsReady();
+        await page.evaluate(() => {
+          window.__ecc.start();
+          window.__ecc.tick(1);
+          window.__ecc.pause();
+        });
+        await page.waitForFunction(() => window.__ecc.ads().banner.height > 0, { timeout: 5000, polling: 50 }).catch(() => {});
+        await sleep(300);
+        const ap = await page.evaluate(() => {
+          const el = document.getElementById('btn-adprivacy');
+          const r = el.getBoundingClientRect();
+          const pr = document.getElementById('btn-privacy').getBoundingClientRect();
+          return { shown: getComputedStyle(el).display !== 'none', text: el.textContent, w: Math.round(r.width), h: Math.round(r.height), left: Math.round(r.left), right: Math.round(r.right), vw: innerWidth, privacyShown: pr.height >= 44 };
+        });
+        const apText = lang === 'es' ? 'Privacidad de anuncios' : 'Ad privacy';
+        check(checks, `${T} pause (consent options required): "${apText}" shows, 44 pt, inside the screen, next to Privacidad`, ap.shown && ap.text === apText && ap.h >= 44 && ap.w >= 44 && ap.left >= 0 && ap.right <= ap.vw && ap.privacyShown, JSON.stringify(ap));
+        const apGap = await gapCheck('#pause');
+        check(checks, `${T} pause with the ad privacy link: every control ${GAP}+ pt above the banner`, apGap.banner && apGap.gap >= GAP, JSON.stringify(apGap));
+        auditChecks(checks, `${T} pause with the ad privacy link`, await page.evaluate(() => window.__audit('#pause', { min: { 'btn-resume': 64, 'btn-pause-menu': 48 } })));
+        await tapEl(page, '#btn-adprivacy');
+        await sleep(150);
+        const apTap = await page.evaluate(() => ({ log: window.__eccSim.log.filter((l) => l === 'showPrivacyOptionsForm').length, state: window.__ecc.state() }));
+        check(checks, `${T} the ad privacy link opens Google's privacy options form once, PAUSA stays`, apTap.log === 1 && apTap.state === 'paused', JSON.stringify(apTap));
+        info.push(`${T}: card with offer ${JSON.stringify(after)}; pause gap ${JSON.stringify(pauseGap)}; sheet gap ${JSON.stringify(sheetGap)}; ad privacy ${JSON.stringify(ap)}`);
       }
     }
     await page.setViewport(SE);

@@ -12,6 +12,10 @@
 //   buy: 'success' | 'cancel' | 'pending' | 'fail'
 //   owned: boolean                            what StoreKit says is owned
 //   price: string | null                      the localized price (null: no product)
+//
+// A page opened with ?ads=sim&adprivacy=1 answers the consent check like an
+// EEA device that has already chosen: consent obtained, and Google asks for
+// an in-app way back to the choices (the "Privacidad de anuncios" link).
 
 import type { AdsPort, AttStatus, BannerEvent, ConsentInfo, RewardedEvent } from './ads';
 import type { StorePort } from './purchases';
@@ -52,7 +56,10 @@ export function simPortsFromUrl(productId: string): { ads: AdsPort; store: Store
   let onRewarded: (e: RewardedEvent) => void = () => {};
   let onBanner: (e: BannerEvent) => void = () => {};
   let box: HTMLElement | null = null;
-  const consent: ConsentInfo = { status: 'NOT_REQUIRED', isConsentFormAvailable: false, canRequestAds: true, privacyOptionsRequirementStatus: 'NOT_REQUIRED' };
+  const eea = /[?&]adprivacy=1\b/.test(location.search);
+  const consent: ConsentInfo = eea
+    ? { status: 'OBTAINED', isConsentFormAvailable: true, canRequestAds: true, privacyOptionsRequirementStatus: 'REQUIRED' }
+    : { status: 'NOT_REQUIRED', isConsentFormAvailable: false, canRequestAds: true, privacyOptionsRequirementStatus: 'NOT_REQUIRED' };
 
   const drawBanner = (): HTMLElement => {
     const w = Math.min(window.innerWidth, 500);

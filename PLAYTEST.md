@@ -12,7 +12,9 @@ pause, M to mute.
 
 New since build 10: Google's consent message and the tracking prompt on the
 title, "Dobla tus plátanos" on the game-over card, a banner on PAUSA and
-on Los Mandaos, and Remove Ads ($1.99). Decisions:
+on Los Mandaos, Remove Ads ($1.99), and "Privacidad de anuncios" on PAUSA
+where Google's consent rules apply. RELEASE.md has the full device check
+list for build 11. Decisions:
 `docs/audit/ADS-PLAN.md`. Until the real AdMob ids exist, test with
 `npm run build:adtest` and `npx cap sync ios`, run from Xcode (RELEASE.md);
 the title shows a red "ANUNCIOS DE PRUEBA" tag and every ad says "Test
@@ -38,6 +40,19 @@ mode".
    Delete and reinstall, then Restaurar compras: it comes back.
 6. **Offline.** Airplane mode, then play: no button, no banner, no error,
    and the game plays exactly as before.
+7. **Tracking "no".** Reinstall and answer "Ask App Not to Track": the
+   banner and the ×2 video still come (non-personalized). Nothing in the
+   game asks again; Settings > Privacy & Security > Tracking changes it.
+8. **Report an ad.** Tap the small AdChoices mark on a banner and on a
+   video. Does Google's menu offer a way to report the ad? (The App Review
+   note says it does; tell me if it does not.)
+9. **Purchase, second identity.** On a second device or with a second
+   Sandbox account, Remove Ads is not owned and the banner shows. Cancel
+   Apple's sheet: "Compra cancelada.", nothing else changes.
+10. **Ad privacy (EEA only).** Where Google's consent rules apply, PAUSA
+    shows "Privacidad de anuncios" after "Privacidad", and it reopens
+    Google's choices. In the US it never shows. Only testable with an EEA
+    connection; the screens probe covers it with the stand-in.
 
 ## Next-level pass (build 10)
 

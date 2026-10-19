@@ -89,10 +89,19 @@ Owner decisions (Adelson, 2026-10-17), added to docs/audit/PLAN.md:
   StoreKit price, buy, restore and the privacy link. Owned is cached as
   `ecc.v1.adFree` (backed up by the Preferences mirror) and re-read from
   StoreKit at launch and on every transaction update. When Google's consent
-  rules require it, PAUSA shows "Opciones de anuncios" / "Ad choices".
+  rules require it, PAUSA shows "Privacidad de anuncios" / "Ad privacy"
+  right after "Privacidad"; it opens Google's privacy options form.
 - **Simulator purchases:** `ios/App/App/Products.storekit` (the product at
   1.99 USD) is set on the Run action of the shared App scheme. It only works
   when the app is run from Xcode.
+
+## Compliance (2026-10-19)
+
+App Privacy answers from the built app's privacy manifests, the in-app
+purchase setup, the age rating, the review note and the console-ordered
+owner steps (with the agreements, the privacy page push and app-ads.txt
+added) are in RELEASE.md. The privacy page for 1.0 is `site/privacy.html`,
+not pushed.
 
 ## Owner steps (only Adelson)
 

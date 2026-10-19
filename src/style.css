@@ -1532,7 +1532,7 @@ body {
   }
 }
 
-/* PAUSA's links: Remove Ads, the ad choices (when the consent rules ask
+/* PAUSA's links: Remove Ads, the ad privacy choices (when the consent rules ask
    for them) and the privacy policy */
 .pause-links {
   display: flex;

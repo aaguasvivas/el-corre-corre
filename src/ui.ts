@@ -178,7 +178,7 @@ export const STRINGS = {
     rewardAria: 'Dobla tus plátanos: ver un anuncio',
     rewardDone: '¡doblados!',
     noAds: 'Quitar anuncios',
-    adChoices: 'Opciones de anuncios',
+    adPrivacy: 'Privacidad de anuncios', // Google's consent choices again (shown only where required)
     adTestTag: 'ANUNCIOS\nDE PRUEBA', // build:adtest only, on the title under EN
     storeKicker: 'SIN ANUNCIOS',
     storeTitle: 'Quita los banners',
@@ -349,7 +349,7 @@ export const STRINGS = {
     rewardAria: 'Double your plantains: watch an ad',
     rewardDone: 'doubled!',
     noAds: 'Remove ads',
-    adChoices: 'Ad choices',
+    adPrivacy: 'Ad privacy',
     adTestTag: 'TEST\nADS',
     storeKicker: 'NO ADS',
     storeTitle: 'Remove the banners',
@@ -447,7 +447,7 @@ export interface UICallbacks {
   onNoAds(): void;
   onBuy(): void;
   onRestore(): void;
-  onAdChoices(): void;
+  onAdPrivacy(): void;
   // The mandao sheet or the Remove Ads sheet opened or closed (the banner
   // follows them).
   onOverlayChange(): void;
@@ -762,7 +762,7 @@ export class UI {
   private earnedTimer = 0;
   private noAdsChip: HTMLElement;
   private btnNoAds: HTMLElement;
-  private btnAdChoices: HTMLElement;
+  private btnAdPrivacy: HTMLElement;
   private storeEl: HTMLElement;
   private stBuyEl: HTMLElement;
   private stRestoreEl: HTMLElement;
@@ -917,8 +917,8 @@ export class UI {
         </div>
         <div class="pause-links">
           <button id="btn-noads" class="link-privacy hidden" type="button" aria-haspopup="dialog"></button>
-          <button id="btn-adchoices" class="link-privacy hidden" type="button"></button>
           <button id="btn-privacy" class="link-privacy" type="button"></button>
+          <button id="btn-adprivacy" class="link-privacy hidden" type="button"></button>
         </div>
       </div>
       <div id="store-sheet" class="store-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="st-title">
@@ -1008,7 +1008,7 @@ export class UI {
     this.rewardTagEl = q('#btn-reward .rw-tag');
     this.noAdsChip = q('#noads-chip');
     this.btnNoAds = q('#btn-noads');
-    this.btnAdChoices = q('#btn-adchoices');
+    this.btnAdPrivacy = q('#btn-adprivacy');
     this.storeEl = q('#store-sheet');
     this.stBuyEl = q('#st-buy');
     this.stRestoreEl = q('#st-restore');
@@ -1115,7 +1115,7 @@ export class UI {
     // sheet closes on its X, a tap on the scrim, or Escape.
     this.press(this.noAdsChip, () => this.cb.onNoAds());
     this.press(this.btnNoAds, () => this.cb.onNoAds());
-    this.press(this.btnAdChoices, () => this.cb.onAdChoices());
+    this.press(this.btnAdPrivacy, () => this.cb.onAdPrivacy());
     this.press(this.storeEl, (e) => {
       if (e.target === this.storeEl) this.closeStore();
     });
@@ -1368,7 +1368,7 @@ export class UI {
     this.btnPauseMenu.textContent = t.menu;
     this.btnPrivacyEl.textContent = t.privacy;
     this.btnNoAds.textContent = t.noAds;
-    this.btnAdChoices.textContent = t.adChoices;
+    this.btnAdPrivacy.textContent = t.adPrivacy;
     this.noAdsChip.setAttribute('aria-label', t.noAds);
     this.btnReward.setAttribute('aria-label', t.rewardAria);
     this.rewardTagEl.textContent = this.rewardPaid ? t.rewardDone : t.rewardTag;
@@ -1864,11 +1864,11 @@ export class UI {
   // Which ad entries exist: the store (iOS, or the dev simulation), whether
   // Remove Ads is owned, and whether the consent rules ask for a way back to
   // the ad choices.
-  setAdsUi(store: boolean, adFree: boolean, adChoices: boolean): void {
+  setAdsUi(store: boolean, adFree: boolean, adPrivacy: boolean): void {
     const offer = store && !adFree;
     this.noAdsChip.classList.toggle('hidden', !offer);
     this.btnNoAds.classList.toggle('hidden', !offer);
-    this.btnAdChoices.classList.toggle('hidden', !adChoices);
+    this.btnAdPrivacy.classList.toggle('hidden', !adPrivacy);
     this.storeView.adFree = adFree;
     this.renderStore();
   }

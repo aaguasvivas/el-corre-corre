@@ -10,9 +10,13 @@
      plugins use APIs Apple requires a reason for, and the app declares them:
      - @capacitor/preferences keeps the save backup in UserDefaults, read
        and written only by this app (CA92.1).
-     - @capacitor/filesystem can read file timestamps; the game only writes
-       the share card into its own cache (C617.1: files inside the app
-       container). -->
+     - @capacitor/filesystem and its IONFilesystemLib can read file
+       timestamps; the game only writes the share card into its own cache
+       (C617.1: files inside the app container).
+     Data types and tracking stay empty here on purpose: Google's two
+     manifests declare them for their own code, and repeating them here
+     would double-declare. The list of every manifest in the built app is in
+     RELEASE.md ("App Privacy answers"). -->
 <plist version="1.0">
 <dict>
 	<key>NSPrivacyTracking</key>

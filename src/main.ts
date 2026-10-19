@@ -416,7 +416,7 @@ const ui = new UI(document.getElementById('ui')!, {
   onNoAds: openStore,
   onBuy: buyNoAds,
   onRestore: restoreNoAds,
-  onAdChoices: () => {
+  onAdPrivacy: () => {
     audio.click();
     void ads.showPrivacyOptions();
   },

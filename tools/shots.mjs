@@ -830,6 +830,22 @@ const SCENES = [
     },
   },
   {
+    id: 'pause-adprivacy',
+    what: 'Pause screen where Google asks for a way back to the consent choices: "Privacidad de anuncios" with the other links, the banner stand-in below',
+    ads: true,
+    query: 'adprivacy=1',
+    settle: 500,
+    run: async (s) => {
+      await s.adsReady();
+      await s.start();
+      await s.tick(3);
+      await s.tap('#hud-pause');
+      await s.tick(0);
+      if (!(await s.waitFor('e.ads().banner.height > 0'))) throw new Error('no banner');
+      if (!(await s.waitFor('getComputedStyle(document.getElementById("btn-adprivacy")).display !== "none"'))) throw new Error('no ad privacy link');
+    },
+  },
+  {
     id: 'mandaos-banner',
     what: 'The Los Mandaos sheet with the banner stand-in under it',
     ads: true,
@@ -1437,8 +1453,9 @@ async function main() {
         try {
           // Coach chips show on a first launch; scenes that are not about
           // them start with every move learned (see bootScript).
-          // ?coach=n: a first launch; ?ads=sim: the ads and store stand-ins.
-          const query = [sc.coach === undefined ? '' : `coach=${sc.coach}`, sc.ads ? 'ads=sim' : ''].filter(Boolean).join('&');
+          // ?coach=n: a first launch; ?ads=sim: the ads and store stand-ins;
+          // sc.query: more stand-in knobs (adprivacy=1).
+          const query = [sc.coach === undefined ? '' : `coach=${sc.coach}`, sc.ads ? 'ads=sim' : '', sc.query ?? ''].filter(Boolean).join('&');
           await page.goto(query ? `${url}?${query}` : url, { waitUntil: 'load', timeout: LOAD_MS });
           await page.waitForFunction(() => window.__ecc !== undefined, { timeout: LOAD_MS });
           await page.evaluate(() => document.fonts.ready.then(() => undefined));

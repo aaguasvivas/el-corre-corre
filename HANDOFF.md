@@ -99,6 +99,17 @@ clear of it, the banner gone in play, a test rewarded video that doubled
 the card's plátanos, and the Remove Ads sheet degrading to "not
 available" without a StoreKit product.
 
+**Compliance for release 1.0 (2026-10-19, `ads-1.0`).** Build number 11
+(build 10 is superseded and never uploaded). The App Privacy answers come
+from the five privacy manifests of a Release build plus Google's live
+disclosure page, and live in RELEASE.md ("App Privacy answers") with the
+in-app purchase setup, the age rating answers, the review note and the
+console-ordered owner steps. `site/privacy.html` is rewritten for AdMob,
+tracking, consent, non-personalized ads, reporting an ad and the purchase
+(not pushed). PAUSA shows "Privacidad de anuncios" / "Ad privacy" after
+"Privacidad" when Google's consent rules ask for an in-app way back to the
+choices (section 3.6).
+
 ---
 
 ## 2. Working agreement (how Adelson works, non-negotiable)
@@ -363,6 +374,73 @@ always win. If the bridge does not answer in 1.5 s the game boots anyway and
 that session never writes the mirror. An empty set is never written. The web
 build never touches Preferences.
 
+### 3.6 Ads and Remove Ads
+
+Decisions and owner steps: [docs/audit/ADS-PLAN.md](docs/audit/ADS-PLAN.md).
+Store and privacy answers: [RELEASE.md](RELEASE.md).
+
+**Modules** (table above for one-liners):
+- `src/adIds.ts`: the only place for ids. `RELEASE_ADS` (AdMob app id,
+  banner unit, rewarded unit) is empty until the owner pastes them;
+  `REMOVE_ADS_PRODUCT_ID` is `elcorrecorre.remove_ads`; `TEST_ADS` holds
+  Google's public test ids. `releaseIdProblems()` and `bundleAdsFor()` are
+  the build guard.
+- `vite.config.ts` calls `bundleAdsFor(mode)` and injects one id set per
+  bundle as `__ECC_ADS__`, and writes `dist/ads-ids.json` (`mode`, `test`,
+  `appId`).
+- `src/ads.ts`: `runConsentFlow` (foreground wait, UMP, the form on a calm
+  title, ATT while undetermined, SDK start, each bounded), `RewardedOffer`
+  (once per run), `BannerSlot` (wanted only on calm screens, height
+  reported only while on screen, retries), and `Ads`, which wires them to an
+  `AdsPort`. `Ads.privacyOptions` is true when UMP says the privacy options
+  entry point is REQUIRED; `showPrivacyOptions()` opens Google's form.
+- `src/purchases.ts`: `Entitlements` over a `StorePort`: price, buy,
+  restore, owned, transaction updates, and the cached flag.
+- `src/admobPort.ts` and `src/storePort.ts`: the two native ports (ads
+  capped at PG, `maxAdContentRating`). `src/simAds.ts`: stand-ins for both,
+  only in a dev or probe page opened with `?ads=sim`.
+- `src/main.ts`: `syncBanner()` (PAUSA, or the title with the mandao sheet
+  open, never under the Remove Ads sheet or during a video),
+  `refreshRewardOffer()`, `watchReward()` (holds the loop, input and audio
+  while a video is up), `syncAdsUi()` (the AD chip, "Quitar anuncios" and
+  "Privacidad de anuncios"), and the title-only gate for the prompts.
+- `src/ui.ts`: the ×2 offer on the card, the AD chip, the PAUSA links
+  (`#btn-noads`, `#btn-privacy`, `#btn-adprivacy`), the Remove Ads sheet,
+  and the `STRINGS` keys `reward*`, `noAds`, `adPrivacy`, `adTestTag`,
+  `store*`.
+- `tools/ios-ads-plist.mjs` (`capacitor:copy:after`): writes the bundle's
+  app id into `GADApplicationIdentifier`. The Xcode build phase "[ECC] No
+  test ads in an archive" fails an archive that carries test ids.
+
+**Config** (`src/config.ts`, the "Ads" block): `adsStartDelaySec` (title
+time before the prompts), `adsForegroundWaitMs`, `adsConsentTimeoutMs`,
+`adsConsentFormMaxMs`, `adsStepTimeoutMs`, `adsInitTimeoutMs`,
+`adsLoadTimeoutMs`, `rewardedMaxAgeSec`, `rewardArmSec` (the ×2 button
+ignores taps this long after the card lands), `rewardShowGuardMs`,
+`rewardCountUpMs`, `bannerRetrySec` ([30, 90, 240]), `bannerGapPx` (24).
+
+**Saves:** `ecc.v1.adFree` (`'1'` while Remove Ads is owned) is the only
+new key, mirrored by the Preferences backup. Consent and ATT answers live
+with Google's SDK and iOS, never in the game's saves.
+
+**Builds:**
+
+| Command | Ids | Use |
+|---|---|---|
+| `npm run dev`, `npm run build:probe` | Google's test ids | Browser work and probes; `?ads=sim` turns on the stand-ins |
+| `npm run build:adtest` | Google's test ids, red ANUNCIOS DE PRUEBA tag | Device tests from Xcode; an archive refuses it |
+| `npm run build` | `RELEASE_ADS` | The App Store bundle; fails while the ids are empty, malformed or test ids |
+
+**Tests and probes:** `src/__tests__/ads.test.ts` (every consent branch
+and timeout, once per run, banner retries), `purchases.test.ts` (every
+store outcome), `adIds.test.ts` (the guard). `tools/screens-probe.mjs ads`
+drives the stand-ins at SE and 6.9-inch in ES and EN: the offer never moves
+OTRA VEZ, early taps restart, one payment per run, banner gaps, Remove Ads,
+and the ad privacy link (`?ads=sim&adprivacy=1` answers like an EEA device
+that has chosen). `tools/shots.mjs` has 8 ads scenes (section 4.3). The web
+build makes no ad call; the game must stay fully playable with ads failing
+forever (offline, no fill, an SDK that never starts).
+
 ---
 
 ## 4. Testing infrastructure (how quality was kept; use it)
@@ -403,7 +481,8 @@ production-like bundle serves `dist-probe/`.
   rewarded, paid, offer, banner, hold}`; `store()` returns `{available,
   adFree, price, priceState, open}`; `reward()` taps "Dobla tus plátanos".
   They do something only on a page opened with `?ads=sim`, whose stand-ins
-  are steered through `window.__eccSim` (see `src/simAds.ts`).
+  are steered through `window.__eccSim` (see `src/simAds.ts`); add
+  `&adprivacy=1` for a consent check that asks for the ad privacy link.
 - **Actions:** `start() crash() pause() resume() menu() selectVehicle(id)
   share()`. `god(on)` skips vehicle collisions for long rides;
   `touching(margin)` says whether a car is inside the rider's circle plus a
@@ -446,9 +525,9 @@ production-like bundle serves `dist-probe/`.
 
 | Tool | What it does | Run |
 |---|---|---|
-| `tools/shots.mjs` | Headless gallery: 51 scenes (the 7 ads scenes run with `?ads=sim`: gameover-reward, gameover-reward-done, pause-banner, mandaos-banner, title-noads, store-sheet, store-bought) (the three `store-*` scenes run at `iphone69` only), seeded `Math.random`, frozen rAF, suspended audio. Presets `iphone69` (440x956 at 3x = 1320x2868, the App Store 6.9-inch size) and `se` (375x667 at 2x), or `WxH@scale`. Exit 1 on a page error, blank WebGL, a flat frame or a failed scene | `sh tools/heavy.sh node tools/shots.mjs --scenes title,contravia --viewports se --out docs/shots/x` (`--lang en`, `--seed 11`, `--gl swiftshader`, `--list`) |
+| `tools/shots.mjs` | Headless gallery: 56 scenes (`--list`; the 8 ads scenes run with `?ads=sim`: gameover-reward, gameover-reward-done, pause-banner, pause-adprivacy (with `adprivacy=1`), mandaos-banner, title-noads, store-sheet, store-bought; the six App Store scenes `store-contravia`, `store-record`, `store-gas-cv`, `store-leyenda`, `store-puerta` and `store-zona` run at `iphone69` only), seeded `Math.random`, frozen rAF, suspended audio. Presets `iphone69` (440x956 at 3x = 1320x2868, the App Store 6.9-inch size) and `se` (375x667 at 2x), or `WxH@scale`. Exit 1 on a page error, blank WebGL, a flat frame or a failed scene | `sh tools/heavy.sh node tools/shots.mjs --scenes title,contravia --viewports se --out docs/shots/x` (`--lang en`, `--seed 11`, `--gl swiftshader`, `--list`) |
 | `tools/feel-probe.mjs` | Crash, judder, countdown, brake, dip, keys, trick, shield, motion and draws probes | `sh tools/heavy.sh node tools/feel-probe.mjs [probe ...]` |
-| `tools/screens-probe.mjs` | Title, sheet, pause, card and share layout and flows at SE, 6.9-inch and landscape, ES and EN; `ads` checks the offer, the banner gaps and Remove Ads with the stand-ins | `sh tools/heavy.sh node tools/screens-probe.mjs [layout flow buy card ads motion share]` |
+| `tools/screens-probe.mjs` | Title, sheet, pause, card and share layout and flows at SE, 6.9-inch and landscape, ES and EN; `ads` checks the offer, the banner gaps, Remove Ads and the ad privacy link with the stand-ins | `sh tools/heavy.sh node tools/screens-probe.mjs [layout flow buy card ads motion share]` |
 | `tools/hud-probe.mjs` | Top band, popups, lane, cards, coach, contrast, reduced motion, pause freeze, duplicate ids | `sh tools/heavy.sh node tools/hud-probe.mjs [probe ...]` |
 | `tools/audio-probe.mjs` | The live game's audio wiring with a running AudioContext | `sh tools/heavy.sh node tools/audio-probe.mjs` |
 | `tools/audio-lab.mjs` | Offline renders of the real AudioEngine: limiter, layers, tape, duck, fuzz, sfx | `sh tools/heavy.sh node tools/audio-lab.mjs [--suites limiter,layers]` |
@@ -488,7 +567,7 @@ Worktree rules learned in this pass:
 - **Build:** 874 kB JS (249 kB gzip) for `npm run build:adtest` on
   `ads-1.0` (843 kB, 239 kB gzip at `eb676ef`); the chunk-size warning is
   accepted. `npm run build` needs the real AdMob ids first.
-- **Probes on `ads-1.0`:** feel 50, screens 384 (212 plus 172 in `ads`),
+- **Probes on `ads-1.0`:** feel 50, screens 420 (212 plus 208 in `ads`),
   hud 111, audio 26/26.
 - **Draw calls**, god-mode ride from 0 to 3300 m at 440x956, seed 7,
   median / p90 / max (wave 2 merge, `a900ef6`): Malecón 106 / 123 / 131,
