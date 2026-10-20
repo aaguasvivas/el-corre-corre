@@ -69,7 +69,7 @@ request and the decision taken.
 6. **Not in this pass** (roadmap): revive ring, pursuer (Doña Tatica or AMET),
    night mode, weather, word of the day, mystery box, borrowed rides, Modo
    Paseo, character unlocks, medal lines, rival tapes.
-8. **Ads in release 1.0 (decided 2026-10-17).** Rewarded "Dobla tus
+8. **Ads in release 1.0 (decided 2026-10-17).** Rewarded "Duplica tus
    plátanos" on the game-over card, a small banner on the pause screen and
    the Los Mandaos sheet only, and a $1.99 Remove Ads purchase. Full
    decisions and owner steps: docs/audit/ADS-PLAN.md. This replaces the

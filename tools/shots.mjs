@@ -352,7 +352,7 @@ async function poseFlash(s, ms) {
   }, ms);
 }
 
-// A run that picked up plátanos ends on the card with "Dobla tus plátanos"
+// A run that picked up plátanos ends on the card with "Duplica tus plátanos"
 // offered (a ?ads=sim scene).
 async function rewardCard(s) {
   await s.adsReady();
@@ -798,7 +798,7 @@ const SCENES = [
   },
   {
     id: 'gameover-reward',
-    what: 'Game over with "Dobla tus plátanos" offered (ads stand-in): the ×2 button armed in the plátanos row',
+    what: 'Game over with "Duplica tus plátanos" offered (ads stand-in): the ×2 button armed in the plátanos row',
     ads: true,
     settle: 1600,
     run: rewardCard,

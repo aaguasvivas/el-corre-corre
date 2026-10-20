@@ -5,7 +5,7 @@ Owner decisions (Adelson, 2026-10-17), added to docs/audit/PLAN.md:
 1. **Ads ship in the first App Store release (1.0).** Build 10 (no ads) is
    superseded and is never submitted. 1.0 ships as build 11 or later.
 2. **Formats: rewarded plus a small banner.**
-   - Rewarded video, opt-in only: "Dobla tus plátanos" / "Double your
+   - Rewarded video, opt-in only: "Duplica tus plátanos" / "Double your
      plantains" on the game-over card doubles the plátanos earned in that
      run. It never blocks OTRA VEZ, never plays unless tapped, and never
      touches points, distance or records.
@@ -74,7 +74,7 @@ Owner decisions (Adelson, 2026-10-17), added to docs/audit/PLAN.md:
   "no" keeps ads dark; a consent step that breaks fails open. Ads are
   non-personalized unless the player allowed tracking and the consent step
   answered (DECISION). Ad content is capped at PG (DECISION).
-- **Dobla tus plátanos:** a video preloads at SDK start and at every run
+- **Duplica tus plátanos:** a video preloads at SDK start and at every run
   start (and after each video). The card offers it only with a video loaded
   and at least 1 plátano earned; it arms 0.9 s after the card lands (a tap
   there before that is OTRA VEZ). The reward is the run's whole plátano take
@@ -112,9 +112,9 @@ not pushed.
    `npm run build` stops with a message that points here.
 2. AdMob > Privacy & messaging: publish a GDPR message and an IDFA explainer
    message for this app.
-3. app-ads.txt: AdMob checks `https://<developer website domain>/app-ads.txt`
-   with the line for pub-4879291425090726. The store listing's marketing URL
-   decides the domain (choose where to host it).
+3. app-ads.txt: done. It is already live at
+   `https://aaguasvivas.github.io/app-ads.txt` (same domain as the marketing
+   URL; checked 2026-10-20).
 4. App Store Connect: create the non-consumable `elcorrecorre.remove_ads`
    (or the id you prefer; then change `REMOVE_ADS_PRODUCT_ID` in
    `src/adIds.ts` and the `productID` in `ios/App/App/Products.storekit`)

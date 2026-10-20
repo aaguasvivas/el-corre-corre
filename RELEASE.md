@@ -83,16 +83,13 @@ Details for each step are in the sections below.
 5. **Privacy page.** Approve the push of `site/privacy.html` to the public
    `el-corre-corre-site` repo (a push needs your yes). Then fetch the live
    URL and diff it against `site/privacy.html`.
-6. **app-ads.txt** (ADS-PLAN.md owner step 3). AdMob reads
-   `app-ads.txt` at the root of the developer website domain on the store
-   listing. The marketing URL is
-   `https://aaguasvivas.github.io/el-corre-corre-site/`, so the file must
-   be at `https://aaguasvivas.github.io/app-ads.txt`, which needs a GitHub
-   Pages repo named `aaguasvivas.github.io`. Choosing that domain (or
-   another one) is your call. The file holds one line:
-   `google.com, pub-4879291425090726, DIRECT, f08c47fec0942fa0`
-   (copy the exact line AdMob shows under Apps > app-ads.txt). AdMob
-   verifies it after the app is linked to the live store listing.
+6. **app-ads.txt:** done. `https://aaguasvivas.github.io/app-ads.txt` is
+   live (checked 2026-10-20) with
+   `google.com, pub-4879291425090726, DIRECT, f08c47fec0942fa0`, the same
+   file Anota uses. The marketing URL
+   `https://aaguasvivas.github.io/el-corre-corre-site/` is on that domain,
+   so nothing else is needed. AdMob verifies it after the app is linked to
+   the live store listing.
 7. **In-app purchase** (ADS-PLAN.md owner step 4). Create Remove Ads in App
    Store Connect ("In-app purchase: Remove Ads" below). If you choose a
    product id other than `elcorrecorre.remove_ads`, change
@@ -369,7 +366,7 @@ ES:
 ```
 Build 11: anuncios y Quitar anuncios.
 Al abrir por primera vez, el juego pregunta por el rastreo en la pantalla de inicio, nunca en una corrida.
-Choca con plátanos recogidos: el botón ×2 de la tarjeta pone un video y dobla los plátanos de esa corrida. Es opcional.
+Choca con plátanos recogidos: el botón ×2 de la tarjeta pone un video y duplica los plátanos de esa corrida. Es opcional.
 En la pausa y en Los Mandaos hay un banner pequeño. Nunca mientras corres.
 Quitar anuncios (el botón AD debajo del sonido) quita los banners. En TestFlight la compra es de prueba y no cobra.
 Prueba también sin internet: el juego tiene que funcionar igual, sin anuncios.
@@ -517,9 +514,8 @@ The note is 2336 characters (the field allows 4000).
 2. **Version release:** manual or automatic (submission step 9).
 3. **Share link:** `SHARE_URL` in `src/ui.ts` is empty, so the share card
    has no URL footer.
-4. **app-ads.txt domain:** owner step 6.
-5. **Contests answer** in the age rating (submission step 2).
-6. **Family Sharing** for Remove Ads ("In-app purchase" step 6).
+4. **Contests answer** in the age rating (submission step 2).
+5. **Family Sharing** for Remove Ads ("In-app purchase" step 6).
 
 ## After launch (roadmap lives in CLAUDE.md and docs/audit/PLAN.md)
 

@@ -173,10 +173,10 @@ export const STRINGS = {
     trickNounCar: 'derrape',
     // Ads (docs/audit/ADS-PLAN.md): the opt-in video on the card, the
     // Remove Ads sheet, the links on PAUSA.
-    rewardLine: '¡Dobla tus plátanos con un anuncio!',
+    rewardLine: '¡Duplícalos con un anuncio!',
     rewardTag: 'anuncio',
-    rewardAria: 'Dobla tus plátanos: ver un anuncio',
-    rewardDone: '¡doblados!',
+    rewardAria: 'Duplica tus plátanos: ver un anuncio',
+    rewardDone: '¡duplicados!',
     noAds: 'Quitar anuncios',
     adPrivacy: 'Privacidad de anuncios', // Google's consent choices again (shown only where required)
     adTestTag: 'ANUNCIOS\nDE PRUEBA', // build:adtest only, on the title under EN
@@ -184,7 +184,7 @@ export const STRINGS = {
     storeTitle: 'Quita los banners',
     storeTitleOwned: 'Ya no tienes banners',
     storeBanners: 'Se van los banners de la pausa y de Los Mandaos.',
-    storeVideos: 'Dobla tus plátanos sigue ahí: ese video sale solo cuando tú lo pides.',
+    storeVideos: 'El video pa’ duplicar tus plátanos sigue ahí: sale solo cuando tú lo pides.',
     storeBuy: (price: string) => `COMPRAR · ${price}`,
     storeBuyBare: 'COMPRAR',
     storeOwned: '¡Gracias por apoyar el juego!',
@@ -344,7 +344,7 @@ export const STRINGS = {
     } satisfies Record<MandaoKind, (n: number, trick: string) => string>,
     trickNounBike: 'Wheelie',
     trickNounCar: 'Drift',
-    rewardLine: 'Double your plantains with an ad!',
+    rewardLine: 'Double them with an ad!',
     rewardTag: 'ad',
     rewardAria: 'Double your plantains: watch an ad',
     rewardDone: 'doubled!',
@@ -355,7 +355,7 @@ export const STRINGS = {
     storeTitle: 'Remove the banners',
     storeTitleOwned: 'Your banners are gone',
     storeBanners: 'No more banners on the pause screen or the missions list.',
-    storeVideos: 'Double your plantains stays: that video plays only when you ask for it.',
+    storeVideos: 'The video that doubles your plantains stays: it plays only when you ask for it.',
     storeBuy: (price: string) => `BUY · ${price}`,
     storeBuyBare: 'BUY',
     storeOwned: 'Thanks for supporting the game!',
@@ -441,7 +441,7 @@ export interface UICallbacks {
   riderRect(out: Band): void;
   // A ¡HECHO! stamp landed on the game-over card (i: its order on the card).
   onStamp(i: number): void;
-  // "Dobla tus plátanos" on the game-over card.
+  // "Duplica tus plátanos" on the game-over card.
   onReward(): void;
   // Remove Ads: open its sheet, buy, restore; and the ad consent choices.
   onNoAds(): void;
@@ -578,7 +578,7 @@ const CHECK_SVG =
   '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.6l3.1 3.1L13 4.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const LOCK_SVG =
   '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M5.2 7.2V5.4a2.8 2.8 0 0 1 5.6 0v1.8" fill="none" stroke="currentColor" stroke-width="1.9"/><rect x="3.2" y="7" width="9.6" height="7.2" rx="1.8" fill="currentColor"/></svg>';
-// "Dobla tus plátanos": a video's play mark, and the check once it paid.
+// "Duplica tus plátanos": a video's play mark, and the check once it paid.
 const PLAY_SVG =
   '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#002d62"/><path d="M8 6.2v7.6l6-3.8z" fill="#fff3c4"/></svg>';
 const CHECK_RW_SVG =
@@ -751,7 +751,7 @@ export class UI {
   private mandaoSheetEl: HTMLElement;
   private pauseMandaosEl: HTMLElement;
   private btnPrivacyEl: HTMLElement;
-  // Ads: the card's "Dobla tus plátanos", the Remove Ads entries and sheet.
+  // Ads: the card's "Duplica tus plátanos", the Remove Ads entries and sheet.
   private btnReward: HTMLElement;
   private rewardTagEl: HTMLElement;
   private rewardOn = false;
@@ -1106,7 +1106,7 @@ export class UI {
         e.stopImmediatePropagation();
       }
     });
-    // "Dobla tus plátanos": its own tap only once armed (CSS lets the card
+    // "Duplica tus plátanos": its own tap only once armed (CSS lets the card
     // take every tap before that), and never twice.
     this.press(this.btnReward, () => {
       if (this.btnReward.classList.contains('armed') && !this.rewardPaid && !this.btnReward.classList.contains('busy')) this.cb.onReward();
@@ -1785,7 +1785,7 @@ export class UI {
 
   // ---------------- ads ----------------
 
-  // "Dobla tus plátanos" on the card: shown only while a video is loaded and
+  // "Duplica tus plátanos" on the card: shown only while a video is loaded and
   // this run can still be paid (main decides). It sits in the plátanos row,
   // up in the card and far from OTRA VEZ, and it only takes taps once the
   // card has been up CONFIG.rewardArmSec (until then a tap there is a tap

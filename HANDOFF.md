@@ -87,7 +87,7 @@ link (a "Privacidad" / "Privacy" link at the bottom of PAUSA that opens the
 site page in Safari). Still open: publishing the privacy page.
 
 **Ads for release 1.0 (branch `ads-1.0`, 2026-10-18).** Capacitor 8,
-then the ads: the consent and tracking flow, "Dobla tus plátanos" on the
+then the ads: the consent and tracking flow, "Duplica tus plátanos" on the
 card, one banner on PAUSA and the mandao sheet, and the $1.99 Remove Ads
 purchase. Decisions, what was built and the owner steps:
 [docs/audit/ADS-PLAN.md](docs/audit/ADS-PLAN.md). `npm run build` fails
@@ -485,7 +485,7 @@ production-like bundle serves `dist-probe/`.
   kicker?)`.
 - **Ads and Remove Ads:** `ads()` returns `{enabled, ready, outcome, npa,
   rewarded, paid, offer, banner, hold}`; `store()` returns `{available,
-  adFree, price, priceState, open}`; `reward()` taps "Dobla tus plátanos".
+  adFree, price, priceState, open}`; `reward()` taps "Duplica tus plátanos".
   They do something only on a page opened with `?ads=sim`, whose stand-ins
   are steered through `window.__eccSim` (see `src/simAds.ts`); add
   `&adprivacy=1` for a consent check that asks for the ad privacy link.

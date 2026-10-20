@@ -11,7 +11,7 @@
 //                   except the player's own answer. An explicit "no" keeps
 //                   ads dark; a consent step that breaks fails open to
 //                   non-personalized ads.
-//   RewardedOffer   "Dobla tus plátanos": one preloaded rewarded video, and
+//   RewardedOffer   "Duplica tus plátanos": one preloaded rewarded video, and
 //                   at most one reward per run.
 //   BannerSlot      the one anchored adaptive banner of the pause screen and
 //                   the Los Mandaos sheet: shown only while wanted, its
@@ -172,7 +172,7 @@ export async function runConsentFlow(port: AdsPort, env: FlowEnv, t: FlowTiming 
 }
 
 // ---------------------------------------------------------------------------
-// "Dobla tus plátanos": the rewarded video's bookkeeping. No plugin calls.
+// "Duplica tus plátanos": the rewarded video's bookkeeping. No plugin calls.
 // ---------------------------------------------------------------------------
 
 export type RewardedPhase = 'idle' | 'loading' | 'loaded' | 'showing';

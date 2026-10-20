@@ -1416,7 +1416,7 @@ body {
 
 /* ---------- Ads and Remove Ads (docs/audit/ADS-PLAN.md) ---------- */
 
-/* "Dobla tus plátanos": a compact gold button at the end of the card's
+/* "Duplica tus plátanos": a compact gold button at the end of the card's
    plátanos row, up in the card and far from OTRA VEZ. It stays invisible
    and lets every tap through to the card (OTRA VEZ) until it is armed
    (CONFIG.rewardArmSec), then fades in. */

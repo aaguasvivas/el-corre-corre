@@ -11,7 +11,7 @@ pause, M to mute.
 ## Ads for release 1.0 (build 11)
 
 New since build 10: Google's consent message and the tracking prompt on the
-title, "Dobla tus plátanos" on the game-over card, a banner on PAUSA and
+title, "Duplica tus plátanos" on the game-over card, a banner on PAUSA and
 on Los Mandaos, Remove Ads ($1.99), and "Privacidad de anuncios" on PAUSA
 where Google's consent rules apply. RELEASE.md has the full device check
 list for build 11. Decisions:

@@ -1,5 +1,5 @@
 // purchases.ts: Remove Ads, the one in-app purchase ($1.99, non-consumable).
-// Owning it removes every banner; the opt-in "Dobla tus plátanos" video
+// Owning it removes every banner; the opt-in "Duplica tus plátanos" video
 // stays, since it only ever plays when the player taps it. No server and no
 // account: ownership is StoreKit's own record, re-read at launch, on every
 // transaction update and on restore, and cached in localStorage as

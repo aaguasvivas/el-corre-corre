@@ -292,7 +292,7 @@ describe('Ads: the flow runs once', () => {
   });
 });
 
-describe('RewardedOffer: Dobla tus plátanos, once per run', () => {
+describe('RewardedOffer: Duplica tus plátanos, once per run', () => {
   it('offers only a loaded video, for a run that earned at least one plátano', () => {
     const o = new RewardedOffer();
     o.runStarted();

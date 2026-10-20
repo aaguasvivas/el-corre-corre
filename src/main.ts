@@ -491,7 +491,7 @@ function syncBanner(): void {
   ads.setBannerWanted(calm && !ui.storeOpen && !adHold);
 }
 
-// "Dobla tus plátanos" on the card: only with a video loaded and a run that
+// "Duplica tus plátanos" on the card: only with a video loaded and a run that
 // earned at least one plátano and has not been paid.
 function refreshRewardOffer(): void {
   ui.setRewardOffer(state === 'gameover' && lastRun !== null && !adHold && ads.canOffer(lastRun.platanosEarned));

@@ -53,7 +53,7 @@ La Pasola, chiquita pero cumplidora. El Motor, el clásico del barrio. El Civic 
 Dembow de fondo, y cafecito, bendición e imán en la calle. Cuando chocas, OTRA VEZ te pone a correr de nuevo al instante.
 
 ANUNCIOS Y COMPRAS
-El juego es gratis y tiene anuncios: un banner pequeño en la pausa y en Los Mandaos, nunca mientras corres. Al final de una corrida puedes ver un video, si quieres, pa’ doblar los plátanos de esa corrida. Quitar anuncios es una compra única dentro de la app que quita los banners; el video opcional se queda. Las pinturas se compran solo con plátanos del juego, nunca con dinero.
+El juego es gratis y tiene anuncios: un banner pequeño en la pausa y en Los Mandaos, nunca mientras corres. Al final de una corrida puedes ver un video, si quieres, pa’ duplicar los plátanos de esa corrida. Quitar anuncios es una compra única dentro de la app que quita los banners; el video opcional se queda. Las pinturas se compran solo con plátanos del juego, nunca con dinero.
 
 Sin cuentas, y sin internet se juega completo. Toca y dale.
 ```

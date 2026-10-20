@@ -625,7 +625,7 @@ export const CONFIG = {
   // AdMob drops a rewarded ad an hour after it loaded; one held this long is
   // replaced at the next run start.
   rewardedMaxAgeSec: 3300,
-  // FEEL: "Dobla tus plátanos" on the game-over card takes taps only after
+  // FEEL: "Duplica tus plátanos" on the game-over card takes taps only after
   // the card has been up this long. Before that a tap on it is a tap on the
   // card, so OTRA VEZ, so a player hammering the screen to restart never
   // opens a video by accident.
