@@ -143,8 +143,8 @@ The pages are live (GitHub Pages repo `el-corre-corre-site`). Changes to
 `site/` go live only after a push to that repo, with Adelson's go. The
 privacy page update for release 1.0 (AdMob, tracking, consent and how to
 change it, non-personalized ads, reporting an ad, the purchase; dated
-October 19, 2026) is in `site/privacy.html` and must be pushed before the
-App Privacy answers and before review.
+October 19, 2026) is in `site/privacy.html` and has been live since
+2026-10-20.
 
 ## Screenshots
 

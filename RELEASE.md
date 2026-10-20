@@ -14,11 +14,10 @@ Run every command here from the main checkout,
   `dev.elcorrecorre.app`, SKU `elcorrecorre-ios-v1`, primary language
   Spanish (Mexico). Builds 1 to 9 are uploaded.
 - Site: live at https://aaguasvivas.github.io/el-corre-corre-site/ (public
-  repo `el-corre-corre-site`, GitHub Pages). `site/privacy.html` has the
-  release 1.0 update (ads, tracking, consent, the purchase; dated October
-  19, 2026) and is not pushed. The live page still says "no ads, no
-  tracking", which is false for build 11: publish it before the App Privacy
-  answers and before Submit (owner step 5).
+  repo `el-corre-corre-site`, GitHub Pages). The release 1.0 privacy page
+  (ads, tracking, consent, the purchase; dated October 19, 2026) was
+  published on 2026-10-20 (site commit `e0d35d0`); the live page matches
+  `site/privacy.html` byte for byte.
 - TestFlight: internal group (Adelson) and external group Familia
   (Erickson).
 - Release 1.0 ships with ads, Remove Ads and Capacitor 8 as build 11
@@ -80,9 +79,8 @@ Details for each step are in the sections below.
    explainer message. Optional: a US state regulations message. Unpublished
    messages never show; the game then asks for tracking with the bare iOS
    prompt and shows no consent form.
-5. **Privacy page.** Approve the push of `site/privacy.html` to the public
-   `el-corre-corre-site` repo (a push needs your yes). Then fetch the live
-   URL and diff it against `site/privacy.html`.
+5. **Privacy page:** done. Published 2026-10-20 with Adelson's yes (site
+   commit `e0d35d0`); the live page matches `site/privacy.html`.
 6. **app-ads.txt:** done. `https://aaguasvivas.github.io/app-ads.txt` is
    live (checked 2026-10-20) with
    `google.com, pub-4879291425090726, DIRECT, f08c47fec0942fa0`, the same
@@ -119,7 +117,7 @@ Details for each step are in the sections below.
    into the ignored `dist-probe/`). Check: after `npm run build`,
    `grep -c __ecc dist/assets/index-*.js` prints 0.
 5. **Privacy page.** Rewritten for release 1.0 in `site/privacy.html`
-   (2026-10-19). Not published: owner step 5.
+   (2026-10-19) and published 2026-10-20.
 6. **In-app privacy link.** Done: PAUSA has a "Privacidad" / "Privacy" link
    that opens the privacy URL in Safari (Capacitor hands `window.open` to
    the system).
